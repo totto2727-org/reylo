@@ -4,12 +4,12 @@ import { spawnSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { DatabaseSync, StatementSync } from "node:sqlite";
+import { DatabaseSync } from "node:sqlite";
 import { Session } from "../src/analyze.ts";
 import { sqlModule } from "../src/loader.ts";
 import { mapperHandlers } from "../src/mapper-server.ts";
 import { hclPath } from "../src/project.ts";
-import { hclDatabase } from "../src/hcl.ts";
+import { hclCatalog } from "../src/hcl.ts";
 import { engine } from "../src/engine.ts";
 
 const tmp = fileURLToPath(new URL("../tmp/", import.meta.url));
@@ -48,39 +48,34 @@ test("HCL sources accept only one local .hcl file", () => {
   for (const source of ["hcl:", "hcl://remote/schema.hcl", "hcl:./app.db", "hcl:./schema.hcl?mode=rw", "hcl:./schema.hcl#fragment", "hcl:./bad\0schema.hcl"]) assert.throws(() => hclPath(source, tmp), /one local \.hcl file/);
 });
 
-test("HCL catalog queries validate SQLite bindings and array rows at the Node boundary", async (t) => {
+test("HCL supplies only static schema rows and embedded function defaults to the engine", async () => {
   const root = project();
-  const db = hclDatabase(join(root, "schema.hcl"), await engine("sqlite", root));
+  const catalog = hclCatalog(join(root, "schema.hcl"), await engine("sqlite", root));
   try {
-    assert.deepEqual(await db.query("select ?, ?, ?, ?, ?", [null, 2, 3n, "text", new Uint8Array([4])]), [[null, 2, 3, "text", new Uint8Array([4])]]);
-    const bytes = new Uint8Array([1, 2, 3]);
-    assert.deepEqual(await db.query("select ?", [new DataView(bytes.buffer, 1, 1)]), [[new Uint8Array([2])]]);
-    for (const value of [undefined, true, {}, [], new ArrayBuffer(1)]) await assert.rejects(db.query("select ?", [value]), /SQLite catalog parameters must be/);
-    const objectRows = t.mock.method(StatementSync.prototype, "all", () => [{}]);
-    await assert.rejects(db.query("select 1", []), /SQLite catalog query did not return array rows/);
-    objectRows.mock.restore();
-    assert.deepEqual(await db.query("select 1", []), [[1]]);
+    const ddl = "select sql from sqlite_schema where sql is not null and type in ('table', 'view', 'index', 'trigger') order by rowid";
+    assert.deepEqual(await catalog.query(ddl, []), [['CREATE TABLE "users" ("id" integer NOT NULL, "name" text NOT NULL, PRIMARY KEY ("id"))']]);
+    assert.deepEqual(await catalog.query("select name, narg, type from pragma_function_list", []), []);
+    await assert.rejects(catalog.query(ddl, [1]), /do not accept parameters/);
+    await assert.rejects(catalog.query("create table unexpected (id text)", []), /Unsupported static HCL catalog request/);
+    const analyzed = await catalog.analyze("select upper(name), json_object('id', id) from users where id = :id");
+    assert.deepEqual(analyzed.diagnostics, []);
   } finally {
-    await db.close();
+    await catalog.close();
     rmSync(root, { recursive: true, force: true });
   }
 });
 
-test("HCL loading rejects trailing SQL statements and keeps its catalog read-only", async () => {
+test("invalid static declarations fail before the engine receives a catalog", async () => {
   const root = project();
   const wasm = await engine("sqlite", root);
   try {
-    const db = hclDatabase(join(root, "schema.hcl"), wasm);
-    try {
-      await assert.rejects(db.query("create table unexpected (id text)", []), /readonly|read-only/);
-    } finally { await db.close(); }
-    for (const [expression, expected] of [["1)); CREATE TABLE unexpected (id text); --", /trailing statements/], ["1)) --", /truncates the declared schema/]] as const) {
-      writeFileSync(join(root, "schema.hcl"), schema().replace("  primary_key {", `  check { expr = ${JSON.stringify(expression)} }\n  primary_key {`));
-      assert.throws(() => hclDatabase(join(root, "schema.hcl"), wasm), expected);
-    }
-    // Legitimate comments and semicolons inside SQL string literals remain supported.
+    writeFileSync(join(root, "schema.hcl"), schema().replace("type = text", "type = unknown_type"));
+    assert.throws(() => hclCatalog(join(root, "schema.hcl"), wasm), /Cannot evaluate HCL schema/);
+    // SQL expressions remain input to the existing embedded SQL analyzer, not host execution.
     writeFileSync(join(root, "schema.hcl"), schema().replace("  primary_key {", `  check { expr = ${JSON.stringify("name != ';' /* normal comment */")} }\n  primary_key {`));
-    await hclDatabase(join(root, "schema.hcl"), wasm).close();
+    const catalog = hclCatalog(join(root, "schema.hcl"), wasm);
+    assert.deepEqual((await catalog.analyze(SELECT)).diagnostics, []);
+    await catalog.close();
     assert.ok(!readdirSync(root).some((name) => /\.(db|sqlite)(-|$)/.test(name)));
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
@@ -101,10 +96,25 @@ test("Atlas HCL feeds the real SQLite engine and invalidates warm caches immedia
     assert.ok(cached.ok);
     assert.equal(cached.source, "cache");
     const child = spawnSync(process.execPath, ["--input-type=module", "-e", `
-      import { Session } from ${JSON.stringify(new URL("../src/analyze.ts", import.meta.url).href)};
+      import { registerHooks } from 'node:module';
+      registerHooks({ resolve(specifier, context, nextResolve) {
+        if (specifier === 'node:sqlite') throw new Error('Host SQLite is forbidden during HCL analysis');
+        return nextResolve(specifier, context);
+      }});
+      const { Session } = await import(${JSON.stringify(new URL("../src/analyze.ts", import.meta.url).href)});
+      const { mapperHandlers } = await import(${JSON.stringify(new URL("../src/mapper-server.ts", import.meta.url).href)});
+      const { sqlModule } = await import(${JSON.stringify(new URL("../src/loader.ts", import.meta.url).href)});
+      const handlers = mapperHandlers();
+      const projectHandle = 'without-host-sqlite';
+      await handlers.openProject({ projectHandle, configFileName: ${JSON.stringify(join(root, "tsconfig.json"))} });
+      const transformed = await handlers.transform({ projectHandle, fileName: ${JSON.stringify(join(root, "get.sql"))}, content: ${JSON.stringify(SELECT)} });
+      if (transformed.diagnostics.length || !transformed.text.includes('name: string')) throw new Error(JSON.stringify(transformed));
+      const built = await sqlModule(${JSON.stringify(join(root, "get.sql"))}, ${JSON.stringify(SELECT)});
+      if (!built.code.includes('select id')) throw new Error('No runtime query was generated');
+      await handlers.closeProject({ projectHandle });
       const session = await Session.open(${JSON.stringify(root)}, {});
       try { console.log(JSON.stringify(await session.analyze(${JSON.stringify(SELECT)}))); }
-      finally { await session.close(); }
+      finally { for (const opened of Session.opened()) await opened.close(); }
     `], { env: { ...process.env, PATH: "" }, encoding: "utf8" });
     assert.equal(child.status, 0, child.stderr);
     const noAtlas = JSON.parse(child.stdout);
