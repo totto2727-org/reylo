@@ -96,7 +96,9 @@ for (const db of sqliteOnly ? ["sqlite"] as const : DATABASES) {
   const { private: _p, exports: entries, devDependencies: _dev, ...engine } = JSON.parse(readFileSync(join(from, "package.json"), "utf8"));
   if (engine.version !== pkg.version) throw new Error(`packages/${db}/package.json is ${engine.version}, and reylo is ${pkg.version}; they move together`);
   const exported = Object.fromEntries(Object.entries(entries as Record<string, string>).map(([key, path]) => [key, js(path)]));
-  writeFileSync(join(to, "package.json"), JSON.stringify({ ...engine, exports: exported }, null, 2) + "\n");
+  // The tooling bundle includes the MPL-covered native HCL parser port alongside MIT code.
+  writeFileSync(join(to, "package.json"), JSON.stringify({ ...engine, license: "MIT AND MPL-2.0", files: [...engine.files, "licenses"], exports: exported }, null, 2) + "\n");
+  cpSync(join(root, "licenses"), join(to, "licenses"), { recursive: true });
   cpSync(join(from, "engine"), join(to, "engine"), { recursive: true });
   copyFileSync(join(from, "README.md"), join(to, "README.md"));
   // Before anything loads the bundles: loading the shim starts its I/O worker from this file.

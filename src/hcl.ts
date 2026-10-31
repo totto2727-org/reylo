@@ -1,9 +1,7 @@
-// Atlas owns HCL parsing and evaluation. Reylo only hosts the resulting schema in memory.
-import { spawnSync } from "node:child_process";
+// The native parser and static Atlas adapter supply an analysis-only SQLite catalog.
 import { readFileSync } from "node:fs";
-import { dirname } from "node:path";
-import { pathToFileURL } from "node:url";
 import { DatabaseSync, type SQLInputValue } from "node:sqlite";
+import { sqliteSchemaFromHcl } from "./hcl-sqlite.ts";
 import { AnswerCache, type EngineCore, type EngineIo } from "./engine-core.ts";
 
 function sqliteInput(value: unknown): SQLInputValue {
@@ -13,16 +11,27 @@ function sqliteInput(value: unknown): SQLInputValue {
 }
 
 export function hclDatabase(path: string, engine: EngineCore) {
-  const before = readFileSync(path, "utf8");
-  const run = spawnSync("atlas", ["schema", "inspect", "--url", pathToFileURL(path).href, "--dev-url", "sqlite://dev?mode=memory", "--format", "{{ sql . }}"], {
-    cwd: dirname(path), encoding: "utf8", timeout: 30_000, maxBuffer: 16 * 1024 * 1024,
-    env: { ...process.env, ATLAS_NO_UPDATE_NOTIFIER: "1" }, stdio: ["ignore", "pipe", "pipe"], windowsHide: true,
-  });
-  if (run.error || run.status !== 0) throw new Error(`Cannot evaluate HCL schema ${path}: ${run.error?.message ?? (run.stderr.trim() || `Atlas exited with ${run.status ?? run.signal}`)}`);
-  if (readFileSync(path, "utf8") !== before) throw new Error(`HCL schema ${path} changed while Atlas evaluated it. Retry the analysis.`);
+  let statements: string[];
+  try {
+    statements = sqliteSchemaFromHcl(readFileSync(path), path);
+  } catch (error) {
+    throw new Error(`Cannot evaluate HCL schema ${path}: ${error instanceof Error ? error.message : String(error)}`);
+  }
   const db = new DatabaseSync(":memory:");
   try {
-    db.exec(run.stdout);
+    // Prepare one statement at a time. SQL expression fields must not execute trailing
+    // statements, even if a project supplies malformed SQL in an explicit expression.
+    for (const sql of statements) {
+      const statement = db.prepare(sql);
+      // sqlite3_sql exposes exactly the text consumed by SQLite's own parser.
+      // Do not silently accept trailing statements in an explicit SQL expression.
+      if (statement.sourceSQL !== sql) throw new Error("Atlas SQLite SQL expression contains trailing statements.");
+      statement.run();
+      // SQLite omits a trailing comment from sqlite_schema.sql. Comparing its stored
+      // DDL also catches an expression that comments out later constraints/options.
+      const stored = db.prepare("SELECT sql FROM sqlite_schema WHERE sql IS NOT NULL ORDER BY rowid DESC LIMIT 1").get();
+      if (stored?.sql !== sql) throw new Error("Atlas SQLite SQL expression truncates the declared schema.");
+    }
     // Analysis asks only catalog queries. A replay must never mutate the schema it is reading.
     db.exec("PRAGMA query_only = ON");
   } catch (e) {

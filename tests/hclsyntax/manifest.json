@@ -1,0 +1,228 @@
+{
+  "upstream": {
+    "repository": "https://github.com/hashicorp/hcl",
+    "tag": "v2.25.0",
+    "revision": "00057cf06d7b38a3f89e6e54d622eee98322b314",
+    "license": "MPL-2.0",
+    "go": "go version go1.26.9 darwin/arm64"
+  },
+  "oracle": "Unchanged upstream test assertions execute through a Go AST call-wrapper overlay. Expected values are serialized exclusively from the pinned Go implementation, never from the TypeScript port.",
+  "fixtures": 728,
+  "graphemes": {
+    "module": "github.com/apparentlymart/go-textseg/v15",
+    "version": "v15.0.0",
+    "checksum": "h1:uYvfpb3DyLSCGWnctWKGj857c6ew1u1fNQOlOtuGxQY=",
+    "unicode": "15.0.0",
+    "license": "MIT",
+    "file": "textseg/tables_test.go",
+    "function": "TestScanGraphemeClusters",
+    "cases": 602,
+    "coverage": "Complete unicodeGraphemeTests table extracted from Go AST, preserving every input byte and expected cluster. Generic AllTokens/bufio.ScanWords tests excluded because that API is not ported."
+  },
+  "functions": {
+    "expression_template_test.go": [
+      {
+        "name": "TestTemplateExprParseAndValue",
+        "calls": 53,
+        "cases": 53,
+        "apis": {
+          "parseTemplate": 53
+        },
+        "coverage": "Parsing result, complete AST and parsing diagnostics only. Evaluation assertions execute in Go but are not claimed as ported."
+      },
+      {
+        "name": "TestTemplateExprGracefulValue",
+        "calls": 1,
+        "cases": 1,
+        "apis": {
+          "parseTemplate": 1
+        },
+        "coverage": "Parsing result, complete AST and parsing diagnostics only. Evaluation assertions execute in Go but are not claimed as ported."
+      },
+      {
+        "name": "TestTemplateExprWrappedGracefulValue",
+        "calls": 1,
+        "cases": 1,
+        "apis": {
+          "parseTemplate": 1
+        },
+        "coverage": "Parsing result, complete AST and parsing diagnostics only. Evaluation assertions execute in Go but are not claimed as ported."
+      },
+      {
+        "name": "TestTemplateExprIsStringLiteral",
+        "calls": 9,
+        "cases": 9,
+        "apis": {
+          "parseTemplate": 9
+        },
+        "coverage": "Parsing result, complete AST and parsing diagnostics only. Evaluation assertions execute in Go but are not claimed as ported."
+      }
+    ],
+    "expression_test.go": [
+      {
+        "name": "TestExpressionParseAndValue",
+        "calls": 230,
+        "cases": 230,
+        "apis": {
+          "parseExpression": 230
+        },
+        "coverage": "Parsing result, complete AST and parsing diagnostics only. Evaluation assertions execute in Go but are not claimed as ported."
+      },
+      {
+        "name": "TestExpressionErrorMessages",
+        "calls": 18,
+        "cases": 18,
+        "apis": {
+          "parseExpression": 18
+        },
+        "coverage": "Parsing result, complete AST and parsing diagnostics only. Evaluation assertions execute in Go but are not claimed as ported."
+      },
+      {
+        "name": "TestFunctionCallExprValue",
+        "calls": 0,
+        "cases": 0,
+        "apis": {},
+        "coverage": "Excluded: evaluation or static AST helper API not included in the native parser scope."
+      },
+      {
+        "name": "TestExpressionAsTraversal",
+        "calls": 1,
+        "cases": 1,
+        "apis": {
+          "parseExpression": 1
+        },
+        "coverage": "Parsing result, complete AST and parsing diagnostics only. Evaluation assertions execute in Go but are not claimed as ported."
+      },
+      {
+        "name": "TestStaticExpressionList",
+        "calls": 1,
+        "cases": 1,
+        "apis": {
+          "parseExpression": 1
+        },
+        "coverage": "Parsing result, complete AST and parsing diagnostics only. Evaluation assertions execute in Go but are not claimed as ported."
+      },
+      {
+        "name": "TestParseExpression_incompleteFunctionCall",
+        "calls": 6,
+        "cases": 6,
+        "apis": {
+          "parseExpression": 6
+        },
+        "coverage": "Parsing result, complete AST and parsing diagnostics only. Evaluation assertions execute in Go but are not claimed as ported."
+      },
+      {
+        "name": "TestAllBoolExpressions",
+        "calls": 133,
+        "cases": 133,
+        "apis": {
+          "parseExpression": 133
+        },
+        "coverage": "Parsing result, complete AST and parsing diagnostics only. Evaluation assertions execute in Go but are not claimed as ported."
+      }
+    ],
+    "parser_test.go": [
+      {
+        "name": "TestParseConfig",
+        "calls": 48,
+        "cases": 48,
+        "apis": {
+          "parseConfig": 48
+        },
+        "coverage": "Every original table input with complete oracle result and diagnostics."
+      },
+      {
+        "name": "TestParseConfig_incompleteFunctionCall",
+        "calls": 11,
+        "cases": 11,
+        "apis": {
+          "parseConfig": 11
+        },
+        "coverage": "Every original table input with complete oracle result and diagnostics."
+      },
+      {
+        "name": "TestParseConfigDiagnostics",
+        "calls": 15,
+        "cases": 15,
+        "apis": {
+          "parseConfig": 15
+        },
+        "coverage": "Every original table input with complete oracle result and diagnostics."
+      }
+    ],
+    "public_test.go": [
+      {
+        "name": "TestValidIdentifier",
+        "calls": 24,
+        "cases": 24,
+        "apis": {
+          "validIdentifier": 24
+        },
+        "coverage": "Every original table input with complete oracle result and diagnostics."
+      }
+    ],
+    "scan_string_lit_test.go": [
+      {
+        "name": "TestScanStringLit",
+        "calls": 64,
+        "cases": 64,
+        "apis": {
+          "scanStringLit": 64
+        },
+        "coverage": "Every original table input with complete oracle result and diagnostics."
+      }
+    ],
+    "scan_tokens_test.go": [
+      {
+        "name": "TestScanTokens_normal",
+        "calls": 62,
+        "cases": 62,
+        "apis": {
+          "lexConfig": 62
+        },
+        "coverage": "Every original table input with complete oracle result and diagnostics."
+      },
+      {
+        "name": "TestScanTokens_template",
+        "calls": 5,
+        "cases": 5,
+        "apis": {
+          "lexTemplate": 5
+        },
+        "coverage": "Every original table input with complete oracle result and diagnostics."
+      }
+    ],
+    "token_test.go": [
+      {
+        "name": "TestCheckInvalidTokensTest",
+        "calls": 6,
+        "cases": 6,
+        "apis": {
+          "lexConfig": 6
+        },
+        "coverage": "Every original table input with complete oracle result and diagnostics."
+      }
+    ]
+  },
+  "peeker": {
+    "file": "peeker_test.go",
+    "function": "TestPeeker",
+    "cases": 3,
+    "coverage": "All three original scenarios transcribed directly with Peek/Read equality and exact token sequences."
+  },
+  "corpus": {
+    "cases": 40,
+    "nativeSpecFiles": 15,
+    "fuzzConfig": 7,
+    "fuzzExpression": 10,
+    "fuzzTemplate": 8,
+    "excludedTraversalSeeds": 4,
+    "coverage": "Pinned Go parser AST and diagnostics, not hcldec evaluation parity."
+  },
+  "exclusions": [
+    "Expression.Value and cty evaluation assertions",
+    "Standalone traversal parsing, JSON parsing, hcldec body decoding, navigation, variable enumeration, walking",
+    "BenchmarkLexConfig performance benchmark, which has no correctness assertions",
+    "pos_test.go helpers not copied into the parser are outside scope"
+  ]
+}

@@ -42,7 +42,9 @@ For SQLite, the fork also accepts one local Atlas HCL schema instead of a databa
 direct_url: hcl:./schema.hcl
 ```
 
-Install the Atlas CLI and make `atlas` available on `PATH` for the type check and builds. Atlas evaluates the file against an in-memory SQLite dev database, and Reylo analyzes the resulting schema in memory. No application database is opened or created, and no migration runs. Changes to the HCL file invalidate its analysis cache. An unreadable or invalid file, or a failed Atlas evaluation, is an analysis error rather than an offline-cache fallback.
+The fork parses native HCL in process with a port of HashiCorp's parser, then compiles supported static Atlas SQLite declarations into an in-memory analysis catalog. Analysis needs no Atlas executable, Go runtime, remote service, application database, or migration execution. Changes to the HCL file invalidate its analysis cache immediately. Unreadable HCL, syntax errors, unsupported declarations, and invalid references are analysis errors rather than offline-cache fallbacks.
+
+The Atlas adapter supports the `main` schema, tables, columns, literal defaults and explicit `sql("...")` defaults, primary and foreign keys, checks, unique and ordered indexes, partial indexes, and SQLite table options. Native HCL syntax is parsed before this semantic check. Arbitrary HCL evaluation, variables, dynamic expressions, other schema blocks, and unrecognized attributes are not supported and are rejected instead of ignored.
 
 The HCL source is only for analysis. The application still supplies its own SQLite or D1 client at runtime and manages its schema and migrations. Generated query modules do not need Atlas or the HCL file at runtime.
 

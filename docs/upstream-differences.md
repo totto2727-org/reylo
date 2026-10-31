@@ -6,12 +6,35 @@ The upstream base is [`colinhacks/reylo@73562e513ef50d54df51daefa5243fa8427df7af
 ## Local Atlas HCL schema analysis
 
 The fork accepts a local `hcl:./schema.hcl` SQLite analysis source.
-Atlas evaluates the HCL, and Reylo analyzes the resulting schema in an in-memory SQLite database without opening or creating an application database.
-The retained source changes are in the project source resolution and analysis path, including `src/project.ts`, `src/analyze.ts` and `src/hcl.ts`.
-Atlas must be available when analyzing an HCL source.
+The fork parses HCL directly in JavaScript, then supplies the existing SQLite analysis engine with an in-memory schema catalog without opening or creating an application database.
+The retained source changes are in project source resolution and analysis, the private native-syntax parser, and the static Atlas SQLite adapter in `src/hcl-sqlite.ts`.
+No Atlas executable, Go runtime, subprocess, remote service, or migration execution is required for HCL analysis.
 The HCL file remains an analysis input, not a migration or a runtime connection.
 This is a build-time source customization, not a deployment customization or a new SQL execution driver.
 The upstream runtime query API, binding, decoding and engine inference rules are unchanged.
+
+### Native HCL source port
+
+The parser is translated from [HashiCorp HCL v2.25.0 at `00057cf06d7b38a3f89e6e54d622eee98322b314`](https://github.com/hashicorp/hcl/tree/00057cf06d7b38a3f89e6e54d622eee98322b314).
+The private `src/hclsyntax/` implementation covers the native scanner, token cursor, configuration and expression parser, templates, parser-reachable AST, ranges, and diagnostics.
+It does not add HCL evaluation, JSON syntax, `gohcl`, `hcldec`, or standalone traversal APIs.
+No compiler settings are weakened for the translated implementation, Atlas adapter, or application code.
+Translated files retain their MPL-2.0 notices, and [`licenses/hashicorp-hcl-MPL-2.0.txt`](../licenses/hashicorp-hcl-MPL-2.0.txt) retains the full upstream license.
+The byte scanner also ports `go-textseg/v15` v15.0.0's Unicode 15 grapheme scanner and tables, preserving its [MIT and Unicode notices](../licenses/go-textseg-LICENSE.txt).
+This pins the selected Go reference behavior instead of delegating positions to the host JavaScript runtime's Unicode version.
+Engine tooling distributions include these licenses and identify the combined MIT and MPL-2.0 contents.
+The original covered source and this fork's translated files remain available at the linked source repositories.
+The [conformance test manifest and reproduction instructions](../tests/hclsyntax/README.md) identify every copied test surface, excluded API, and reference fixture.
+
+The Atlas semantic adapter supports static SQLite `main` schemas, tables, columns, defaults, primary and foreign keys, checks, indexes, and table options.
+It rejects unknown blocks, attributes, dynamic expressions, and invalid references rather than silently discarding them.
+This adapter is not an implementation of arbitrary Atlas HCL evaluation.
+SQLite's own prepared-statement parser prevents trailing SQL statements in explicit expression fields from being executed.
+The resulting analysis catalog is read-only for the trusted bundled inference engine's catalog queries.
+Its private query callback is not a general-purpose SQL sandbox and must not be exposed to untrusted callers.
+
+A content fingerprint remains necessary when reusing analysis sessions: watching an HCL file does not replace a session's already-open in-memory catalog.
+HCL edits immediately discard that catalog and its analysis answers before another query is analyzed, including callers without a bundler watcher.
 
 ## Native SQLite and D1 execution
 

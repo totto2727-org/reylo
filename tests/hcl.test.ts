@@ -66,6 +66,25 @@ test("HCL catalog queries validate SQLite bindings and array rows at the Node bo
   }
 });
 
+test("HCL loading rejects trailing SQL statements and keeps its catalog read-only", async () => {
+  const root = project();
+  const wasm = await engine("sqlite", root);
+  try {
+    const db = hclDatabase(join(root, "schema.hcl"), wasm);
+    try {
+      await assert.rejects(db.query("create table unexpected (id text)", []), /readonly|read-only/);
+    } finally { await db.close(); }
+    for (const [expression, expected] of [["1)); CREATE TABLE unexpected (id text); --", /trailing statements/], ["1)) --", /truncates the declared schema/]] as const) {
+      writeFileSync(join(root, "schema.hcl"), schema().replace("  primary_key {", `  check { expr = ${JSON.stringify(expression)} }\n  primary_key {`));
+      assert.throws(() => hclDatabase(join(root, "schema.hcl"), wasm), expected);
+    }
+    // Legitimate comments and semicolons inside SQL string literals remain supported.
+    writeFileSync(join(root, "schema.hcl"), schema().replace("  primary_key {", `  check { expr = ${JSON.stringify("name != ';' /* normal comment */")} }\n  primary_key {`));
+    await hclDatabase(join(root, "schema.hcl"), wasm).close();
+    assert.ok(!readdirSync(root).some((name) => /\.(db|sqlite)(-|$)/.test(name)));
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
 test("Atlas HCL feeds the real SQLite engine and invalidates warm caches immediately", async () => {
   const root = project();
   const session = await Session.open(root, {});
@@ -89,8 +108,8 @@ test("Atlas HCL feeds the real SQLite engine and invalidates warm caches immedia
     `], { env: { ...process.env, PATH: "" }, encoding: "utf8" });
     assert.equal(child.status, 0, child.stderr);
     const noAtlas = JSON.parse(child.stdout);
-    assert.equal(noAtlas.ok, false);
-    assert.match(noAtlas.message, /Cannot evaluate HCL schema.*ENOENT/);
+    assert.equal(noAtlas.ok, true, JSON.stringify(noAtlas));
+    assert.deepEqual(noAtlas.analysis.columns.map(({ name, nullable }: { name: string; nullable: boolean }) => [name, nullable]), [["id", false], ["name", false]]);
     writeFileSync(join(root, "schema.hcl"), schema(true));
     const changed = await session.analyze(SELECT);
     assert.ok(changed.ok, JSON.stringify(changed));

@@ -1,0 +1,95 @@
+// Copyright IBM Corp. 2014, 2025
+// SPDX-License-Identifier: MPL-2.0
+// This file is injected into the official hclsyntax package by go test -overlay.
+package hclsyntax
+
+import (
+ "encoding/json"
+ "fmt"
+ "os"
+ "reflect"
+ "sync"
+ "testing"
+ "path/filepath"
+ "strings"
+
+ "github.com/hashicorp/hcl/v2"
+ "github.com/zclconf/go-cty/cty"
+)
+
+var reyloOracleMutex sync.Mutex
+
+func reyloOracleValue(value reflect.Value) any {
+ if !value.IsValid() {return nil}
+ if value.Kind()==reflect.Interface {if value.IsNil(){return nil};return reyloOracleValue(value.Elem())}
+ if value.CanInterface() {
+  switch v:=value.Interface().(type) {
+  case cty.Value:
+   if v==cty.NilVal{return map[string]any{"cty":"nil"}}
+   if !v.IsKnown(){return map[string]any{"cty":"unknown"}}
+   if v.IsNull(){return map[string]any{"cty":"null"}}
+   switch v.Type() {
+   case cty.String:return map[string]any{"cty":"string","value":v.AsString()}
+   case cty.Bool:return map[string]any{"cty":"bool","value":v.True()}
+   case cty.Number:return map[string]any{"cty":"number","value":v.AsBigFloat().Text('g',-1)}
+   }
+   panic("unexpected parser cty literal")
+  case *Operation:
+   for name,op:=range map[string]*Operation{"or":OpLogicalOr,"and":OpLogicalAnd,"not":OpLogicalNot,"equal":OpEqual,"notEqual":OpNotEqual,"greater":OpGreaterThan,"greaterEqual":OpGreaterThanOrEqual,"less":OpLessThan,"lessEqual":OpLessThanOrEqual,"add":OpAdd,"subtract":OpSubtract,"multiply":OpMultiply,"divide":OpDivide,"modulo":OpModulo,"negate":OpNegate}{if v==op{return name}}
+   panic("unknown operation")
+  }
+ }
+ switch value.Kind() {
+ case reflect.Pointer:if value.IsNil(){return nil};return reyloOracleValue(value.Elem())
+ case reflect.Struct:
+  result:=map[string]any{"goType":value.Type().Name()}
+  for i:=0;i<value.NumField();i++ {field:=value.Type().Field(i);if !field.IsExported(){continue};result[field.Name]=reyloOracleValue(value.Field(i))}
+  if value.CanAddr() && value.Addr().CanInterface() { if node,ok:=value.Addr().Interface().(interface{Range() hcl.Range});ok{result["ComputedRange"]=reyloOracleValue(reflect.ValueOf(node.Range()))} }
+  return result
+ case reflect.Map:
+  result:=map[string]any{}
+  iter:=value.MapRange();for iter.Next(){result[fmt.Sprint(iter.Key().Interface())]=reyloOracleValue(iter.Value())};return result
+ case reflect.Array,reflect.Slice:
+  result:=[]any{};for i:=0;i<value.Len();i++{result=append(result,reyloOracleValue(value.Index(i)))};return result
+ case reflect.String:return value.String()
+ case reflect.Bool:return value.Bool()
+ case reflect.Int,reflect.Int8,reflect.Int16,reflect.Int32,reflect.Int64:return value.Int()
+ case reflect.Uint,reflect.Uint8,reflect.Uint16,reflect.Uint32,reflect.Uint64:return value.Uint()
+ default:panic(fmt.Sprintf("unsupported oracle reflection %s",value.Type()))
+ }
+}
+
+func reyloOracleRecord(api,name string,src []byte,filename string,start hcl.Pos,result any,diags hcl.Diagnostics,extra any) {
+ fixture:=map[string]any{"api":api,"name":name,"source":src,"filename":filename,"start":start,"result":reyloOracleValue(reflect.ValueOf(result)),"diagnostics":reyloOracleValue(reflect.ValueOf(diags)),"extra":extra}
+ data,err:=json.Marshal(fixture);if err!=nil{panic(err)}
+ reyloOracleMutex.Lock();defer reyloOracleMutex.Unlock()
+ f,err:=os.OpenFile(os.Getenv("HCL_ORACLE_OUTPUT"),os.O_CREATE|os.O_APPEND|os.O_WRONLY,0644);if err!=nil{panic(err)}
+ defer f.Close();if _,err=f.Write(append(data,'\n'));err!=nil{panic(err)}
+}
+func reyloOracleParseConfig(src []byte,filename string,start hcl.Pos,name string)(*hcl.File,hcl.Diagnostics){file,d:=ParseConfig(src,filename,start);reyloOracleRecord("parseConfig",name,src,filename,start,file.Body,d,nil);return file,d}
+func reyloOracleParseExpression(src []byte,filename string,start hcl.Pos,name string)(Expression,hcl.Diagnostics){e,d:=ParseExpression(src,filename,start);reyloOracleRecord("parseExpression",name,src,filename,start,e,d,nil);return e,d}
+func reyloOracleParseTemplate(src []byte,filename string,start hcl.Pos,name string)(Expression,hcl.Diagnostics){e,d:=ParseTemplate(src,filename,start);isLiteral:=false;if t,ok:=e.(*TemplateExpr);ok{isLiteral=t.IsStringLiteral()};reyloOracleRecord("parseTemplate",name,src,filename,start,e,d,map[string]any{"isStringLiteral":isLiteral});return e,d}
+func reyloOracleTokens(api,name string,src []byte,filename string,start hcl.Pos,tokens Tokens,d hcl.Diagnostics)(Tokens,hcl.Diagnostics){result:=[]any{};for _,t:=range tokens{result=append(result,map[string]any{"type":t.Type.String(),"bytes":t.Bytes,"range":t.Range})};reyloOracleRecord(api,name,src,filename,start,nil,d,result);return tokens,d}
+func reyloOracleLexConfig(src []byte,filename string,start hcl.Pos,name string)(Tokens,hcl.Diagnostics){t,d:=LexConfig(src,filename,start);return reyloOracleTokens("lexConfig",name,src,filename,start,t,d)}
+func reyloOracleLexExpression(src []byte,filename string,start hcl.Pos,name string)(Tokens,hcl.Diagnostics){t,d:=LexExpression(src,filename,start);return reyloOracleTokens("lexExpression",name,src,filename,start,t,d)}
+func reyloOracleLexTemplate(src []byte,filename string,start hcl.Pos,name string)(Tokens,hcl.Diagnostics){t,d:=LexTemplate(src,filename,start);return reyloOracleTokens("lexTemplate",name,src,filename,start,t,d)}
+func reyloOraclescanTokens(src []byte,filename string,start hcl.Pos,mode scanMode,name string)[]Token{t:=scanTokens(src,filename,start,mode);api:="lexConfig";if mode==scanTemplate{api="lexTemplate"};reyloOracleTokens(api,name,src,filename,start,t,checkInvalidTokens(t));return t}
+func reyloOraclescanStringLit(src []byte,quoted bool,name string)[][]byte{s:=scanStringLit(src,quoted);reyloOracleRecord("scanStringLit",name,src,"",hcl.Pos{},nil,nil,map[string]any{"quoted":quoted,"slices":s});return s}
+func TestReyloOfficialCorpus(t *testing.T) {
+ for _,root:=range []string{"../specsuite/tests","fuzz/testdata/fuzz"} {
+  err:=filepath.WalkDir(root,func(path string,d os.DirEntry,err error)error{
+   if err!=nil{return err};if d.IsDir(){return nil}
+   if strings.Contains(path,"FuzzParseTraversalAbs"){return nil}
+   if root=="../specsuite/tests" && !strings.HasSuffix(path,".hcl"){return nil}
+   src,err:=os.ReadFile(path);if err!=nil{return err}
+   t.Run(path,func(t *testing.T){start:=hcl.Pos{Line:1,Column:1};switch {
+   case strings.Contains(path,"FuzzParseExpression"):reyloOracleParseExpression(src,path,start,t.Name())
+   case strings.Contains(path,"FuzzParseTemplate"):reyloOracleParseTemplate(src,path,start,t.Name())
+   default:reyloOracleParseConfig(src,path,start,t.Name())
+   }})
+   return nil
+  });if err!=nil{t.Fatal(err)}
+ }
+}
+
+func reyloOracleValidIdentifier(src,name string)bool{v:=ValidIdentifier(src);reyloOracleRecord("validIdentifier",name,[]byte(src),"",hcl.Pos{},v,nil,nil);return v}
