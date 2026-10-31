@@ -6,7 +6,9 @@ The upstream base is [`colinhacks/reylo@73562e513ef50d54df51daefa5243fa8427df7af
 ## Local Atlas HCL schema analysis
 
 The fork accepts a local `hcl:./schema.hcl` SQLite analysis source.
-The fork parses HCL directly in JavaScript, then supplies the existing SQLite analysis engine with an in-memory schema catalog without opening or creating an application database.
+The fork parses HCL directly in JavaScript and supplies DDL catalog rows directly to the existing SQLite analysis engine without opening a host or application database.
+The HCL path performs no host SQL execution.
+The engine's existing embedded SQLite parser and internal schema replay remain unchanged.
 The retained source changes are in project source resolution and analysis, the private native-syntax parser, and the static Atlas SQLite adapter in `src/hcl-sqlite.ts`.
 No Atlas executable, Go runtime, subprocess, remote service, or migration execution is required for HCL analysis.
 The HCL file remains an analysis input, not a migration or a runtime connection.
@@ -31,12 +33,13 @@ The [conformance test manifest and reproduction instructions](../tests/hclsyntax
 The Atlas semantic adapter supports static SQLite `main` schemas, tables, columns, defaults, primary and foreign keys, checks, indexes, and table options.
 It rejects unknown blocks, attributes, dynamic expressions, and invalid references rather than silently discarding them.
 This adapter is not an implementation of arbitrary Atlas HCL evaluation.
-SQLite's own prepared-statement parser prevents trailing SQL statements in explicit expression fields from being executed.
-The resulting analysis catalog is read-only for the trusted bundled inference engine's catalog queries.
-Its private query callback is not a general-purpose SQL sandbox and must not be exposed to untrusted callers.
+The private catalog callback answers only the engine's known DDL and function-list requests and rejects other queries or parameters.
+It does not execute SQL on the host and is not a general-purpose SQL interface.
+Static inference uses the embedded engine's built-in functions rather than a live target's function allowlist.
+SQL syntax and schema replay remain the responsibility of the existing embedded engine.
 
-A content fingerprint remains necessary when reusing analysis sessions: watching an HCL file does not replace a session's already-open in-memory catalog.
-HCL edits immediately discard that catalog and its analysis answers before another query is analyzed, including callers without a bundler watcher.
+HCL content hashes replace database fingerprint queries and are checked before cached analysis is reused.
+HCL edits immediately discard the catalog answers and analysis cache before another query is analyzed, including callers without a bundler watcher.
 
 ## Native SQLite and D1 execution
 
