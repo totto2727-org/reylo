@@ -6,7 +6,7 @@
 // Translated from hclsyntax/parser.go, parser_template.go and public.go at
 // hashicorp/hcl 00057cf06d7b38a3f89e6e54d622eee98322b314.
 // The AST is data-only. cty evaluation is outside this port's boundary.
-import { lexConfig, lexExpression, lexTemplate, scanStringLit, scanGraphemeCluster } from './scanner.ts';
+import { lexConfig, lexExpression, lexTemplate, scanStringLit, graphemeClusters } from './scanner.ts';
 import { Peeker } from './peeker.ts';
 import { rangeBetween as between, emptyRangeAt, rangeString, isStringLiteral } from './types.ts';
 import type { Attribute, Block, Body, Diagnostic, Expression, ForExpression, Literal, ObjectKey, Pos, Range, Token, TraversalStep } from './types.ts';
@@ -14,14 +14,6 @@ export * from './types.ts';
 
 const decoder = new TextDecoder();
 const encoder = new TextEncoder();
-function graphemeClusters(bytes: Uint8Array): Uint8Array[] {
-  const clusters: Uint8Array[] = [];
-  for (let offset = 0; offset < bytes.length;) {
-    const length = scanGraphemeCluster(bytes.subarray(offset));
-    clusters.push(bytes.subarray(offset, offset + length)); offset += length;
-  }
-  return clusters;
-}
 const text = (token: Token): string => decoder.decode(token.bytes);
 const keyword = (token: Token, word: string): boolean => token.type === 'TokenIdent' && text(token) === word;
 const error = (summary: string, detail: string, subject: Range, context?: Range): Diagnostic => ({ severity: 'error', summary, detail, subject, ...(context ? { context } : {}) });

@@ -12,6 +12,23 @@ import { actualAST, actualDiagnostics, diagnostics, oracleAST, oracleTokens, pos
 const fixtures = readFileSync(new URL('./fixtures.jsonl', import.meta.url), 'utf8').trimEnd().split('\n').map(line => JSON.parse(line) as Fixture);
 const manifest = JSON.parse(readFileSync(new URL('./manifest.json', import.meta.url), 'utf8')) as { fixtures: number; functions: Record<string, { name: string; calls: number; cases: number }[]> };
 
+test('HCL string tokens retain UTF-8 byte ranges and grapheme columns through Intl', () => {
+  const source = Buffer.from('a = "e\u0301😀"\n');
+  const scanned = lexConfig(source, 'unicode.hcl');
+  assert.deepEqual(scanned.diagnostics, []);
+  const literal = scanned.tokens.find(token => token.type === 'TokenQuotedLit');
+  assert(literal);
+  assert.deepEqual(Buffer.from(literal.bytes), Buffer.from('e\u0301😀'));
+  assert.deepEqual(literal.range, {
+    filename: 'unicode.hcl',
+    start: { line: 1, column: 6, byte: 5 },
+    end: { line: 1, column: 8, byte: 12 },
+  });
+  const parsed = parseConfig(source, 'unicode.hcl');
+  assert.deepEqual(parsed.diagnostics, []);
+  assert.deepEqual(Object.keys(parsed.body.attributes), ['a']);
+});
+
 function assertNumericLexemes(value: unknown, source: Buffer, startByte: number): void {
   if (value === null || typeof value !== 'object') return;
   if (Array.isArray(value)) { value.forEach(item => assertNumericLexemes(item, source, startByte)); return }

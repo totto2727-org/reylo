@@ -171,7 +171,7 @@ Reylo is bring-your-own-driver. Pass `.run()` a client from any of these, or a D
 
 ## Fork differences
 
-This fork adds local Atlas HCL schema analysis for SQLite and a SQLite-only package build. Native batches use the existing Standard Query interface. See [upstream differences](docs/upstream-differences.md) for the exact base revision, scope and limits.
+This fork adds local Atlas HCL schema analysis for SQLite. Native batches use the existing Standard Query interface. Package builds use the upstream nub workflow, including all engines and the playground. See [upstream differences](docs/upstream-differences.md) for the exact base revision, scope and limits.
 
 ## License
 

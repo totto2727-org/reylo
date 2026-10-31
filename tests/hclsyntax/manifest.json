@@ -8,17 +8,6 @@
   },
   "oracle": "Unchanged upstream test assertions execute through a Go AST call-wrapper overlay. Expected values are serialized exclusively from the pinned Go implementation, never from the TypeScript port.",
   "fixtures": 728,
-  "graphemes": {
-    "module": "github.com/apparentlymart/go-textseg/v15",
-    "version": "v15.0.0",
-    "checksum": "h1:uYvfpb3DyLSCGWnctWKGj857c6ew1u1fNQOlOtuGxQY=",
-    "unicode": "15.0.0",
-    "license": "MIT",
-    "file": "textseg/tables_test.go",
-    "function": "TestScanGraphemeClusters",
-    "cases": 602,
-    "coverage": "Complete unicodeGraphemeTests table extracted from Go AST, preserving every input byte and expected cluster. Generic AllTokens/bufio.ScanWords tests excluded because that API is not ported."
-  },
   "functions": {
     "expression_template_test.go": [
       {

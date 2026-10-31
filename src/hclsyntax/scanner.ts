@@ -9,17 +9,8 @@ import type { Token, Pos, Diagnostic } from './types.ts';
 import * as tables from './scanner-tables.ts';
 import * as stringTables from './string-literal-tables.ts';
 import { RagelState, runRagel } from './scanner-ragel.ts';
-import { scanGraphemeCluster } from './scanner-grapheme.ts';
-export { scanGraphemeCluster } from './scanner-grapheme.ts';
-export function graphemeClusters(data: Uint8Array): Uint8Array[] {
-  const result: Uint8Array[] = [];
-  for (let offset = 0; offset < data.length;) {
-    const advance = scanGraphemeCluster(data.subarray(offset));
-    result.push(data.subarray(offset, offset + advance));
-    offset += advance;
-  }
-  return result;
-}
+import { graphemeClusters } from './scanner-grapheme.ts';
+export { graphemeClusters } from './scanner-grapheme.ts';
 
 const selfTokens: Record<number, string> = {
   123: 'TokenOBrace', 125: 'TokenCBrace', 91: 'TokenOBrack', 93: 'TokenCBrack',
@@ -43,13 +34,11 @@ function scanTokens(input: Uint8Array, filename: string, start: Pos, mode: 'norm
     const begin: Pos = { ...pos, column: pos.column + from + startByte - pos.byte, byte: from + startByte };
     const end: Pos = { ...begin, byte: to + startByte };
     const bytes = data.subarray(from, to);
-    for (let offset = 0; offset < bytes.length;) {
-      const n = scanGraphemeCluster(bytes.subarray(offset));
-      if ((n === 1 && bytes[offset] === 10) || (n === 2 && bytes[offset] === 13 && bytes[offset + 1] === 10)) {
+    for (const cluster of graphemeClusters(bytes)) {
+      if ((cluster.length === 1 && cluster[0] === 10) || (cluster.length === 2 && cluster[0] === 13 && cluster[1] === 10)) {
         end.line++;
         end.column = 1;
       } else end.column++;
-      offset += n;
     }
     pos = end;
     tokens.push({ type, bytes, range: { filename, start: begin, end } });

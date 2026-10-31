@@ -21,7 +21,6 @@ It does not run Go, Atlas, a package manager, or a subprocess.
 [manifest.json](./manifest.json) records each upstream test function, its captured calls, case counts, APIs, and exclusions.
 The 728 official oracle fixtures comprise 688 calls from the original test functions and 40 raw official corpus inputs.
 Three complete `TestPeeker` scenarios and a fixture-manifest consistency check bring the HCL portion to 732 tests.
-The complete 602-case Unicode grapheme table and its manifest check bring the full suite to 1,335 tests.
 No cases are skipped.
 
 The full original tables are retained for:
@@ -65,16 +64,11 @@ Evaluation, JSON syntax, standalone traversal parsing, generic body decoding, na
 `pos_test.go` tests `RangeOver`, position overlap, and range partitioning, none of which the port copies.
 The lexical performance benchmark is not a correctness test and is not included in the test count.
 
-## Unicode grapheme coverage
+## Character positions
 
-The scanner's transitive grapheme implementation is covered by every row of `unicodeGraphemeTests` from `github.com/apparentlymart/go-textseg/v15` version `v15.0.0`.
-The module is pinned by the official HCL module checksum `h1:uYvfpb3DyLSCGWnctWKGj857c6ew1u1fNQOlOtuGxQY=`.
-[grapheme-fixtures.json](./grapheme-fixtures.json) contains all 602 original input/expected-cluster pairs.
-[graphemes.test.ts](./graphemes.test.ts) asserts each cluster's exact bytes.
-The MIT license is retained in [textseg.LICENSE](./textseg.LICENSE).
-The extractor reads the original Go table with Go's AST parser and runs the full original `textseg` package test suite before writing fixtures.
-Generic `AllTokens`/`bufio.ScanWords` tests are excluded because the TypeScript scanner does not port those APIs.
-Word and sentence segmentation tables are also excluded because their algorithms are not ported.
+Character segmentation uses the runtime's standard `Intl.Segmenter`, with UTF-16 boundaries mapped back to the original UTF-8 source bytes.
+The scanner has no copied textseg Unicode tables or independent textseg conformance suite.
+Unicode-version differences in grapheme columns are accepted when they do not change HCL parsing; this suite checks HCL tokens, ASTs, diagnostics and source positions instead of reproducing a dependency's internals.
 
 ## Reproduce the fixtures
 
@@ -97,12 +91,11 @@ The original Go assertions therefore validate the implementation used as the ora
 The synthetic corpus driver reads only official seed/spec input files.
 
 Generated overlay files and intermediate exports stay under `tmp/direct-hcl/` and are not maintained artifacts.
-The maintained files are the exporters, recording hooks, deterministic HCL and grapheme fixture data, the explicit coverage manifest, test harnesses, this document, and both licenses.
-The exporter was run twice with byte-identical fixture and manifest output to verify reproducibility.
+The maintained files are the exporters, recording hooks, deterministic HCL fixture data, the explicit coverage manifest, test harnesses, this document, and the upstream license.
+The HCL exporter was run twice with byte-identical fixture output to verify reproducibility.
 
 ## Source references
 
-- [Pinned Unicode grapheme module](https://pkg.go.dev/github.com/apparentlymart/go-textseg/v15@v15.0.0/textseg).
 - [Native parser tests](https://github.com/hashicorp/hcl/blob/00057cf06d7b38a3f89e6e54d622eee98322b314/hclsyntax/parser_test.go).
 - [Token scanner tests](https://github.com/hashicorp/hcl/blob/00057cf06d7b38a3f89e6e54d622eee98322b314/hclsyntax/scan_tokens_test.go).
 - [String scanner tests](https://github.com/hashicorp/hcl/blob/00057cf06d7b38a3f89e6e54d622eee98322b314/hclsyntax/scan_string_lit_test.go).

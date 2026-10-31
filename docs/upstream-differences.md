@@ -20,8 +20,10 @@ The private `src/hclsyntax/` implementation covers the native scanner, token cur
 It does not add HCL evaluation, JSON syntax, `gohcl`, `hcldec`, or standalone traversal APIs.
 No compiler settings are weakened for the translated implementation, Atlas adapter, or application code.
 Translated files retain their MPL-2.0 notices, and [`licenses/hashicorp-hcl-MPL-2.0.txt`](../licenses/hashicorp-hcl-MPL-2.0.txt) retains the full upstream license.
-The byte scanner also ports `go-textseg/v15` v15.0.0's Unicode 15 grapheme scanner and tables, preserving its [MIT and Unicode notices](../licenses/go-textseg-LICENSE.txt).
-This pins the selected Go reference behavior instead of delegating positions to the host JavaScript runtime's Unicode version.
+The scanner uses standard `Intl.Segmenter` for grapheme columns and maps its UTF-16 boundaries to original UTF-8 byte positions.
+It carries no copied textseg Unicode engine or tables.
+Grapheme rules follow the host runtime's Unicode version instead of reproducing Unicode 15 exactly; character-column differences that do not change parsing are accepted.
+The small adapted malformed-UTF-8 byte-width boundary retains its [MIT and Unicode notices](../licenses/go-textseg-LICENSE.txt).
 Engine tooling distributions include these licenses and identify the combined MIT and MPL-2.0 contents.
 The original covered source and this fork's translated files remain available at the linked source repositories.
 The [conformance test manifest and reproduction instructions](../tests/hclsyntax/README.md) identify every copied test surface, excluded API, and reference fixture.
@@ -49,15 +51,12 @@ Regression tests in `tests/standard-query-sqlite.test.ts` cover ordered and repe
 These tests establish compatibility with native SQLite transactions, not Cloudflare D1 batch behavior.
 An application must validate D1 execution with its own native `prepare()`, `bind()` and `batch()` calls.
 
-## Local SQLite package build
+## Package build and license packaging
 
-The centralized `scripts/build.ts` accepts `--sqlite` for local SQLite consumers.
-Run `node scripts/build.ts --sqlite` to build `dist/reylo` and `dist/sqlite`, then link those package directories in the application.
-The build uses the existing TypeScript compilation, declaration generation, package manifests, SQLite engine and tooling bundles.
-It skips the unrelated database packages and the docs playground, so it does not require the site's installation or `nub`.
-The default build without the flag still builds all packages and the playground.
-The SQLite-only output is for local consumption, not a complete release artifact, and `reylo play` has no bundled playground page in this mode.
-Both modes replace `dist/`, so rebuild with the required mode before consuming its output.
+Package builds retain the upstream `scripts/build.ts` behavior: `nub run build` replaces `dist/`, builds all four engine packages, and includes the playground in `dist/reylo`.
+Use upstream's nub 0.9.6 on Node 24 and run `nub install --frozen-lockfile` at the repository root and in `site/` before building.
+Local SQLite consumers link `dist/reylo` and `dist/sqlite` from that complete build.
+The retained packaging change copies `licenses/` into each engine distribution and declares its combined MIT and MPL-2.0 contents because each tooling bundle includes the native HCL parser port.
 
 Raw TypeScript source links can load natively after Node resolves symlinks outside `node_modules`, but they also expose implementation files to the consuming application's compiler options.
 Built links expose the official JavaScript and declarations instead, preserving application type checks without rewriting upstream implementation or weakening compiler settings.
