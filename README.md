@@ -169,6 +169,10 @@ Reylo is bring-your-own-driver. Pass `.run()` a client from any of these, or a D
 
 [reylo.dev](https://reylo.dev) covers the rest: every plugin and editor, configuration, errors, each database's data types and edge cases, and advanced examples. Agents can read it all as Markdown at [reylo.dev/llms.txt](https://reylo.dev/llms.txt).
 
+## Fork differences
+
+This fork adds checked SQLite bindings for native batches. See [upstream differences](docs/upstream-differences.md) for the exact base revision, scope and limits.
+
 ## License
 
 [MIT](LICENSE)

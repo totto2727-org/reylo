@@ -2,7 +2,7 @@
 title: "Usage"
 ---
 
-{/* Usage is basic usage only: the first example, then one h3 per member of an imported query (.sql, .run(), .runSync(), .try(), .with()). Anything else, such as tracing, goes in a section of its own or in the FAQ, never under Usage. */}
+{/* Usage is basic usage only: the first example, then one h3 per member of an imported query (.sql, .run(), .compile(), .runSync(), .try(), .with()). Anything else, such as tracing, goes in a section of its own or in the FAQ, never under Usage. */}
 
 ## Usage
 
@@ -580,7 +580,7 @@ const db = drizzle("app.db");
 db.transaction((tx) => getUser.runSync(tx, { id: 1 }));
 ```
 
-D1 has no transaction a query can join: its `batch()` takes D1's own prepared statements.
+D1 has no transaction a query can join: its `batch()` takes D1's own prepared statements. Use [`.compile()`](#compile) to bind a query before adding it to a batch.
 
 #### DuckDB [#duckdb-drivers]
 
@@ -606,6 +606,25 @@ try {
   throw error;
 }
 ```
+
+### `.compile()`
+
+For SQLite, bind a query without running it. The input has the same TypeScript type and parameter checks as `.run()`. The result contains `sql` and `parameters` in positional binding order:
+
+```ts
+import getUser from "./get_user.sql";
+
+const first = getUser.compile({ id: 1 });
+const second = getUser.compile({ id: 2 });
+await env.DB.batch([
+  env.DB.prepare(first.sql).bind(...first.parameters),
+  env.DB.prepare(second.sql).bind(...second.parameters),
+]);
+```
+
+The driver owns the batch and its transaction. Compile every query before submitting the batch. Driver errors still come from the driver, and its results are raw: `.compile()` does not decode rows or apply cardinality.
+
+No database client is passed, so `.compile()` does not check whether the live schema still matches the analysis. Keep migrations and query analysis in sync. Driver-specific limits still apply, including D1's limits on large integers and binary values. Other dialects are refused.
 
 ### `.runSync()`
 
