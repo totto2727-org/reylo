@@ -1,5 +1,5 @@
 // Builds every publishable package into dist/, one directory each, published with
-// `npm publish dist/<name>`:
+// `npm publish dist/<name>`. Use `--sqlite` for local runtime and SQLite packages without the playground:
 // - dist/reylo: the run time and the entry points a project names (tsconfig.build.json), compiled to
 //   JavaScript with their declarations, the README, `reylo play`'s page in play/ (built from site/),
 //   and a package.json whose exports and content mapper name the compiled files. Node strips no types under node_modules, so an installed copy
@@ -25,6 +25,8 @@ const root = join(import.meta.dirname, "..");
 const dist = join(root, "dist");
 const js = (path: string) => path.replace(/\.ts$/, ".js");
 const DATABASES = ["postgres", "sqlite", "mysql", "duckdb"] as const;
+// Local SQLite consumers need the same packages, without unrelated engines or the docs toolchain.
+const sqliteOnly = process.argv.includes("--sqlite");
 
 rmSync(dist, { recursive: true, force: true });
 const reylo = join(dist, "reylo");
@@ -69,13 +71,15 @@ console.log(`dist/reylo: ${files.length} files, package ${built.name}@${built.ve
 
 // `reylo play`'s page (src/play.ts), built from the docs site's playground with the site's own
 // toolchain into dist/reylo/play/, which needs the site's install (\`nub install\` in site/).
-const site = join(root, "site");
-if (!existsSync(join(site, "node_modules", "vite"))) throw new Error("site/ is not installed, and reylo play's page is built with its toolchain: run nub install in site/");
-execFileSync("nub", ["run", "build:play"], { cwd: site, env: { ...process.env, REYLO_PLAY_OUT: join(reylo, "play") }, stdio: ["ignore", "ignore", "inherit"] });
-const page = readdirSync(join(reylo, "play"), { recursive: true, encoding: "utf8" });
-if (!page.includes("index.html")) throw new Error("dist/reylo/play has no index.html");
-const pageBytes = page.reduce((n, f) => n + (statSync(join(reylo, "play", f)).isFile() ? statSync(join(reylo, "play", f)).size : 0), 0);
-console.log(`dist/reylo/play: ${page.length} files, ${Math.round(pageBytes / 1024)} KB`);
+if (!sqliteOnly) {
+  const site = join(root, "site");
+  if (!existsSync(join(site, "node_modules", "vite"))) throw new Error("site/ is not installed, and reylo play's page is built with its toolchain: run nub install in site/");
+  execFileSync("nub", ["run", "build:play"], { cwd: site, env: { ...process.env, REYLO_PLAY_OUT: join(reylo, "play") }, stdio: ["ignore", "ignore", "inherit"] });
+  const page = readdirSync(join(reylo, "play"), { recursive: true, encoding: "utf8" });
+  if (!page.includes("index.html")) throw new Error("dist/reylo/play has no index.html");
+  const pageBytes = page.reduce((n, f) => n + (statSync(join(reylo, "play", f)).isFile() ? statSync(join(reylo, "play", f)).size : 0), 0);
+  console.log(`dist/reylo/play: ${page.length} files, ${Math.round(pageBytes / 1024)} KB`);
+}
 
 // Each engine package's JavaScript is bundled into a few files with everything it reads, which also
 // leaves out the comments.
@@ -85,7 +89,7 @@ const bundled = { bundle: true, platform: "node", format: "esm", target: "node24
 // call the engine never makes, through a `require` of its own that the bundle leaves out.
 const shimWorker = join(dirname(createRequire(join(root, "package.json")).resolve("@bytecodealliance/preview2-shim/instantiation")), "..", "io", "worker-thread.bundle.js");
 
-for (const db of DATABASES) {
+for (const db of sqliteOnly ? ["sqlite"] as const : DATABASES) {
   const from = join(root, "packages", db);
   const to = join(dist, db);
   mkdirSync(to);

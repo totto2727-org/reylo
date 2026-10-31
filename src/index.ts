@@ -1,6 +1,6 @@
 // The runtime query object behind `import query from "./file.sql"`.
 // Types come from the content mapper; values come from the runtime loader.
-import { compile, execute, executeSync, rawStatement, type ClientFor, type Dialect, type Inputs, type QueryModule, type SyncClientFor } from "./execute.ts";
+import { compile, execute, executeSync, type ClientFor, type Dialect, type Inputs, type QueryModule, type SyncClientFor } from "./execute.ts";
 import type { StandardJSONSchemaV1, StandardTypedV1 } from "./standard.ts";
 import { standardQuery, type StandardQueryV1 } from "./standard-query.ts";
 import type { Structured } from "./rows.ts";
@@ -96,12 +96,6 @@ export interface Query<Params, Row, C extends Cardinality, D extends Dialect, E 
   try(client: ClientFor<D>, ...params: ParamsArg<Params>): Promise<TryResult<Materialize<Row, C>, E>>;
   /** `try` on a synchronous SQLite client, as `runSync`: it returns the result itself. */
   trySync(client: SyncClientFor<D>, ...params: ParamsArg<Params>): TryResult<Materialize<Row, C>, E>;
-  /**
-   * Binds a SQLite query without executing it, using `.run()`'s parameter checks and encoding.
-   * Pass the SQL and ordered values to a native prepared-statement batch. Does not check the
-   * live schema or decode results. Other dialects are refused.
-   */
-  compile(this: Query<Params, Row, C, "sqlite", E>, ...params: ParamsArg<Params>): { readonly sql: string; readonly parameters: readonly unknown[] };
   /** The statement bound to a client, such as a transaction: `const get = q.with(tx); await get({ id: 1 })`. */
   with(client: ClientFor<D>): (...params: ParamsArg<Params>) => Promise<Materialize<Row, C>>;
 }
@@ -222,15 +216,6 @@ export function defineQuery<Params, Row, C extends Cardinality, D extends Dialec
         throw error;
       }
     }) as Query<Params, Row, C, D>["trySync"],
-    compile: ((params?: Params) => {
-      try {
-        if (def.dialect !== "sqlite") throw new TypeError("compile currently supports SQLite queries only.");
-        const { text, values } = rawStatement(module, params ?? {});
-        return { sql: text, parameters: values };
-      } catch (error) {
-        throw named(error);
-      }
-    }) as Query<Params, Row, C, D>["compile"],
     with: ((client: ClientFor<D>) => (params?: Params) => run(client, params ?? ({} as Params))) as Query<Params, Row, C, D>["with"],
   };
   // `.run()`, `.try()` and the function `.with()` returns, published on the tracing channel as one

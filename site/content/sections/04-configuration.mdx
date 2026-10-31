@@ -36,6 +36,16 @@ DATABASE_URL=mysql://root@localhost:3306/app
 DATABASE_URL=file:./app.db
 ```
 
+For SQLite, the fork also accepts one local Atlas HCL schema instead of a database file. The path starts at the project's `package.json`:
+
+```yaml title=".reylo.yaml"
+direct_url: hcl:./schema.hcl
+```
+
+Install the Atlas CLI and make `atlas` available on `PATH` for the type check and builds. Atlas evaluates the file against an in-memory SQLite dev database, and Reylo analyzes the resulting schema in memory. No application database is opened or created, and no migration runs. Changes to the HCL file invalidate its analysis cache. An unreadable or invalid file, or a failed Atlas evaluation, is an analysis error rather than an offline-cache fallback.
+
+The HCL source is only for analysis. The application still supplies its own SQLite or D1 client at runtime and manages its schema and migrations. Generated query modules do not need Atlas or the HCL file at runtime.
+
 Point it at a direct connection, not a pooler: describing a query through a pooler in transaction mode, such as PgBouncer's, can fail. You can interpolate other variables from your environment to construct a connection string.
 
 ```yaml title=".reylo.yaml"
