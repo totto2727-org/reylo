@@ -2,6 +2,7 @@
   "name": "@totto2727/reylo",
   "version": "0.6.0",
   "private": true,
+  "publishConfig": { "access": "public", "registry": "https://registry.npmjs.org/" },
   "description": "Import SQL files as fully typed queries. A TypeScript content mapper plus a runtime loader.",
   "license": "MIT",
   "author": "Colin McDonnell",

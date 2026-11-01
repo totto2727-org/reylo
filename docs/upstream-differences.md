@@ -83,11 +83,13 @@ No duplicate compiler, custom execution driver or toolchain migration is require
 
 ## Fork npm publication
 
-`.github/workflows/publish.yml` stages the five scoped distributions after pushes to `main` or a manual run on `main`.
-It reuses the upstream Nub, Node, full distribution build, and npm staging helper instead of introducing Nix or Vite+ into the fork toolchain.
-The upstream release workflow remains unchanged and is not the supported fork publication entry point.
+`.github/workflows/publish.yml` uses the library template's `v*` tag trigger and shared `setup-nix`, `setup-typescript`, and `publish-npm` actions.
+Nub retains the upstream full distribution build, and the shared publisher stages each built engine before the runtime.
+The minimal `flake.nix` supplies only the empty Linux shell required by the shared publisher, using the library template's locked Nixpkgs input.
+It installs no JavaScript runtime, package manager, or build tool through Nix.
+The package manifests declare public npm publication without changing source-package privacy.
+The upstream release workflow remains unchanged and is not the fork's publication entry point.
 Publication requires the npm scope owner's trusted-publisher configuration and separate npm approval of staged versions.
-No package is published merely by adding this workflow.
-See [the publishing guide](publishing.md) for setup, approval order, and partial-failure handling.
+See [the publishing guide](publishing.md) for setup and package boundaries.
 
 When syncing upstream, update the exact base hash above and maintain this record with the retained source changes.

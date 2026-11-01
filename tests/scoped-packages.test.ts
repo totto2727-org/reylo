@@ -31,3 +31,11 @@ test("the scoped public runtime preserves the Standard Query contract", () => {
   assert.deepEqual(query.encode({ id: 7 }), [7]);
   assert.deepEqual(query.decode([[7]]), { id: 7 });
 });
+
+test("source packages stay private while distributions target public npm publication", () => {
+  for (const path of ["../package.json", ...["postgres", "sqlite", "mysql", "duckdb"].map((dialect) => `../packages/${dialect}/package.json`)]) {
+    const source = JSON.parse(readFileSync(new URL(path, import.meta.url), "utf8"));
+    assert.equal(source.private, true);
+    assert.deepEqual(source.publishConfig, { access: "public", registry: "https://registry.npmjs.org/" });
+  }
+});

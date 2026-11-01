@@ -2,6 +2,7 @@
   "name": "@totto2727/reylo-duckdb",
   "version": "0.6.0",
   "private": true,
+  "publishConfig": { "access": "public", "registry": "https://registry.npmjs.org/" },
   "description": "Reylo's analysis engine for DuckDB: the WebAssembly artifact and the build steps reylo loads to type .sql files against a DuckDB database, through the app's own @duckdb/node-api. Install it beside reylo, at reylo's version.",
   "license": "MIT",
   "author": "Colin McDonnell",

@@ -1,65 +1,39 @@
-name: Stage fork packages on npm
+name: Publish to npm
 
 on:
   push:
-    branches: [main]
-  workflow_dispatch:
-
-permissions:
-  contents: read
-
-concurrency:
-  group: npm-publish
-  cancel-in-progress: false
+    tags: ['v*']
 
 jobs:
-  stage:
-    if: github.repository == 'totto2727-org/reylo'
+  publish:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
-    environment: npm
+    timeout-minutes: 15
     permissions:
       contents: read
       id-token: write
     steps:
-      - name: Require public main
-        env:
-          PRIVATE: ${{ github.event.repository.private }}
-        run: |
-          [ "$GITHUB_REF" = "refs/heads/main" ] || { echo "::error::Only main can stage packages"; exit 1; }
-          [ "$PRIVATE" = "false" ] || { echo "::error::npm provenance requires a public source repository"; exit 1; }
-
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-
-      - name: Set up Nub
-        uses: nubjs/setup-nub@c7b970ec04655a2f0a111cd436cc182a3b660e7a # v0.6.0
+      - uses: actions/checkout@v4
+      - uses: totto2727-org/monorepo/.github/actions/setup-nix@main
+      - uses: totto2727-org/monorepo/.github/actions/setup-typescript@main
+      - uses: nubjs/setup-nub@c7b970ec04655a2f0a111cd436cc182a3b660e7a # v0.6.0
         with:
-          nub-version: "0.9.6"
-          node-version: "24"
-          registry-url: https://registry.npmjs.org/
-
-      - name: Install npm with staging support
-        run: | # zizmor: ignore[adhoc-packages] npm itself, matching the upstream release workflow
-          npm install -g npm@11
-          v="$(npm --version)"
-          [ "$(printf '%s\n11.15.0\n' "$v" | sort -V | head -1)" = "11.15.0" ] \
-            || { echo "::error::npm $v cannot stage (need >= 11.15.0)"; exit 1; }
-          echo "npm $v at $(command -v npm)"
-
-      - run: nub install --frozen-lockfile
+          nub-version: '0.9.6'
+          node-version: '24'
       - run: nub install --frozen-lockfile
         working-directory: site
       - run: nub run build
-
-      - name: Resolve the version
-        id: version
-        run: echo "version=$(nub --node -p "require('./dist/reylo/package.json').version")" >> "$GITHUB_OUTPUT"
-
-      - name: Stage engines and runtime
-        env:
-          VERSION: ${{ steps.version.outputs.version }}
-        run: |
-          for dir in dist/postgres dist/sqlite dist/mysql dist/duckdb dist/reylo; do
-            bash .github/scripts/npm-stage-publish.sh "$dir" --provenance --access public
-          done
-          echo 'Packages are staged or already present. A maintainer must approve staged versions on npm before they become installable.' >> "$GITHUB_STEP_SUMMARY"
+      - uses: totto2727-org/monorepo/.github/actions/publish-npm@main
+        with:
+          working-directory: dist/postgres
+      - uses: totto2727-org/monorepo/.github/actions/publish-npm@main
+        with:
+          working-directory: dist/sqlite
+      - uses: totto2727-org/monorepo/.github/actions/publish-npm@main
+        with:
+          working-directory: dist/mysql
+      - uses: totto2727-org/monorepo/.github/actions/publish-npm@main
+        with:
+          working-directory: dist/duckdb
+      - uses: totto2727-org/monorepo/.github/actions/publish-npm@main
+        with:
+          working-directory: dist/reylo

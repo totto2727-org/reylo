@@ -1,78 +1,39 @@
 # Publish fork packages
 
-This guide is for fork maintainers who stage and approve npm releases.
-The fork uses `.github/workflows/publish.yml` to stage these public packages:
+Maintainers publish built distributions with the same shared actions as `template/vite-plus-lib/.github/workflows/publish.yml.disabled`.
 
-- `@totto2727/reylo`
-- `@totto2727/reylo-postgres`
-- `@totto2727/reylo-sqlite`
-- `@totto2727/reylo-mysql`
-- `@totto2727/reylo-duckdb`
+## Packages
 
-## Configure trusted publishing
+| Distribution | Package | Fork changes |
+| --- | --- | --- |
+| `dist/reylo` | `@totto2727/reylo` | HCL source integration and scoped module references |
+| `dist/sqlite` | `@totto2727/reylo-sqlite` | Static Atlas HCL analysis and scoped references |
+| `dist/postgres` | `@totto2727/reylo-postgres` | Scoped references and the shared tooling bundle |
+| `dist/mysql` | `@totto2727/reylo-mysql` | Scoped references and the shared tooling bundle |
+| `dist/duckdb` | `@totto2727/reylo-duckdb` | Scoped references and the shared tooling bundle |
 
-Before the first release, an npm package owner must configure each package separately.
-The owner must have permission to publish public packages in the `@totto2727` scope.
-If npm requires an initial package version before it permits trusted-publisher configuration, complete that initial setup separately as the package owner.
-The workflow does not create package ownership or supply a bootstrap token.
+An SQLite consumer installs the runtime and SQLite engine at the same version.
+The workflow retains all four upstream engines without changing their inference rules.
 
-For each package, configure a GitHub Actions trusted publisher with these exact values:
+## Setup
 
-| Setting | Value |
-| --- | --- |
-| Repository owner | `totto2727-org` |
-| Repository | `reylo` |
-| Workflow filename | `publish.yml` |
-| Environment | `npm` |
-| Publication permission | Stage only |
+- Configure npm trusted publishing for each package: repository `totto2727-org/reylo`, workflow `publish.yml`, without a GitHub environment.
+- Keep the repository public for provenance.
+- Complete any initial package ownership setup as the npm scope owner.
+- Use stage-only publishing permissions and approve staged versions on npm.
 
-Create the `npm` GitHub environment in `totto2727-org/reylo`.
-Restrict its deployment branches to `main` and configure required reviewers for release approval.
-Keep the repository public for npm provenance.
-The workflow requests `contents: read` and `id-token: write` and uses OIDC authentication.
-It does not require an `NPM_TOKEN`, a deploy key, or release-tag credentials.
-Trusted-publisher setup is required to stage packages, but does not prevent workflow implementation or local build checks.
+## Release
 
-## Stage a version
+1. Pass CI and set the same version in the root and all four engine manifests.
+2. Push the corresponding `v*` tag, as in the library template.
+3. Inspect the staged versions on npm and approve the engines before the runtime.
 
-1. Confirm that the intended commit passes the repository's CI checks.
-2. Set the same version in the root manifest and all four engine manifests, including the root's exact-version engine peers.
-3. Merge the release changes into `main`.
-4. Approve the `npm` environment deployment when GitHub requests it.
+The workflow uses shared `setup-nix`, `setup-typescript`, and `publish-npm` actions.
+Nub still builds the upstream distributions, including the playground, after installing `site/` dependencies.
+The empty Nix shell satisfies the shared publisher's `nix print-dev-env` contract and manages no JavaScript runtime or package manager.
+The lockfile uses the library template's pinned Nixpkgs input.
 
-A push to `main` starts the workflow.
-To retry a version, select **Stage fork packages on npm** in GitHub Actions and run it with the `main` branch selected.
-Manual runs from other branches fail before checkout or installation.
-Do not start a retry until an earlier run has finished.
-The workflow serializes runs and does not cancel a run that is already staging packages.
-
-The workflow retains nub 0.9.6 on Node 24.
-It installs the root and `site/` dependencies with frozen lockfiles, then runs the complete upstream build.
-The npm CLI must be at least 11.15.0 for staging support.
-The workflow follows upstream's npm 11 installation and checks this minimum version explicitly.
-It does not use the shared monorepo publisher because that action requires Nix and Vite+.
-
-The build writes five distributions under `dist/` and checks that their versions agree.
-Source manifests remain private to prevent accidental source publication.
-Only the generated distributions are staged with provenance and public access.
-The engines are staged first, in PostgreSQL, SQLite, MySQL, and DuckDB order, followed by the runtime.
-No Rust or WebAssembly rebuild is added to this workflow.
-
-## Approve staged packages
-
-A successful workflow does not mean that a new version is available to install.
-The inherited staging helper skips versions already served by npm and accepts conflicts that indicate an existing staged or published version.
-Check the npm staged queue for each of the five package names.
-An npm maintainer must approve the staged engine versions first and the runtime version last, with the required npm two-factor authentication.
-Use npm's staged-package interface or the npm staging commands from the maintainer's own authenticated terminal.
-GitHub environment approval alone does not approve packages on npm.
-After approval, confirm that npm serves all five packages at the intended version before announcing the release.
-
-A partial failure can leave some engines staged without the runtime.
-Inspect the failed job, correct the cause, then rerun the workflow on `main`.
-The inherited `.github/scripts/npm-stage-publish.sh` handles versions already present or already staged.
-Do not assume that a conflict proves that npm serves the intended package contents.
-
-The upstream `.github/workflows/release.yml` remains unchanged.
-It is not the supported fork publication entry point and requires separate upstream release configuration.
-This fork workflow does not create Git tags, GitHub releases, or move the documentation release branch.
+Each engine is staged before the runtime through `publish-npm` with its own distribution directory.
+A partial failure can leave some versions staged, so inspect npm before retrying.
+The upstream `release.yml` remains unchanged and is not the fork's publication entry point.
+No workflow run or package publication is performed as part of this configuration change.
