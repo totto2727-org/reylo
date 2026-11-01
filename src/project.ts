@@ -24,6 +24,7 @@ export type Dialect = "postgres" | "sqlite" | "mysql" | "duckdb";
 export type ProjectFile = {
   /** Never the type check's connection: read only to say so. */
   url?: string;
+  /** A database URL, or hcl:./schema.hcl for a local Atlas SQLite schema. */
   direct_url?: string;
   env?: string[];
   strict_params?: boolean;
@@ -57,7 +58,7 @@ export type ResolvedProject = {
    * command failed, whose failure is then `error`.
    */
   refreshUrl: (() => string | undefined) | undefined;
-  /** The files a change to which changes the project: the project file and the `.env` files. */
+  /** The files a change to which changes the project: the project file, `.env` files and any HCL source. */
   watched: string[];
   /** Why the project cannot be used, already placed (`.reylo.yaml:3:1: ...`); every transform reports it. */
   error: string | undefined;
@@ -120,7 +121,16 @@ export function dialectOf(url: string): Dialect | undefined {
   if (scheme === "mysql" || scheme === "mariadb") return "mysql";
   if (scheme === "file" || scheme === "sqlite") return "sqlite";
   if (scheme === "duckdb") return "duckdb";
+  if (scheme === "hcl") return "sqlite";
   return undefined;
+}
+
+/** A single local Atlas HCL schema, never a database file or a remote source. */
+export function hclPath(url: string, root: string): string | undefined {
+  if (!url.toLowerCase().startsWith("hcl:")) return undefined;
+  const path = url.slice(4);
+  if (!path || path.startsWith("//") || path.includes("?") || path.includes("#") || path.includes("\0") || !path.endsWith(".hcl")) throw new Error("An hcl: source must name one local .hcl file, for example hcl:./schema.hcl.");
+  return resolve(root, path);
 }
 
 export function readEnvFile(path: string): Record<string, string> {
@@ -354,9 +364,15 @@ export function resolveProject(engine: Engine | MissingEngine, projectDir: strin
     if (hit) urlSource = hit.source;
   }
   let dialect = url ? dialectOf(url) : "postgres";
-  if (url && !dialect) error ??= `Cannot tell the database from the URL (${urlSource}): reylo reads postgres://, postgresql://, mysql://, file:, sqlite: and duckdb: URLs.`;
+  if (url && !dialect) error ??= `Cannot tell the database from the URL (${urlSource}): reylo reads postgres://, postgresql://, mysql://, file:, sqlite:, duckdb: and hcl: URLs.`;
   // Either name, created or removed, changes the project.
   const watched = [...new Set([...(file ? [file] : []), ...both]), ...envFiles];
+  try {
+    const source = url && hclPath(url, root);
+    if (source) watched.push(source);
+  } catch (e) {
+    error ??= `${urlSource}: ${(e as Error).message}`;
+  }
   // No URL names the database: the engine the project installed does, when it installed one, for
   // `.reylo/`, which a build with no URL reads (src/analyze.ts).
   const installed = url ? [] : installedEngines(root);

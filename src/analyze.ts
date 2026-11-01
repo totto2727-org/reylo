@@ -8,10 +8,10 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, w
 import { createHash } from "node:crypto";
 import { join } from "node:path";
 import { anyEngine, AnswerCache, engine, reason, MissingEngine, Unreachable, type Analysis, type Engine, type Lexed } from "./engine.ts";
-import { duckdbPath, packageDir, resolveProject, sqlitePath, type ResolvedProject } from "./project.ts";
+import { duckdbPath, hclPath, packageDir, resolveProject, sqlitePath, type ResolvedProject } from "./project.ts";
 import { duckdbDatabase } from "./duckdb.ts";
 import { NotMysql, refusedLogin } from "./connection.ts";
-import { openProjectDrivers, placeRefusal, type SqliteDriver } from "./sqlite-drivers.ts";
+import type { SqliteDriver } from "./sqlite-drivers.ts";
 
 /** What `.reylo/` holds for one statement. */
 export type Entry = {
@@ -77,6 +77,7 @@ export class Session {
   #busy = 0;
   #timer: ReturnType<typeof setTimeout> | undefined;
   #schema: { value: string | null; at: number; error?: string; fatal?: boolean } | undefined;
+  #hclHash: string | undefined;
 
   private constructor(engine: Engine | MissingEngine, project: ResolvedProject, idle: number, dir: string, env: Record<string, string | undefined>) {
     this.root = project.root;
@@ -211,6 +212,7 @@ export class Session {
     for (const driver of io?.drivers ?? []) {
       const refusal = await driver.refuses(analysis.rewritten.sql, analysis.rewritten.order.length);
       if (refusal === undefined) continue;
+      const { placeRefusal } = await import("./sqlite-drivers.ts");
       const { start, length } = placeRefusal(sql, refusal);
       const message = driver.says(refusal);
       return { ...outcome, analysis: { ...analysis, diagnostics: [{ message, start, length, code: 6 }] } };
@@ -269,6 +271,22 @@ export class Session {
    */
   async schema(): Promise<{ value: string | null; error?: string; fatal?: boolean }> {
     const now = Date.now();
+    const source = this.project.url && hclPath(this.project.url, this.root);
+    if (source) {
+      // Unlike a remote database, a local source is checked before every cache hit, without a TTL.
+      try {
+        const hash = sha256(readFileSync(source, "utf8"));
+        if (hash !== this.#hclHash || this.#schema?.value === null) {
+          await this.#release();
+          this.#schema = undefined;
+          this.#hclHash = hash;
+        }
+      } catch (e) {
+        await this.#release();
+        this.#schema = { value: null, at: now, error: `Cannot read HCL schema ${source}: ${(e as Error).message}`, fatal: true };
+        return this.#schema;
+      }
+    }
     if (this.#schema && now - this.#schema.at < (this.#schema.value === null ? OFFLINE_TTL : SCHEMA_TTL)) return this.#schema;
     const pending = this.#connection();
     let io: Io;
@@ -280,13 +298,17 @@ export class Session {
       return this.#schema;
     }
     try {
-      const rows = await io.query(FINGERPRINT[this.project.dialect], []);
-      const value = createHash("sha256").update(JSON.stringify(rows)).digest("hex").slice(0, 16);
+      // HCL is the complete schema source. Its content hash replaces a live catalog fingerprint.
+      const rows = source ? [] : await io.query(FINGERPRINT[this.project.dialect], []);
+      const value = createHash("sha256").update(JSON.stringify(source ? [this.#hclHash, rows] : rows)).digest("hex").slice(0, 16);
       // The engine's answers describe the old schema too.
       if (this.#schema?.value && this.#schema.value !== value) await io.forget().catch(() => {});
       this.#schema = { value, at: now };
     } catch (e) {
-      if (e instanceof Unreachable) {
+      if (source) {
+        this.#drop(pending);
+        this.#schema = { value: null, at: now, error: (e as Error).message, fatal: true };
+      } else if (e instanceof Unreachable) {
         this.#drop(pending);
         this.#schema = { value: null, at: now, error: reason(e) };
       } else {
@@ -320,6 +342,8 @@ export class Session {
   #server(): string {
     const { dialect, url, root } = this.project;
     if (!url) return "";
+    const source = hclPath(url, root);
+    if (source) return `hcl:${source}`;
     if (dialect === "sqlite") return sqlitePath(url, root);
     if (dialect === "duckdb") return duckdbPath(url, root);
     try {
@@ -440,6 +464,8 @@ export class Session {
     const { dialect, root } = this.project;
     // The URL names a database whose engine the project lacks: its error, as the import's.
     if (this.#engine instanceof MissingEngine) throw this.#engine;
+    const source = hclPath(url, root);
+    if (source) return (await import("./hcl.ts")).hclCatalog(source, this.#engine);
     // DuckDB runs inside the app: the engine's needs are answered by the project's own DuckDB
     // (src/duckdb.ts), which opens the file for each analysis and holds nothing between them.
     if (dialect === "duckdb") {
@@ -459,7 +485,7 @@ export class Session {
     const c = await this.#engine.open(target);
     let drivers: SqliteDriver[] | undefined;
     try {
-      drivers = dialect === "sqlite" ? await openProjectDrivers(root, target) : undefined;
+      drivers = dialect === "sqlite" ? await (await import("./sqlite-drivers.ts")).openProjectDrivers(root, target) : undefined;
     } catch (e) {
       await c.close();
       throw e;

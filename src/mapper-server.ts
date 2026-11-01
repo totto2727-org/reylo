@@ -3,11 +3,12 @@
 // database, the engine, the `.reylo/` cache shared with the bundler plugins and `reylo generate`)
 // is `src/analyze.ts`; this file renders it as types and places its diagnostics in the file.
 import { createHash } from "node:crypto";
+import { readFileSync } from "node:fs";
 import { dirname, relative, sep } from "node:path";
 import { serve } from "./rpc.ts";
 import { anyEngine, type Lexed } from "./engine.ts";
 import { moduleTypes, queryErrorType, withinFile } from "./module-types.ts";
-import { PROJECT_FILE, PROJECT_FILES, resolveProject } from "./project.ts";
+import { hclPath, PROJECT_FILE, PROJECT_FILES, resolveProject } from "./project.ts";
 import { Session } from "./analyze.ts";
 import { docComment, leadingComment, statementAfter } from "./doc-comment.ts";
 
@@ -68,7 +69,14 @@ export function mapperHandlers(): MapperHandlers {
       const projectFile = resolved.file ? relative(projectDir, resolved.file).split(sep).join("/") || resolved.file : PROJECT_FILE;
       const optionDiagnostics = Object.keys(p.options ?? {}).map((key) => ({ path: [key], messageText: `reylo reads its settings from ${projectFile}, not from the content mapper's options; move "${key}" there.`, code: 104 }));
       projects.set(p.projectHandle, { strictParams: resolved.strictParams, projectFile, session: Session.open(projectDir) });
-      const configIdentity = createHash("sha1").update(JSON.stringify([resolved.file ?? null, resolved.dialect, resolved.strictParams, resolved.url ?? null, resolved.error ?? null, p.options ?? null])).digest("hex");
+      let schemaIdentity: string | undefined;
+      try {
+        const source = resolved.url && hclPath(resolved.url, resolved.root);
+        if (source) schemaIdentity = createHash("sha1").update(readFileSync(source)).digest("hex");
+      } catch {
+        schemaIdentity = "unreadable HCL source";
+      }
+      const configIdentity = createHash("sha1").update(JSON.stringify([resolved.file ?? null, resolved.dialect, resolved.strictParams, resolved.url ?? null, resolved.error ?? null, p.options ?? null, ...(schemaIdentity ? [schemaIdentity] : [])])).digest("hex");
       return { configIdentity, watchedFiles: resolved.watched, optionDiagnostics };
     },
     async transform(params) {

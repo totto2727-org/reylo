@@ -2,7 +2,7 @@
 title: "Usage"
 ---
 
-{/* Usage is basic usage only: the first example, then one h3 per member of an imported query (.sql, .run(), .runSync(), .try(), .with()). Anything else, such as tracing, goes in a section of its own or in the FAQ, never under Usage. */}
+{/* Usage is basic usage only: the first example, then one h3 per member of an imported query (.sql, .run(), ~standard.query, .runSync(), .try(), .with()). Anything else, such as tracing, goes in a section of its own or in the FAQ, never under Usage. */}
 
 ## Usage
 
@@ -580,7 +580,7 @@ const db = drizzle("app.db");
 db.transaction((tx) => getUser.runSync(tx, { id: 1 }));
 ```
 
-D1 has no transaction a query can join: its `batch()` takes D1's own prepared statements.
+D1 has no transaction a query can join: its `batch()` takes D1's own prepared statements. Use [Standard Query bindings](#native-batches) to prepare a query before adding it to a native batch.
 
 #### DuckDB [#duckdb-drivers]
 
@@ -606,6 +606,25 @@ try {
   throw error;
 }
 ```
+
+### Standard Query native batches [#native-batches]
+
+Every query exposes the existing Standard Query interface. For SQLite or D1 native batches, use its statement text and encoded parameters with the driver's own prepared statements:
+
+```ts
+import getUser from "./get_user.sql";
+
+const statement = getUser["~standard"].query;
+const first = env.DB.prepare(statement.text).bind(...statement.encode({ id: 1 }));
+const second = env.DB.prepare(statement.text).bind(...statement.encode({ id: 2 }));
+await env.DB.batch([first, second]);
+```
+
+Encoding applies the existing parameter checks and conversions. The encoder accepts unknown input and validates it at runtime. A generic typed consumer can use `StandardQueryV1.InferArgs<Q>` from `reylo` to preserve a query's inferred input types.
+
+The driver owns execution, the batch and its transaction boundaries. Prepare and encode every statement before submitting the batch. Driver errors still come from the driver, and its results are raw. To apply Reylo's decoding and cardinality, pass rows as arrays of raw column values in selection order to `statement.decode()`.
+
+Standard Query does not check whether the live schema still matches the analysis. Keep migrations and query analysis in sync. Driver-specific limits still apply, including D1's limits on large integers and binary values. Use each dialect's own driver and raw-value representation. No custom compilation API or D1 driver is needed.
 
 ### `.runSync()`
 
