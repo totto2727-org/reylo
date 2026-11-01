@@ -206,6 +206,6 @@ async function built(root: string, name: string, sql: string) {
   writeFileSync(file, sql);
   const { code } = await sqlModule(file, sql);
   const out = join(root, `${name}.mjs`);
-  writeFileSync(out, code.replace(`from "reylo"`, `from ${JSON.stringify(INDEX)}`));
+  writeFileSync(out, code.replace(`from "@totto2727/reylo"`, `from ${JSON.stringify(INDEX)}`));
   return (await import(`${pathToFileURL(out).href}?${Math.random()}`)).default;
 }

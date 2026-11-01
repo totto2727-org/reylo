@@ -135,7 +135,7 @@ async function render(session: Session, source: string, written: string, sql: st
     const prose = leading.prose;
     const shown = statementAfter(written, leading);
     return [
-      `import type { Query } from "reylo";`,
+      `import type { Query } from "@totto2727/reylo";`,
       `export type Params = ${paramsType};`,
       `export type Row = ${rowType};`,
       `export type QueryError = ${queryError};`,

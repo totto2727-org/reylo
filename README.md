@@ -10,7 +10,7 @@
 <p align="center">
   <a href="https://github.com/colinhacks/reylo/actions/workflows/test.yml"><img src="https://github.com/colinhacks/reylo/actions/workflows/test.yml/badge.svg?branch=main" alt="test status" /></a>
   <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/github/license/colinhacks/reylo?style=flat" alt="License: MIT" /></a>
-  <a href="https://www.npmjs.com/package/reylo"><img src="https://img.shields.io/github/v/release/colinhacks/reylo?label=npm" alt="npm version" /></a>
+  <a href="https://www.npmjs.com/package/@totto2727/reylo"><img src="https://img.shields.io/npm/v/%40totto2727%2Freylo" alt="npm version" /></a>
   <a href="https://github.com/colinhacks/reylo"><img src="https://img.shields.io/github/stars/colinhacks/reylo" alt="GitHub stars" /></a>
 </p>
 
@@ -73,8 +73,8 @@ To install Reylo, you'll need:
 Install Reylo, the engine for your database and TypeScript 7.1:
 
 ```sh
-npm install reylo
-npm install -D @reylosql/postgres  # or mysql, sqlite, duckdb
+npm install @totto2727/reylo
+npm install -D @totto2727/reylo-postgres  # or @totto2727/reylo-mysql, @totto2727/reylo-sqlite, @totto2727/reylo-duckdb
 npm install -D typescript@beta
 ```
 
@@ -85,7 +85,7 @@ Add Reylo to `tsconfig.json`, for `.sql` files and for its project file, `.reylo
 {
   "compilerOptions": { /* ... */ },
   "contentMappers": [
-    { "package": "reylo", "extensions": [".sql", ".reylo.yaml", ".reylo.yml"] }
+    { "package": "@totto2727/reylo", "extensions": [".sql", ".reylo.yaml", ".reylo.yml"] }
   ]
 }
 ```
@@ -111,7 +111,7 @@ DATABASE_URL=postgres://localhost:5432/app  # or mysql://…, file:./app.db for 
 To make `.sql` imports work at run time too, load Reylo where your code runs. On Node:
 
 ```sh
-node --env-file=.env --import reylo/register main.ts
+node --env-file=.env --import @totto2727/reylo/register main.ts
 ```
 
 For Bun, Nub, Vite, Next.js, esbuild, webpack, Rspack, Cloudflare Workers and Jest, add [the plugin for your setup](https://reylo.dev/#plugins), or copy its complete [example project](https://github.com/colinhacks/reylo/tree/main/examples). To see the types as you type, set up [your editor](https://reylo.dev/#editors).

@@ -31,7 +31,7 @@ async function built(root: string, name: string, raw: string) {
   writeFileSync(file, raw);
   const { code } = await sqlModule(file, raw);
   const out = join(root, `${name}.mjs`);
-  writeFileSync(out, code.replace(`from "reylo"`, `from ${JSON.stringify(INDEX)}`));
+  writeFileSync(out, code.replace(`from "@totto2727/reylo"`, `from ${JSON.stringify(INDEX)}`));
   return (await import(pathToFileURL(out).href)) as { default: { sql: string; raw: string; "~standard": { query: { text: string } }; run(client: unknown, params?: unknown): Promise<unknown> }; sql: string; raw: string };
 }
 
@@ -120,7 +120,7 @@ test("SQLite: a statement that fires no trigger declares its QueryError narrowed
     const declared = await declarations(root, { "insert_user.sql": insert, "insert_audited.sql": audited });
     const queryError = (file: string) => /^export type QueryError = ([\s\S]*?>);$/m.exec(declared[file]!)![1];
     assert.equal(queryError("insert_user.sql"), [
-      `import("reylo").SqliteQueryError<{`,
+      `import("@totto2727/reylo").SqliteQueryError<{`,
       `  "SQLITE_CONSTRAINT": { columns: readonly ["email"] | readonly ["id"] | readonly ["rowid"]; table: "users" };`,
       `  "SQLITE_CONSTRAINT_NOTNULL": { columns: readonly ["email"] | readonly ["id"]; table: "users" };`,
       `  "SQLITE_CONSTRAINT_PRIMARYKEY": { columns: readonly ["id"]; table: "users" };`,
@@ -128,7 +128,7 @@ test("SQLite: a statement that fires no trigger declares its QueryError narrowed
       `  "SQLITE_CONSTRAINT_UNIQUE": { columns: readonly ["email"]; table: "users" };`,
       `}>`,
     ].join("\n"));
-    assert.equal(queryError("insert_audited.sql"), `import("reylo").QueryError<"sqlite">`);
+    assert.equal(queryError("insert_audited.sql"), `import("@totto2727/reylo").QueryError<"sqlite">`);
   } finally {
     await closeSessions();
   }
@@ -187,14 +187,14 @@ test("Postgres: a statement that runs only the server's own code declares its Qu
     const declared = await declarations(root, { "insert_user.sql": insert, "insert_audited.sql": audited, "list_users.sql": select });
     const queryError = (file: string) => /^export type QueryError = ([\s\S]*?>);$/m.exec(declared[file]!)![1];
     assert.equal(queryError("insert_user.sql"), [
-      `import("reylo").PostgresQueryError<{`,
+      `import("@totto2727/reylo").PostgresQueryError<{`,
       `  "23502": { column: "email" | "id"; table: "users" };`,
       `  "23505": { constraint: "users_email_key" | "users_pkey"; table: "users" };`,
       `  "23514": { constraint: "adult"; table: "users" };`,
       `}>`,
     ].join("\n"));
-    assert.equal(queryError("insert_audited.sql"), `import("reylo").QueryError<"postgres">`);
-    assert.equal(queryError("list_users.sql"), `import("reylo").PostgresQueryError<{}>`);
+    assert.equal(queryError("insert_audited.sql"), `import("@totto2727/reylo").QueryError<"postgres">`);
+    assert.equal(queryError("list_users.sql"), `import("@totto2727/reylo").PostgresQueryError<{}>`);
     assert.match(declared["insert_user.sql"]!, /^declare const query: Query<.*, "none", "postgres", QueryError> & \{$/m);
   } finally {
     await closeSessions();

@@ -1,6 +1,6 @@
 // The analysis engine: one WebAssembly component per database, in the `engine/` directory of the
-// database's npm package (`@reylosql/postgres`, `@reylosql/sqlite`, `@reylosql/mysql`,
-// `@reylosql/duckdb`), which a
+// database's npm package (`@totto2727/reylo-postgres`, `@totto2727/reylo-sqlite`, `@totto2727/reylo-mysql`,
+// `@totto2727/reylo-duckdb`), which a
 // project installs beside reylo and which is found from the project first, then from reylo's own
 // install; each loads once per process. The engine connects to the database itself: the analysis
 // of a statement is one request on a connection it opened (engine/native, built as a component by
@@ -29,7 +29,7 @@ export { AnswerCache, EngineCore } from "./engine-core.ts";
  * version, so a project installs the ones for its databases. Every one carries the same core, which
  * lexes and reads the project file.
  */
-export const ENGINE_PACKAGES: Record<Dialect, string> = { postgres: "@reylosql/postgres", sqlite: "@reylosql/sqlite", mysql: "@reylosql/mysql", duckdb: "@reylosql/duckdb" };
+export const ENGINE_PACKAGES: Record<Dialect, string> = { postgres: "@totto2727/reylo-postgres", sqlite: "@totto2727/reylo-sqlite", mysql: "@totto2727/reylo-mysql", duckdb: "@totto2727/reylo-duckdb" };
 
 /**
  * The version of reylo, which every engine package it loads must have: that of the package this
@@ -60,7 +60,7 @@ export class MissingEngine extends Error {
 
   /** No engine at all, so not even the project file can be read. */
   static none(): MissingEngine {
-    return new MissingEngine(`reylo reads the project file with a database's engine, and none is installed: npm install -D @reylosql/postgres, @reylosql/mysql, @reylosql/sqlite or @reylosql/duckdb, the one for your database`);
+    return new MissingEngine(`reylo reads the project file with a database's engine, and none is installed: npm install -D @totto2727/reylo-postgres, @totto2727/reylo-mysql, @totto2727/reylo-sqlite or @totto2727/reylo-duckdb, the one for your database`);
   }
 }
 

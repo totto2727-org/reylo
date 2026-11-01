@@ -11,11 +11,11 @@ importers:
       pg:
         specifier: ^8.23.1
         version: 8.23.1
-      reylo:
+      '@totto2727/reylo':
         specifier: link:../../dist/reylo
         version: link:../../dist/reylo
     devDependencies:
-      '@reylosql/postgres':
+      '@totto2727/reylo-postgres':
         specifier: link:../../dist/postgres
         version: link:../../dist/postgres
       '@rspack/cli':

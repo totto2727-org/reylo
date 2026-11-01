@@ -9,6 +9,6 @@
     "verbatimModuleSyntax": true,
     "erasableSyntaxOnly": true
   },
-  "contentMappers": [{ "package": "reylo", "extensions": [".sql", ".reylo.yaml", ".reylo.yml"] }],
+  "contentMappers": [{ "package": "@totto2727/reylo", "extensions": [".sql", ".reylo.yaml", ".reylo.yml"] }],
   "include": ["src", "queries", "setup.ts"]
 }

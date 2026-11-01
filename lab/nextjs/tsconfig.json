@@ -26,7 +26,7 @@
   },
   "contentMappers": [
     {
-      "package": "reylo",
+      "package": "@totto2727/reylo",
       "extensions": [
         ".sql"
       ]

@@ -5,15 +5,15 @@
   "scripts": {
     "setup": "node --env-file-if-exists=.env setup.ts",
     "typecheck": "tsc --noEmit --runExternalCode",
-    "start": "node --env-file-if-exists=.env --import reylo/register src/main.ts",
-    "test": "node --env-file-if-exists=.env --import reylo/register --test"
+    "start": "node --env-file-if-exists=.env --import @totto2727/reylo/register src/main.ts",
+    "test": "node --env-file-if-exists=.env --import @totto2727/reylo/register --test"
   },
   "dependencies": {
     "postgres": "^3.4.9",
-    "reylo": "link:../../dist/reylo"
+    "@totto2727/reylo": "link:../../dist/reylo"
   },
   "devDependencies": {
-    "@reylosql/postgres": "link:../../dist/postgres",
+    "@totto2727/reylo-postgres": "link:../../dist/postgres",
     "@types/node": "^26.6.1",
     "typescript": "7.1.0-beta"
   }

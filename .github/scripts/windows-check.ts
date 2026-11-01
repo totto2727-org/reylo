@@ -27,12 +27,12 @@ writeFileSync(join(project, "package.json"), JSON.stringify({
   name: "reylo-windows",
   private: true,
   type: "module",
-  dependencies: { reylo: `link:${posixRelative(project, join(repo, "dist", "reylo"))}` },
+  dependencies: { "@totto2727/reylo": `link:${posixRelative(project, join(repo, "dist", "reylo"))}` },
   devDependencies: {
-    "@reylosql/sqlite": `link:${posixRelative(project, join(repo, "dist", "sqlite"))}`,
-    "@reylosql/postgres": `link:${posixRelative(project, join(repo, "dist", "postgres"))}`,
-    "@reylosql/mysql": `link:${posixRelative(project, join(repo, "dist", "mysql"))}`,
-    "@reylosql/duckdb": `link:${posixRelative(project, join(repo, "dist", "duckdb"))}`,
+    "@totto2727/reylo-sqlite": `link:${posixRelative(project, join(repo, "dist", "sqlite"))}`,
+    "@totto2727/reylo-postgres": `link:${posixRelative(project, join(repo, "dist", "postgres"))}`,
+    "@totto2727/reylo-mysql": `link:${posixRelative(project, join(repo, "dist", "mysql"))}`,
+    "@totto2727/reylo-duckdb": `link:${posixRelative(project, join(repo, "dist", "duckdb"))}`,
     "@duckdb/node-api": "^2.0.0-r.1",
     "@types/node": "^26.6.1",
     typescript: "7.1.0-beta",
@@ -40,7 +40,7 @@ writeFileSync(join(project, "package.json"), JSON.stringify({
 }, null, 2));
 writeFileSync(join(project, "tsconfig.json"), JSON.stringify({
   compilerOptions: { target: "esnext", module: "nodenext", lib: ["esnext"], types: ["node"], strict: true, noEmit: true, skipLibCheck: true },
-  contentMappers: [{ package: "reylo", extensions: [".sql", ".reylo.yaml", ".reylo.yml"] }],
+  contentMappers: [{ package: "@totto2727/reylo", extensions: [".sql", ".reylo.yaml", ".reylo.yml"] }],
   include: ["src"],
 }, null, 2));
 writeFileSync(join(project, "queries", "get_user.sql"), "select id, name from users where id = :id");
@@ -78,7 +78,7 @@ function sqliteDb(path: string, wal = false): DatabaseSync {
 function check(name: string, url: string, { env = {}, tsc = true, refused }: { env?: Record<string, string>; tsc?: boolean; refused?: RegExp } = {}) {
   writeFileSync(join(project, ".reylo.yaml"), `direct_url: ${JSON.stringify(url)}\n`);
   rmSync(join(project, ".reylo"), { recursive: true, force: true });
-  const generate = run(process.execPath, [join(project, "node_modules", "reylo", "src", "cli.js"), "generate"], project, false, env);
+  const generate = run(process.execPath, [join(project, "node_modules", "@totto2727", "reylo", "src", "cli.js"), "generate"], project, false, env);
   const typed = generate.status === 0 && generate.out.includes("✓");
   console.log(`\n== ${name}: ${url}\n${generate.out.trim()}`);
   if (refused) {

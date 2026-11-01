@@ -143,7 +143,7 @@ test("postgres: pg's family, PGlite and Neon, which write any array as an array 
 });
 
 test("a typed JSON, structured or cast parameter is checked with the checks its module passes, and refused without them", async () => {
-  const refusal = (name: string) => ({ name: "TypeError", message: `Parameter "${name}" is a typed JSON, structured or cast parameter, which the run time checks with Reylo's checks; a query defined by hand passes them: defineQuery({ …, checks }) with checks from "reylo".` });
+  const refusal = (name: string) => ({ name: "TypeError", message: `Parameter "${name}" is a typed JSON, structured or cast parameter, which the run time checks with Reylo's checks; a query defined by hand passes them: defineQuery({ …, checks }) with checks from "@totto2727/reylo".` });
   const client = { query: async () => ({ rows: [], rowCount: 0 }) };
   const json: QueryModule<"postgres"> = { dialect: "postgres", sql: "select :p::jsonb", params: ["p"], inputs: { p: { type: { kind: "json" }, schema: { type: "object", properties: { n: { type: "integer" } }, required: ["n"] } } } };
   await assert.rejects(async () => execute(client, json, { p: { n: 1 } }), refusal("p"));

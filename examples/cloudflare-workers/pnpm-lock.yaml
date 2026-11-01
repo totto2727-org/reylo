@@ -8,7 +8,7 @@ importers:
 
   .:
     dependencies:
-      reylo:
+      '@totto2727/reylo':
         specifier: link:../../dist/reylo
         version: link:../../dist/reylo
     devDependencies:
@@ -21,7 +21,7 @@ importers:
       '@cloudflare/workers-types':
         specifier: ^5.20261021.1
         version: 5.20261021.1
-      '@reylosql/sqlite':
+      '@totto2727/reylo-sqlite':
         specifier: link:../../dist/sqlite
         version: link:../../dist/sqlite
       '@types/node':

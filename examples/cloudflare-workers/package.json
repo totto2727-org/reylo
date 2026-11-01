@@ -12,13 +12,13 @@
     "deploy": "wrangler d1 migrations apply DB --remote && wrangler deploy"
   },
   "dependencies": {
-    "reylo": "link:../../dist/reylo"
+    "@totto2727/reylo": "link:../../dist/reylo"
   },
   "devDependencies": {
     "@cloudflare/vite-plugin": "^1.64.0",
     "@cloudflare/vitest-plugin": "^1.4.6",
     "@cloudflare/workers-types": "^5.20261021.1",
-    "@reylosql/sqlite": "link:../../dist/sqlite",
+    "@totto2727/reylo-sqlite": "link:../../dist/sqlite",
     "@types/node": "^26.6.5",
     "typescript": "7.1.0-beta",
     "vite": "^8.3.4",

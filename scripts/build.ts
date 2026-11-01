@@ -6,7 +6,7 @@
 //   that ships TypeScript fails to load in the mapper, the bundler adapters and at run time. It
 //   carries no engine and no build step: each database's is a package of its own, an optional peer
 //   at reylo's exact version, which the entry points find from the project (src/engine-package.ts).
-// - dist/postgres, dist/sqlite, dist/mysql, dist/duckdb: `@reylosql/<database>`, at reylo's version, with its
+// - dist/postgres, dist/sqlite, dist/mysql, dist/duckdb: `@totto2727/reylo-<database>`, at reylo's version, with its
 //   engine component in `engine/` (built by engine/build.sh and committed), its package.json and
 //   README, reylo's build-time half (src/tooling.ts) bundled into `tooling.js`, the worker the
 //   engine opens its connections in (src/engine-worker.ts) bundled into `engine-worker.js`, and the
@@ -42,7 +42,7 @@ const pkg = JSON.parse(readFileSync(join(root, "package.json"), "utf8"));
 const { private: _private, scripts: _scripts, devDependencies: _dev, bin, exports, typescript, ...rest } = pkg;
 // The engines are peers at reylo's own version: reylo refuses another (src/engine.ts).
 for (const db of DATABASES) {
-  const name = `@reylosql/${db}`;
+  const name = `@totto2727/reylo-${db}`;
   if (rest.peerDependencies?.[name] !== pkg.version) throw new Error(`package.json: the peer ${name} is ${rest.peerDependencies?.[name]}, and reylo is ${pkg.version}; they move together`);
   if (!rest.peerDependenciesMeta?.[name]?.optional) throw new Error(`package.json: the peer ${name} must be optional, since a project installs only its databases' engines`);
 }

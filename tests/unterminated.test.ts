@@ -27,11 +27,11 @@ function check(url: string, engine: "sqlite" | "postgres", setup: (root: string)
   writeFileSync(join(root, "package.json"), `{ "type": "module" }`);
   writeFileSync(join(root, ".env"), `DATABASE_URL=${url}\n`);
   setup(root);
-  mkdirSync(join(root, "node_modules", "@reylosql"), { recursive: true });
-  symlinkSync(ROOT, join(root, "node_modules", "reylo"));
-  symlinkSync(join(ROOT, "packages", engine), join(root, "node_modules", "@reylosql", engine));
+  mkdirSync(join(root, "node_modules", "@totto2727"), { recursive: true });
+  symlinkSync(ROOT, join(root, "node_modules", "@totto2727/reylo"));
+  symlinkSync(join(ROOT, "packages", engine), join(root, "node_modules", "@totto2727", `reylo-${engine}`));
   const compilerOptions = { target: "esnext", module: "nodenext", lib: ["esnext"], types: [], strict: true, noEmit: true, skipLibCheck: true, allowImportingTsExtensions: true };
-  writeFileSync(join(root, "tsconfig.json"), JSON.stringify({ compilerOptions, contentMappers: [{ package: "reylo", extensions: [".sql"] }], include: ["main.ts"] }));
+  writeFileSync(join(root, "tsconfig.json"), JSON.stringify({ compilerOptions, contentMappers: [{ package: "@totto2727/reylo", extensions: [".sql"] }], include: ["main.ts"] }));
   for (const [name, text] of Object.entries(FILES)) writeFileSync(join(root, name), text);
   // Each module is typed: an import that became `any` would leave its expected error unused.
   writeFileSync(join(root, "main.ts"), Object.keys(FILES).map((name, i) => `import q${i} from "./${name}";\n// @ts-expect-error a typed query has no such property\nq${i}.nope;\n`).join(""));

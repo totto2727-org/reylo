@@ -1,5 +1,5 @@
 import * as esbuild from "esbuild";
-import reylo from "reylo/esbuild";
+import reylo from "@totto2727/reylo/esbuild";
 
 await esbuild.build({
   entryPoints: ["src/server.ts"],

@@ -46,8 +46,8 @@ export function HeroActions() {
         <a href="https://opensource.org/licenses/MIT">
           <img src="https://img.shields.io/github/license/colinhacks/reylo" alt="License: MIT" height={20} />
         </a>
-        <a href="https://www.npmjs.com/package/reylo">
-          <img src="https://img.shields.io/npm/v/reylo" alt="npm version" height={20} />
+        <a href="https://www.npmjs.com/package/@totto2727/reylo">
+          <img src="https://img.shields.io/npm/v/%40totto2727%2Freylo" alt="npm version" height={20} />
         </a>
         <a href={githubUrl}>
           <img src="https://img.shields.io/github/stars/colinhacks/reylo" alt="GitHub stars" height={20} />

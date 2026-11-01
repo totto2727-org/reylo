@@ -4,16 +4,16 @@ One complete, working project for each setup the [docs](https://reylo.dev/#setup
 
 | Example | Setup | Database and driver | What runs |
 | --- | --- | --- | --- |
-| [node](./node) | `node --import reylo/register` ([Node](https://reylo.dev/#node)) | Postgres, postgres.js | a script, and tests with Node's test runner |
+| [node](./node) | `node --import @totto2727/reylo/register` ([Node](https://reylo.dev/#node)) | Postgres, postgres.js | a script, and tests with Node's test runner |
 | [nub](./nub) | the preload in `nub.jsonc` ([nub](https://reylo.dev/#setup-nub)) | SQLite, `node:sqlite` | a script, and tests with `nub --test` |
-| [bun](./bun) | the preload in `bunfig.toml`, and `Bun.build` with `reylo/esbuild` ([Bun](https://reylo.dev/#setup-bun)) | SQLite, `bun:sqlite` | a script, `bun test`, and a bundle |
-| [vite](./vite) | `reylo/vite` in a React Router app ([Vite](https://reylo.dev/#setup-vite)) | Postgres, pg | the dev server, the production server, and Vitest |
-| [nextjs](./nextjs) | `withReylo` from `reylo/next`: the loader under Turbopack and webpack, and the type check inside `next build` ([Next.js](https://reylo.dev/#setup-nextjs)) | Postgres, postgres.js | an App Router app: `next dev`, and `next build` and `next start` with each bundler |
-| [esbuild](./esbuild) | `reylo/esbuild`: a standalone ES module ([esbuild](https://reylo.dev/#setup-esbuild)) | Postgres, postgres.js | an HTTP server, bundled into one file that runs with plain `node` |
-| [webpack](./webpack) | `reylo/webpack` ([webpack](https://reylo.dev/#setup-webpack)) | MySQL, mysql2 | an HTTP server, bundled into one ES module |
-| [rspack](./rspack) | `reylo/webpack` ([Rspack](https://reylo.dev/#setup-rspack)) | Postgres, pg | an HTTP server, bundled into one ES module |
-| [jest](./jest) | `reylo/jest` ([Jest](https://reylo.dev/#setup-jest)) | SQLite, better-sqlite3 | Jest, in an ES module run and a CommonJS run |
-| [cloudflare-workers](./cloudflare-workers) | `reylo/vite` beside the Cloudflare Vite plugin | SQLite, Cloudflare D1 (the local database wrangler keeps) and a Durable Object's own database | a Worker in workerd: `vite dev`, the build and `vite preview`, Vitest inside workerd, and `wrangler deploy --dry-run`, all without a Cloudflare account |
+| [bun](./bun) | the preload in `bunfig.toml`, and `Bun.build` with `@totto2727/reylo/esbuild` ([Bun](https://reylo.dev/#setup-bun)) | SQLite, `bun:sqlite` | a script, `bun test`, and a bundle |
+| [vite](./vite) | `@totto2727/reylo/vite` in a React Router app ([Vite](https://reylo.dev/#setup-vite)) | Postgres, pg | the dev server, the production server, and Vitest |
+| [nextjs](./nextjs) | `withReylo` from `@totto2727/reylo/next`: the loader under Turbopack and webpack, and the type check inside `next build` ([Next.js](https://reylo.dev/#setup-nextjs)) | Postgres, postgres.js | an App Router app: `next dev`, and `next build` and `next start` with each bundler |
+| [esbuild](./esbuild) | `@totto2727/reylo/esbuild`: a standalone ES module ([esbuild](https://reylo.dev/#setup-esbuild)) | Postgres, postgres.js | an HTTP server, bundled into one file that runs with plain `node` |
+| [webpack](./webpack) | `@totto2727/reylo/webpack` ([webpack](https://reylo.dev/#setup-webpack)) | MySQL, mysql2 | an HTTP server, bundled into one ES module |
+| [rspack](./rspack) | `@totto2727/reylo/webpack` ([Rspack](https://reylo.dev/#setup-rspack)) | Postgres, pg | an HTTP server, bundled into one ES module |
+| [jest](./jest) | `@totto2727/reylo/jest` ([Jest](https://reylo.dev/#setup-jest)) | SQLite, better-sqlite3 | Jest, in an ES module run and a CommonJS run |
+| [cloudflare-workers](./cloudflare-workers) | `@totto2727/reylo/vite` beside the Cloudflare Vite plugin | SQLite, Cloudflare D1 (the local database wrangler keeps) and a Durable Object's own database | a Worker in workerd: `vite dev`, the build and `vite preview`, Vitest inside workerd, and `wrangler deploy --dry-run`, all without a Cloudflare account |
 
 Every example has the same two tables, `users` and `posts`, and the same three queries: `get_user.sql` (a row or `null`), `list_posts.sql` (an array) and `create_post.sql` (an insert). Every one also carries the editor settings of [Editors](https://reylo.dev/#editors) for VS Code, Cursor and Zed.
 
@@ -22,8 +22,8 @@ Every example has the same two tables, `users` and `posts`, and the same three q
 Open the example for your setup and read its README's "How Reylo is wired in": every line Reylo needs, file by file, with the reason for each. Copy those lines, and install the packages from npm instead of copying the example's dependencies, which link this repository's builds:
 
 ```sh
-npm install reylo
-npm install -D @reylosql/postgres typescript@beta   # or @reylosql/mysql, @reylosql/sqlite
+npm install @totto2727/reylo
+npm install -D @totto2727/reylo-postgres typescript@beta   # or @totto2727/reylo-mysql, @totto2727/reylo-sqlite
 ```
 
 Each README's "In your own project" lists anything else that exists only because the example lives in this repository: `.npmrc` (`minimumReleaseAge=0`, because this machine holds fresh releases back), and in Next.js the Turbopack root.

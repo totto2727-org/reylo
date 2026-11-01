@@ -94,7 +94,7 @@ export function mapperHandlers(): MapperHandlers {
         diagnostics.push(diag(size, `The content mapper has no project for this file; restart the TypeScript server.`, 0, 1, 9));
         const leading = leadingComment(sql);
         const doc = docComment(leading.prose, statementAfter(sql, leading));
-        const text = `import type { Query } from "reylo";\nexport type Params = unknown;\nexport type Row = unknown;\nexport type QueryError = import("reylo").QueryError;\n${doc}declare const query: Query<unknown, unknown, "many", "postgres">;\nexport default query;\n`;
+        const text = `import type { Query } from "@totto2727/reylo";\nexport type Params = unknown;\nexport type Row = unknown;\nexport type QueryError = import("@totto2727/reylo").QueryError;\n${doc}declare const query: Query<unknown, unknown, "many", "postgres">;\nexport default query;\n`;
         return { extension: ".ts" as const, diagnostics, text, mappings: mapToStatement(text, sql) };
       }
       // The analysis first, and the dialect from the session after it: a session whose `direct_url`
@@ -118,7 +118,7 @@ export function mapperHandlers(): MapperHandlers {
       const emit = (compiled: string | undefined, paramsType: string, rowType: string, cardinality: string, names: string[], queryError = queryErrorType(dialect, undefined)) => {
         const written = statementAfter(sql, leading);
         const text = [
-          `import type { Query } from "reylo";`,
+          `import type { Query } from "@totto2727/reylo";`,
           `export type Params = ${paramsType};`,
           `export type Row = ${rowType};`,
           `export type QueryError = ${queryError};`,

@@ -19,13 +19,13 @@ function project(installed: Record<string, string | { from: string; version: str
   const root = mkdtempSync(join(tmpdir(), "reylo-engines-"));
   writeFileSync(join(root, "package.json"), "{}");
   for (const [path, text] of Object.entries(files)) writeFileSync(join(root, path), text);
-  mkdirSync(join(root, "node_modules/@reylosql"), { recursive: true });
+  mkdirSync(join(root, "node_modules/@totto2727"), { recursive: true });
   for (const [name, source] of Object.entries(installed)) {
-    const at = join(root, "node_modules/@reylosql", name);
+    const at = join(root, "node_modules/@totto2727", `reylo-${name}`);
     if (typeof source === "string") symlinkSync(source, at);
     else {
       cpSync(source.from, at, { recursive: true });
-      writeFileSync(join(at, "package.json"), JSON.stringify({ name: `@reylosql/${name}`, version: source.version, type: "module", exports: { "./engine/*": "./engine/*", "./package.json": "./package.json" } }));
+      writeFileSync(join(at, "package.json"), JSON.stringify({ name: `@totto2727/reylo-${name}`, version: source.version, type: "module", exports: { "./engine/*": "./engine/*", "./package.json": "./package.json" } }));
     }
   }
   return root;
@@ -34,14 +34,14 @@ function project(installed: Record<string, string | { from: string; version: str
 test("a project with no engine installed is told which package its database needs, and how to install it", async () => {
   const root = project();
   assert.equal(enginePath("postgres", root, nowhere), undefined);
-  await assert.rejects(engine("postgres", root, nowhere), { name: "MissingEngine", message: "postgres statements need @reylosql/postgres: npm install -D @reylosql/postgres" });
-  await assert.rejects(engine("mysql", root, nowhere), { message: "mysql statements need @reylosql/mysql: npm install -D @reylosql/mysql" });
-  await assert.rejects(engine("duckdb", root, nowhere), { message: "duckdb statements need @reylosql/duckdb: npm install -D @reylosql/duckdb" });
+  await assert.rejects(engine("postgres", root, nowhere), { name: "MissingEngine", message: "postgres statements need @totto2727/reylo-postgres: npm install -D @totto2727/reylo-postgres" });
+  await assert.rejects(engine("mysql", root, nowhere), { message: "mysql statements need @totto2727/reylo-mysql: npm install -D @totto2727/reylo-mysql" });
+  await assert.rejects(engine("duckdb", root, nowhere), { message: "duckdb statements need @totto2727/reylo-duckdb: npm install -D @totto2727/reylo-duckdb" });
   // Not even the project file can be read without one.
   const file = project({}, { ".reylo.yaml": "direct_url: postgres://localhost/app\n" });
   const reader = await anyEngine(file, nowhere);
   assert.ok(reader instanceof MissingEngine);
-  assert.match(resolveProject(reader, file, {}).error!, /^\.reylo\.yaml: reylo reads the project file with a database's engine, and none is installed: npm install -D @reylosql\/postgres, @reylosql\/mysql, @reylosql\/sqlite or @reylosql\/duckdb/);
+  assert.match(resolveProject(reader, file, {}).error!, /^\.reylo\.yaml: reylo reads the project file with a database's engine, and none is installed: npm install -D @totto2727\/reylo-postgres, @totto2727\/reylo-mysql, @totto2727\/reylo-sqlite or @totto2727\/reylo-duckdb/);
 });
 
 test("with only SQLite's engine installed, a Postgres URL needs Postgres's, and SQLite's reads the project file", async () => {
@@ -51,7 +51,7 @@ test("with only SQLite's engine installed, a Postgres URL needs Postgres's, and 
   assert.equal(reader.call({ op: "ping" }).status, "ok");
   const resolved = resolveProject(reader, root, {});
   assert.deepEqual([resolved.dialect, resolved.error], ["postgres", undefined]);
-  await assert.rejects(engine(resolved.dialect, resolved.root, nowhere), { message: "postgres statements need @reylosql/postgres: npm install -D @reylosql/postgres" });
+  await assert.rejects(engine(resolved.dialect, resolved.root, nowhere), { message: "postgres statements need @totto2727/reylo-postgres: npm install -D @totto2727/reylo-postgres" });
   const sqlite = await engine("sqlite", root, nowhere);
   assert.equal((sqlite.call({ op: "ping" }) as { database?: string }).database, "sqlite");
 });
@@ -60,15 +60,15 @@ test("an engine of another version than reylo is refused, naming both versions a
   const root = project({ postgres: { from: join(PACKAGES, "postgres"), version: "9.9.9" } });
   await assert.rejects(engine("postgres", root, nowhere), (e: Error) => {
     assert.ok(e instanceof MissingEngine);
-    assert.ok(e.message.startsWith(`reylo ${VERSION} runs with @reylosql/postgres ${VERSION}, and the one installed is 9.9.9 (`), e.message);
-    assert.ok(e.message.endsWith(`): npm install -D @reylosql/postgres@${VERSION}`), e.message);
+    assert.ok(e.message.startsWith(`reylo ${VERSION} runs with @totto2727/reylo-postgres ${VERSION}, and the one installed is 9.9.9 (`), e.message);
+    assert.ok(e.message.endsWith(`): npm install -D @totto2727/reylo-postgres@${VERSION}`), e.message);
     return true;
   });
 });
 
 test("a package whose artifact reads another database's statements is refused by name", async () => {
   const root = project({ postgres: { from: join(PACKAGES, "sqlite"), version: VERSION } });
-  await assert.rejects(engine("postgres", root, nowhere), /^MissingEngine: @reylosql\/postgres \(.*\) carries an engine that reads sqlite statements, not postgres ones/);
+  await assert.rejects(engine("postgres", root, nowhere), /^MissingEngine: @totto2727\/reylo-postgres \(.*\) carries an engine that reads sqlite statements, not postgres ones/);
 });
 
 test("the project's own engine comes before reylo's, and each database's artifact names its database", async () => {

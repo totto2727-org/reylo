@@ -238,7 +238,7 @@ async function built(root: string, name: string, raw: string) {
   writeFileSync(file, raw);
   const { code } = await sqlModule(file, raw);
   const out = join(root, `${name}.mjs`);
-  writeFileSync(out, code.replace(`from "reylo"`, `from ${JSON.stringify(INDEX)}`));
+  writeFileSync(out, code.replace(`from "@totto2727/reylo"`, `from ${JSON.stringify(INDEX)}`));
   return (await import(pathToFileURL(out).href)).default as { run(client: unknown, params?: unknown): Promise<any>; try(client: unknown, params?: unknown): Promise<any> };
 }
 

@@ -11,7 +11,7 @@ export default {
     rules: [
       // Reylo: each .sql import becomes a module that runs the statement. The loader analyzes
       // the statement against the database DATABASE_URL names (or reads .reylo/) at build time.
-      { test: /\.sql$/, use: "reylo/webpack" },
+      { test: /\.sql$/, use: "@totto2727/reylo/webpack" },
       {
         test: /\.ts$/,
         loader: "builtin:swc-loader",

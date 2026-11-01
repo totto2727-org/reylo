@@ -1,6 +1,6 @@
 # Reylo example: Node
 
-A Node project that imports `.sql` files as typed queries and runs them on Postgres through postgres.js, with Reylo's preload loaded by `node --import reylo/register`. It is the setup of [Node](https://reylo.dev/#node) in the docs.
+A Node project that imports `.sql` files as typed queries and runs them on Postgres through postgres.js, with Reylo's preload loaded by `node --import @totto2727/reylo/register`. It is the setup of [Node](https://reylo.dev/#node) in the docs.
 
 ## Run it
 
@@ -32,16 +32,16 @@ Misspell a column in `queries/get_user.sql` and run `nub run typecheck` again: t
 
 ## How Reylo is wired in
 
-- In `package.json`, `reylo` is a dependency, because the preload runs in the app; the Postgres engine `@reylosql/postgres` and `typescript` 7.1 are dev dependencies, used by the type check. The `postgres` package is the driver the app runs the queries with; the type check reads the schema through the postgres.js inside the engine.
-- In the `package.json` scripts, `typecheck` is `tsc --noEmit --runExternalCode`, the flag that lets `tsc` run the content mapper. The `start` script is `node --env-file-if-exists=.env --import reylo/register src/main.ts`: `--import reylo/register` turns each `.sql` import into a module as Node loads it, and `--env-file-if-exists` loads `.env` for the app. The `test` script is the same preload with `--test`, which Node passes to each test file's process, so `src/queries.test.ts` imports `.sql` files too.
-- In `tsconfig.json`, `contentMappers` names `reylo` for `.sql`, which types each import from the database, and for the project file, `.reylo.yaml` or `.reylo.yml`. The `include` option is `src` and `setup.ts`, so `setup.sql`, a script rather than one query, stays out of the type check.
+- In `package.json`, `@totto2727/reylo` is a dependency, because the preload runs in the app; the Postgres engine `@totto2727/reylo-postgres` and `typescript` 7.1 are dev dependencies, used by the type check. The `postgres` package is the driver the app runs the queries with; the type check reads the schema through the postgres.js inside the engine.
+- In the `package.json` scripts, `typecheck` is `tsc --noEmit --runExternalCode`, the flag that lets `tsc` run the content mapper. The `start` script is `node --env-file-if-exists=.env --import @totto2727/reylo/register src/main.ts`: `--import @totto2727/reylo/register` turns each `.sql` import into a module as Node loads it, and `--env-file-if-exists` loads `.env` for the app. The `test` script is the same preload with `--test`, which Node passes to each test file's process, so `src/queries.test.ts` imports `.sql` files too.
+- In `tsconfig.json`, `contentMappers` names `@totto2727/reylo` for `.sql`, which types each import from the database, and for the project file, `.reylo.yaml` or `.reylo.yml`. The `include` option is `src` and `setup.ts`, so `setup.sql`, a script rather than one query, stays out of the type check.
 - The `.env` file sets `DATABASE_URL`, which Reylo reads for its analysis (the type check, the editor and the preload) and the app reads through `--env-file-if-exists`.
 - The `queries/*.sql` files hold one statement per file, with `:name` parameters, imported from `src/` with a relative path. The query `get_user.sql` resolves to a row or `null`, `list_posts.sql` to an array, and `create_post.sql`, an insert with `returning`, to the row it wrote.
 - In `.vscode/settings.json` and `.vscode/extensions.json`, the TypeScript 7 extension is pointed at this project's TypeScript, so the editor shows the queries' types and errors ([Editors](https://reylo.dev/#editors)). In Zed, `.zed/settings.json` does the same.
 
 ## In your own project
 
-- Install from npm instead of the `link:` dependencies: `npm install reylo` and `npm install -D @reylosql/postgres typescript@beta`.
+- Install from npm instead of the `link:` dependencies: `npm install @totto2727/reylo` and `npm install -D @totto2727/reylo-postgres typescript@beta`.
 - The `.npmrc` file (`minimumReleaseAge=0`) exists only because this machine holds fresh releases back; drop it.
 
 ## Notes

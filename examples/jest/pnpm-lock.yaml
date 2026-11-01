@@ -11,7 +11,7 @@ importers:
       better-sqlite3:
         specifier: ^13.0.3
         version: 13.0.3
-      reylo:
+      '@totto2727/reylo':
         specifier: link:../../dist/reylo
         version: link:../../dist/reylo
     devDependencies:
@@ -27,7 +27,7 @@ importers:
       '@jest/globals':
         specifier: ^30.5.2
         version: 30.5.2
-      '@reylosql/sqlite':
+      '@totto2727/reylo-sqlite':
         specifier: link:../../dist/sqlite
         version: link:../../dist/sqlite
       '@types/better-sqlite3':

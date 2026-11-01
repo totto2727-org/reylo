@@ -18,10 +18,10 @@ function project(url: string, driver: string, dialect: string): string {
   const root = realpathSync(mkdtempSync(join(tmpdir(), "reylo-comments-")));
   writeFileSync(join(root, "package.json"), `{ "type": "module" }`);
   writeFileSync(join(root, ".env"), `DATABASE_URL=${url}\n`);
-  mkdirSync(join(root, "node_modules", "@reylosql"), { recursive: true });
+  mkdirSync(join(root, "node_modules", "@totto2727"), { recursive: true });
   symlinkSync(join(DRIVERS, driver), join(root, "node_modules", driver));
-  symlinkSync(ROOT, join(root, "node_modules", "reylo"));
-  symlinkSync(join(ROOT, "packages", dialect), join(root, "node_modules", "@reylosql", dialect));
+  symlinkSync(ROOT, join(root, "node_modules", "@totto2727/reylo"));
+  symlinkSync(join(ROOT, "packages", dialect), join(root, "node_modules", "@totto2727", `reylo-${dialect}`));
   return root;
 }
 
@@ -155,7 +155,7 @@ test("the hover over a field of a query's row shows its column's comment", { ski
   try {
     const root = project(db.url, "postgres", "postgres");
     const compilerOptions = { target: "esnext", module: "nodenext", lib: ["esnext"], types: [], strict: true, noEmit: true, skipLibCheck: true, allowImportingTsExtensions: true };
-    writeFileSync(join(root, "tsconfig.json"), JSON.stringify({ compilerOptions, contentMappers: [{ package: "reylo", extensions: [".sql"] }], include: ["main.ts"] }));
+    writeFileSync(join(root, "tsconfig.json"), JSON.stringify({ compilerOptions, contentMappers: [{ package: "@totto2727/reylo", extensions: [".sql"] }], include: ["main.ts"] }));
     writeFileSync(join(root, "user.sql"), "select id, age, email from users where id = :id\n");
     const main = join(root, "main.ts");
     writeFileSync(main, `import getUser from "./user.sql";\n\nexport async function age(db: Parameters<typeof getUser.run>[0]) {\n  const user = await getUser.run(db, { id: 1 });\n  return user?.age;\n}\n`);

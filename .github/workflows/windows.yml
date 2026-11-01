@@ -83,10 +83,10 @@ jobs:
         env:
           MSYS: winsymlinks:nativestrict
         run: |
-          mkdir -p lab/jest/node_modules/@reylosql
-          ln -sfn ../../.. lab/jest/node_modules/reylo
-          ln -sfn ../../../../packages/sqlite lab/jest/node_modules/@reylosql/sqlite
-          ls -la lab/jest/node_modules/reylo lab/jest/node_modules/@reylosql/
+          mkdir -p lab/jest/node_modules/@totto2727
+          ln -sfn ../../../.. lab/jest/node_modules/@totto2727/reylo
+          ln -sfn ../../../../packages/sqlite lab/jest/node_modules/@totto2727/reylo-sqlite
+          ls -la lab/jest/node_modules/@totto2727/
       - run: nub run typecheck
       # The loader's tests: those without a database everywhere, and Postgres's and MySQL's on the
       # runner's servers.

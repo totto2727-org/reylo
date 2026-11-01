@@ -1,5 +1,5 @@
 import { defineConfig, loadEnv } from "vite";
-import reylo from "reylo/vite";
+import reylo from "@totto2727/reylo/vite";
 
 // Vitest reads this file instead of vite.config.ts: the queries need only Reylo's plugin, not React Router's.
 export default defineConfig(({ mode }) => ({

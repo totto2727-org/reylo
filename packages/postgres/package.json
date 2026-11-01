@@ -1,5 +1,5 @@
 {
-  "name": "@reylosql/postgres",
+  "name": "@totto2727/reylo-postgres",
   "version": "0.6.0",
   "private": true,
   "description": "Reylo's analysis engine for Postgres: the WebAssembly artifact and the build steps reylo loads to type .sql files against a Postgres database. Install it beside reylo, at reylo's version.",
@@ -8,10 +8,10 @@
   "homepage": "https://reylo.dev/postgres",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/colinhacks/reylo.git",
+    "url": "git+https://github.com/totto2727-org/reylo.git",
     "directory": "packages/postgres"
   },
-  "bugs": "https://github.com/colinhacks/reylo/issues",
+  "bugs": "https://github.com/totto2727-org/reylo/issues",
   "type": "module",
   "exports": {
     "./engine/*": "./engine/*",

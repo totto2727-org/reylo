@@ -620,7 +620,7 @@ const second = env.DB.prepare(statement.text).bind(...statement.encode({ id: 2 }
 await env.DB.batch([first, second]);
 ```
 
-Encoding applies the existing parameter checks and conversions. The encoder accepts unknown input and validates it at runtime. A generic typed consumer can use `StandardQueryV1.InferArgs<Q>` from `reylo` to preserve a query's inferred input types.
+Encoding applies the existing parameter checks and conversions. The encoder accepts unknown input and validates it at runtime. A generic typed consumer can use `StandardQueryV1.InferArgs<Q>` from `@totto2727/reylo` to preserve a query's inferred input types.
 
 The driver owns execution, the batch and its transaction boundaries. Prepare and encode every statement before submitting the batch. Driver errors still come from the driver, and its results are raw. To apply Reylo's decoding and cardinality, pass rows as arrays of raw column values in selection order to `statement.decode()`.
 

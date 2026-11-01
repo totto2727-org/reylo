@@ -1,6 +1,6 @@
 import { join } from "node:path";
 import type { NextConfig } from "next";
-import { withReylo } from "reylo/next";
+import { withReylo } from "@totto2727/reylo/next";
 
 const nextConfig: NextConfig = {
   cacheComponents: true,

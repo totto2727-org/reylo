@@ -11,11 +11,11 @@ importers:
       postgres:
         specifier: ^3.4.9
         version: 3.4.9
-      reylo:
+      '@totto2727/reylo':
         specifier: link:../../dist/reylo
         version: link:../../dist/reylo
     devDependencies:
-      '@reylosql/postgres':
+      '@totto2727/reylo-postgres':
         specifier: link:../../dist/postgres
         version: link:../../dist/postgres
       '@types/node':

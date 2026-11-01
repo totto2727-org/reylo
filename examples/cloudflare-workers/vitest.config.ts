@@ -1,6 +1,6 @@
 import { cloudflareTest, readD1Migrations } from "@cloudflare/vitest-plugin";
 import { defineConfig } from "vitest/config";
-import reylo from "reylo/vite";
+import reylo from "@totto2727/reylo/vite";
 
 // The tests run inside workerd, with the bindings of wrangler.jsonc and a D1 database of their own,
 // which test/apply-migrations.ts fills from migrations/.

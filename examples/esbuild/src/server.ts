@@ -1,7 +1,7 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import postgres from "postgres";
 // Each .sql import is a typed query: the type check types it from the database, and
-// reylo/esbuild (or reylo/register in dev) builds it into a module that runs it.
+// @totto2727/reylo/esbuild (or @totto2727/reylo/register in dev) builds it into a module that runs it.
 import createPost from "../queries/create_post.sql";
 import getUser from "../queries/get_user.sql";
 import listPosts from "../queries/list_posts.sql";

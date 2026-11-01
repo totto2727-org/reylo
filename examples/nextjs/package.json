@@ -16,10 +16,10 @@
     "postgres": "^3.4.9",
     "react": "19.3.0",
     "react-dom": "19.3.0",
-    "reylo": "link:../../dist/reylo"
+    "@totto2727/reylo": "link:../../dist/reylo"
   },
   "devDependencies": {
-    "@reylosql/postgres": "link:../../dist/postgres",
+    "@totto2727/reylo-postgres": "link:../../dist/postgres",
     "@types/node": "^24",
     "@types/react": "^19",
     "@types/react-dom": "^19",

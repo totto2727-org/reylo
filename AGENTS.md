@@ -11,7 +11,7 @@ A maintainer may keep local notes beside this file, which are never committed; w
 | Path | What it is |
 | --- | --- |
 | `src/` | The npm package `reylo`, TypeScript: the content mapper, the run time (`.run()`, `.runSync()`, `.with()`), the bundler adapters, the preload `reylo/register` and the CLI `reylo generate` |
-| `packages/<database>/` | The engine packages `@reylosql/postgres`, `@reylosql/mysql`, `@reylosql/sqlite` and `@reylosql/duckdb`: a `package.json`, a README, the committed engine component in `engine/` (jco's transpile of the component `engine/build.sh` builds), and `tooling.ts`, from which the build bundles the build-time half of `src/` into the package. Optional peers of `reylo` at its exact version |
+| `packages/<database>/` | The engine packages `@totto2727/reylo-postgres`, `@totto2727/reylo-mysql`, `@totto2727/reylo-sqlite` and `@totto2727/reylo-duckdb`: a `package.json`, a README, the committed engine component in `engine/` (jco's transpile of the component `engine/build.sh` builds), and `tooling.ts`, from which the build bundles the build-time half of `src/` into the package. Optional peers of `reylo` at its exact version |
 | `engine/` | The analysis engine, Rust: `core/`, shared by every database, and one crate per database, none depending on another, each implementing core's `Database` trait ([engine/README.md](./engine/README.md)). Built for the loader, with the program that connects it to its database (`native/`), to one WebAssembly component per database (`wasip2/`), and linked natively by the oracle |
 | `oracle/` | The soundness oracle (`reylo-oracle`) and `oracle/cases/`, the regression suite for everything the engine infers |
 | `tests/` | The loader's node tests; `tests/helpers.ts` holds what they share: the test databases and a database of a test's own on each, the drivers, and the content mapper's and the language server's clients |
@@ -64,11 +64,11 @@ Prefer nub over `node`, `bun`, npm, npx, pnpm and yarn: `nub install`, `nub add`
 
   ```sh
   (cd lab/drivers && nub install) && (cd lab/jest && nub install)
-  mkdir -p lab/jest/node_modules/@reylosql
-  ln -sfn ../../.. lab/jest/node_modules/reylo && ln -sfn ../../../../packages/sqlite lab/jest/node_modules/@reylosql/sqlite
+  mkdir -p lab/jest/node_modules/@totto2727
+  ln -sfn ../../../.. lab/jest/node_modules/@totto2727/reylo && ln -sfn ../../../../packages/sqlite lab/jest/node_modules/@totto2727/reylo-sqlite
   ```
 
-  Every lab reaches the package through a link, `node_modules/reylo`, to the repository root, and its engine through `node_modules/@reylosql/<database>` into `packages/`. `nub install` in a lab removes the links, so make them again after one.
+  Every lab reaches the package through a link, `node_modules/@totto2727/reylo`, to the repository root, and its engine through `node_modules/@totto2727/reylo-<database>` into `packages/`. `nub install` in a lab removes the links, so make them again after one.
 - `nub run build` writes `dist/reylo` (the run time and the entry points, no engine) and `dist/postgres`, `dist/sqlite`, `dist/mysql` and `dist/duckdb` (the engine component, `tooling.js`, `engine-worker.js` and the I/O worker of jco's preview2-shim, which both bundle: nothing platform-specific, and no dependency), and refuses versions that disagree. The examples link `dist/` with `link:`, not the sources, so run it before `nub install` in an example and again after any change to `src/`. Never turn those links into `file:` dependencies: nub 0.9.6 never refreshes a `file:` directory it has installed once, so the example would run a stale build.
 - `reylo` finds a project's engine from the project first, then from its own install (`src/engine.ts`, `src/engine-package.ts`), and refuses one of another version. The root's own tests reach the four engines through its `devDependencies` (`link:packages/<database>`), and DuckDB's tests reach `@duckdb/node-api` through `lab/drivers`, as an app's install would hold it.
 - `site/` has its own install: `nub install` there before building or serving it.

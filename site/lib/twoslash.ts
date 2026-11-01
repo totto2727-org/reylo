@@ -5,7 +5,7 @@ import type { DocsTwoslashOptions } from 'docs-kit/mdx';
 // content mapper. So a `ts twoslash` block carries, as a hidden file, the module reylo's mapper
 // returns for the `.sql` block it imports (`get_user.d.sql.ts`, which `./get_user.sql` resolves to
 // under allowArbitraryExtensions; lib/remark-mapper.ts puts it there from lib/sql-modules.json),
-// and the `reylo` package that module imports is mounted from the repository's own source: the
+// and the `@totto2727/reylo` package that module imports is mounted from the repository's own source: the
 // hovers show the real `Query` type and its docs. docs-kit (docs-kit/src/mdx/twoslash.ts) adds
 // the cache on disk, the `// @hover:` directive and the trimmed documentation.
 
@@ -14,7 +14,7 @@ export function reyloTwoslash(): DocsTwoslashOptions {
   // The build runs in site/; the reylo package is the repository root above it.
   const repo = path.resolve(process.cwd(), '..');
   return {
-    packages: [{ name: 'reylo', root: repo, entries: ['src/index.ts'] }],
+    packages: [{ name: '@totto2727/reylo', root: repo, entries: ['src/index.ts'] }],
     compilerOptions: {
       // `process.env` and node:sqlite in the examples; @types/node is a dev dependency of the
       // site. A block that uses Bun or Cloudflare D1 references their types itself

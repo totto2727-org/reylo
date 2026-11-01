@@ -3,6 +3,13 @@
 This page records the retained source differences in this fork.
 The upstream base is [`colinhacks/reylo@73562e513ef50d54df51daefa5243fa8427df7af`](https://github.com/colinhacks/reylo/commit/73562e513ef50d54df51daefa5243fa8427df7af).
 
+## Fork package namespace
+
+The fork's runtime package name is `@totto2727/reylo`, with the optional exact-version engines `@totto2727/reylo-postgres`, `@totto2727/reylo-sqlite`, `@totto2727/reylo-mysql`, and `@totto2727/reylo-duckdb`.
+The manifests, generated Content Mapper declarations, runtime module imports, adapter paths, engine discovery, and consumer examples use these names so the fork does not depend on or publish upstream-owned npm packages.
+The `reylo` CLI name, `.reylo.yaml` configuration, `dist/` layout, upstream engine artifacts, and query runtime behavior remain unchanged.
+Install the runtime and selected engines at the same version.
+
 ## Local Atlas HCL schema analysis
 
 The fork accepts a local `hcl:./schema.hcl` SQLite analysis source.

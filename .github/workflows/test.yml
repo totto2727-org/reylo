@@ -142,9 +142,9 @@ jobs:
           link_lab () {
             local dir="lab/$1" db="$2"
             shift 2
-            mkdir -p "$dir/node_modules/@reylosql"
-            ln -sfn ../../.. "$dir/node_modules/reylo"
-            ln -sfn "../../../../packages/$db" "$dir/node_modules/@reylosql/$db"
+            mkdir -p "$dir/node_modules/@totto2727"
+            ln -sfn ../../../.. "$dir/node_modules/@totto2727/reylo"
+            ln -sfn "../../../../packages/$db" "$dir/node_modules/@totto2727/reylo-$db"
             for driver in "$@"; do ln -sfn "../../drivers/node_modules/$driver" "$dir/node_modules/$driver"; done
           }
           link_lab jest sqlite

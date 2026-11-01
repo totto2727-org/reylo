@@ -1,4 +1,4 @@
-// Each .sql import is a typed query: the type check types it from the database, and reylo/vite
+// Each .sql import is a typed query: the type check types it from the database, and @totto2727/reylo/vite
 // builds it into a module that runs it on the D1 binding, or on a Durable Object's own database.
 import { DurableObject } from "cloudflare:workers";
 import migration from "../migrations/0001_users_and_posts.sql?raw";

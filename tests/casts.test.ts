@@ -31,7 +31,7 @@ async function built(root: string, url: string, name: string, sql: string) {
   writeFileSync(join(root, ".env"), `DATABASE_URL=${url}\n`);
   const { code } = await sqlModule(file, sql);
   const out = join(root, `${name}.mjs`);
-  writeFileSync(out, code.replace(`from "reylo"`, `from ${JSON.stringify(INDEX)}`));
+  writeFileSync(out, code.replace(`from "@totto2727/reylo"`, `from ${JSON.stringify(INDEX)}`));
   const module = await import(pathToFileURL(out).href);
   const text = module.default.sql as string;
   assert.equal(module.default["~standard"].query.text, `${text} /*file='${name}.sql'*/`);
