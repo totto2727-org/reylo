@@ -41,6 +41,15 @@ SQL syntax and schema replay remain the responsibility of the existing embedded 
 HCL content hashes replace database fingerprint queries and are checked before cached analysis is reused.
 HCL edits immediately discard the catalog answers and analysis cache before another query is analyzed, including callers without a bundler watcher.
 
+## Atlas parity regression
+
+The test in `tests/hcl-parity.test.ts` compares direct HCL inference with the same schema applied by Atlas to a disposable SQLite database.
+It compares inferred parameters, result columns, nullability, cardinality, and Content Mapper declarations for primary keys, unique indexes, joins, aggregates, and nullable inputs.
+The Linux and Windows loader test jobs install Atlas for this test.
+Run `node --test tests/hcl-parity.test.ts` with Atlas available on `PATH`.
+The reference database exists only under the test's temporary directory and is removed when the test finishes.
+Production HCL analysis remains independent of Atlas and host databases.
+
 ## Native SQLite and D1 execution
 
 Native batching uses the existing Standard Query interface, `query["~standard"].query.text` and `.encode(input)`, with the driver's own prepared statements.
