@@ -79,6 +79,15 @@ The retained packaging change copies `licenses/` into each engine distribution a
 
 Raw TypeScript source links can load natively after Node resolves symlinks outside `node_modules`, but they also expose implementation files to the consuming application's compiler options.
 Built links expose the official JavaScript and declarations instead, preserving application type checks without rewriting upstream implementation or weakening compiler settings.
-No package publishing, duplicate compiler, custom execution driver or toolchain migration is required.
+No duplicate compiler, custom execution driver or toolchain migration is required.
+
+## Fork npm publication
+
+`.github/workflows/publish.yml` stages the five scoped distributions after pushes to `main` or a manual run on `main`.
+It reuses the upstream Nub, Node, full distribution build, and npm staging helper instead of introducing Nix or Vite+ into the fork toolchain.
+The upstream release workflow remains unchanged and is not the supported fork publication entry point.
+Publication requires the npm scope owner's trusted-publisher configuration and separate npm approval of staged versions.
+No package is published merely by adding this workflow.
+See [the publishing guide](publishing.md) for setup, approval order, and partial-failure handling.
 
 When syncing upstream, update the exact base hash above and maintain this record with the retained source changes.

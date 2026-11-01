@@ -20,6 +20,8 @@
 
 <br/>
 
+Fork maintainers: see [publishing scoped packages](docs/publishing.md) for npm trusted-publisher setup and staged release approval.
+
 <p align="center">
   <img src="site/public/readme-demo.gif" alt="An editor: hovering a query's result shows its type, which follows the SQL as the SQL changes" />
 </p>
