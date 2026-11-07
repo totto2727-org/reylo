@@ -1,6 +1,6 @@
 {
   "name": "@totto2727/reylo-sqlite",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "private": true,
   "publishConfig": { "access": "public", "registry": "https://registry.npmjs.org/" },
   "description": "Reylo's analysis engine for SQLite: the WebAssembly artifact and the build steps reylo loads to type .sql files against a SQLite database. Install it beside reylo, at reylo's version.",

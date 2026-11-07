@@ -1,7 +1,8 @@
 # Upstream differences
 
 This page records the retained source differences in this fork.
-The upstream base is [`colinhacks/reylo@73562e513ef50d54df51daefa5243fa8427df7af`](https://github.com/colinhacks/reylo/commit/73562e513ef50d54df51daefa5243fa8427df7af).
+The upstream base is the latest public release tag, [`colinhacks/reylo@7a3928a8ff4dfb387b34ed584ab1319aa72f3f3b` (`v0.7.0`)](https://github.com/colinhacks/reylo/commit/7a3928a8ff4dfb387b34ed584ab1319aa72f3f3b).
+The fork merges this release rather than the later, unreleased `main` history.
 
 ## Fork package namespace
 
@@ -21,6 +22,16 @@ Shared multi-dialect TypeScript branches, decoder code, and the upstream Rust wo
 These retained branches do not constitute supported npm engines or require external database servers for maintained checks.
 The SQLite component, inference rules, and runtime query execution API remain upstream behavior.
 The HCL adapter and package/distribution scope are source customizations, not deployment-only configuration.
+
+## Retained WebAssembly distribution
+
+Upstream v0.7.0 replaces database-specific WebAssembly npm packages with native engine binaries and platform-specific packages.
+This fork retains `packages/sqlite`, `src/engine-package.ts`, the component worker and host, and the WebAssembly build path in `engine/build.sh` because its maintained distribution is exactly the two scoped, platform-independent packages above.
+The SQLite component must be regenerated from the merged Rust sources when their fingerprint changes.
+The root manifests, distribution build, TypeScript build entry points, and minimal SQLite/HCL workflows therefore retain the fork's package discovery and build contract instead of adopting upstream native package publication or the removed documentation-site build.
+Shared native Rust sources remain for upstream mergeability and the soundness oracle, but native platform npm packages are not a supported install path.
+The release's JSON value type and ISO 8601 extended-year representation changes remain part of the supported TypeScript API.
+The type descriptor specification remains at [`spec/type-descriptor.ts`](../spec/type-descriptor.ts).
 
 ## Local Atlas HCL schema analysis
 
