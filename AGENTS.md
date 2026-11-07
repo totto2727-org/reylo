@@ -42,6 +42,8 @@ nub run test
 nub run build
 ```
 
+Run tests through Nub: on Node 24, direct `node --test` does not provide the Temporal API required by the retained shared value tests.
+
 The root tests use `lab/drivers` for third-party SQLite clients and `lab/jest` for Jest/Vitest.
 Install those fixtures when running the complete integration suite:
 

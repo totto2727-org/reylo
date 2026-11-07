@@ -102,6 +102,7 @@ That revision still has a tag filter despite its main-push policy comments; this
 Keep other template settings unchanged unless this fork requires a difference.
 Nub builds the two maintained distributions, and the shared publisher stages the SQLite engine before the runtime.
 Nub setup, the upstream build command instead of `vp pack`, and the two package directories are required differences because upstream already builds separate runtime and engine distributions.
+On Node 24, Nub also supplies the Temporal API used by retained shared value tests; direct `node --test` is not equivalent to `nub run test`.
 CI retains the upstream Node test runner, the Linux and Windows matrix, and Atlas for the optional HCL parity regression instead of the template's Vite+ checks.
 The minimal `flake.nix` supplies only the empty Linux shell required by the shared publisher, using the library template's locked Nixpkgs input.
 It installs no JavaScript runtime, package manager, or build tool through Nix.
