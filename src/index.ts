@@ -129,7 +129,7 @@ export type QueryDefinition = {
   sqlcommenter?: boolean;
   cardinality?: Cardinality;
   jsonSchema?: { input: Record<string, unknown>; output: Record<string, unknown> };
-  /** The checks of a typed JSON, structured or cast parameter, `checks` from "reylo": a build step passes them where the statement has one, so that an app none of whose statements has one bundles none of them. */
+  /** The checks of a typed JSON, structured or cast parameter, `checks` from "@totto2727/reylo": a build step passes them where the statement has one, so that an app none of whose statements has one bundles none of them. */
   checks?: Checks;
 };
 

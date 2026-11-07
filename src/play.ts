@@ -120,7 +120,7 @@ function pageDir(cwd: string): string | undefined {
   // reylo exports no package.json: its entry is resolved, and its directory found above it.
   for (const from of [join(cwd, "noop.js"), import.meta.filename]) {
     try {
-      let dir = dirname(createRequire(from).resolve("reylo"));
+      let dir = dirname(createRequire(from).resolve("@totto2727/reylo"));
       while (dir !== dirname(dir) && !existsSync(join(dir, "package.json"))) dir = dirname(dir);
       candidates.push(join(dir, "play"));
     } catch {}

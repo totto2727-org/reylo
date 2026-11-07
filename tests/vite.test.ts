@@ -9,7 +9,7 @@ import reylo from "../src/vite.ts";
 // own resolveId (`@cloudflare/vite-plugin` 1.64), so the import never reached Reylo's load hook and
 // `.run` was undefined. Reylo's plugin now resolves a relative `.sql` import itself, in a resolveId
 // ordered "pre", which runs before every other plugin's wherever each is listed.
-test("reylo/vite resolves a relative .sql import to its file before any other plugin can claim it", () => {
+test("@totto2727/reylo/vite resolves a relative .sql import to its file before any other plugin can claim it", () => {
   const root = mkdtempSync(join(tmpdir(), "reylo-vite-"));
   mkdirSync(join(root, "src"));
   mkdirSync(join(root, "queries"));
@@ -30,6 +30,6 @@ test("reylo/vite resolves a relative .sql import to its file before any other pl
   assert.equal(resolveId("../queries/get_user.sql", "\0virtual:entry"), null);
 });
 
-test("reylo/vite's resolveId runs before the other plugins' hooks", () => {
+test("@totto2727/reylo/vite's resolveId runs before the other plugins' hooks", () => {
   assert.equal(reylo().resolveId.order, "pre");
 });

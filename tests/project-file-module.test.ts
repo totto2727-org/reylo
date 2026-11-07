@@ -25,11 +25,11 @@ test("a project file in the mapper's extensions is a module that declares nothin
   const db = new DatabaseSync(join(root, "app.db"));
   db.exec("create table posts (id integer primary key, title text not null)");
   db.close();
-  mkdirSync(join(root, "node_modules", "@reylosql"), { recursive: true });
-  symlinkSync(ROOT, join(root, "node_modules", "reylo"));
-  symlinkSync(join(ROOT, "packages", "sqlite"), join(root, "node_modules", "@reylosql", "sqlite"));
+  mkdirSync(join(root, "node_modules", "@totto2727"), { recursive: true });
+  symlinkSync(ROOT, join(root, "node_modules", "@totto2727/reylo"));
+  symlinkSync(join(ROOT, "packages", "sqlite"), join(root, "node_modules", "@totto2727", "reylo-sqlite"));
   const compilerOptions = { target: "esnext", module: "nodenext", lib: ["esnext"], types: [], strict: true, noEmit: true, skipLibCheck: true, allowImportingTsExtensions: true };
-  writeFileSync(join(root, "tsconfig.json"), JSON.stringify({ compilerOptions, contentMappers: [{ package: "reylo", extensions: [".sql", ".reylo.yaml", ".reylo.yml"] }], include: ["main.ts", "config"] }));
+  writeFileSync(join(root, "tsconfig.json"), JSON.stringify({ compilerOptions, contentMappers: [{ package: "@totto2727/reylo", extensions: [".sql", ".reylo.yaml", ".reylo.yml"] }], include: ["main.ts", "config"] }));
   writeFileSync(join(root, "posts.sql"), "select id, title from posts where id > :after::integer\n");
   writeFileSync(
     join(root, "main.ts"),

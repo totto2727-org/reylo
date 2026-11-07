@@ -30,11 +30,11 @@ test("withReylo adds the loader on the server for Turbopack and webpack, and kee
   assert.equal(config.reactStrictMode, true);
   assert.equal(config.turbopack.root, "/app");
   assert.deepEqual(config.turbopack.rules, {
-    "*.sql": { condition: { not: "browser" }, loaders: ["reylo/turbopack"], as: "*.js" },
+    "*.sql": { condition: { not: "browser" }, loaders: ["@totto2727/reylo/turbopack"], as: "*.js" },
     "*.md": { loaders: ["md-loader"], as: "*.js" },
   });
   const server = config.webpack({ module: { rules: [] } }, { isServer: true });
-  assert.deepEqual(server.module.rules, [{ test: /\.sql$/, use: "reylo/webpack" }]);
+  assert.deepEqual(server.module.rules, [{ test: /\.sql$/, use: "@totto2727/reylo/webpack" }]);
   const client = config.webpack({ module: { rules: [] } }, { isServer: false });
   assert.deepEqual(client.module.rules, []);
   assert.deepEqual(seen, ["server", "client"]);
@@ -75,12 +75,12 @@ function app(main: string): string {
     join(root, "tsconfig.json"),
     JSON.stringify({
       compilerOptions: { target: "esnext", module: "nodenext", types: [], strict: true, noEmit: true, skipLibCheck: true, allowImportingTsExtensions: true },
-      contentMappers: [{ package: "reylo", extensions: [".sql"] }],
+      contentMappers: [{ package: "@totto2727/reylo", extensions: [".sql"] }],
       include: ["*.ts"],
     }),
   );
-  mkdirSync(join(root, "node_modules"));
-  symlinkSync(REPO, join(root, "node_modules", "reylo"));
+  mkdirSync(join(root, "node_modules", "@totto2727"), { recursive: true });
+  symlinkSync(REPO, join(root, "node_modules", "@totto2727/reylo"));
   symlinkSync(join(REPO, "node_modules", "typescript"), join(root, "node_modules", "typescript"));
   return root;
 }

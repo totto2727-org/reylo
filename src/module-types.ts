@@ -29,11 +29,11 @@ export type ModuleTypes = {
  * type otherwise.
  */
 export function queryErrorType(dialect: Dialect, errors: Analysis["errors"]): string {
-  if (!errors) return `import("reylo").QueryError<${JSON.stringify(dialect)}>`;
+  if (!errors) return `import("@totto2727/reylo").QueryError<${JSON.stringify(dialect)}>`;
   const name = { postgres: "PostgresQueryError", mysql: "MysqlQueryError", sqlite: "SqliteQueryError", duckdb: "DuckdbQueryError" }[dialect];
   const names = (field: string, list: string[]) => list.map((n) => (field === "columns" ? `readonly [${n.split(", ").map((c) => JSON.stringify(c)).join(", ")}]` : JSON.stringify(n))).join(" | ");
   const codes = Object.entries(errors).map(([code, fields]) => `  ${JSON.stringify(code)}: { ${Object.entries(fields).map(([field, list]) => `${field}: ${names(field, list)}`).join("; ")} };`);
-  return codes.length ? `import("reylo").${name}<{\n${codes.join("\n")}\n}>` : `import("reylo").${name}<{}>`;
+  return codes.length ? `import("@totto2727/reylo").${name}<{\n${codes.join("\n")}\n}>` : `import("@totto2727/reylo").${name}<{}>`;
 }
 
 /** A parameter's TypeScript type: `unknown` when nothing in the statement types it (a CAST does), with `| null` where the statement lets the caller pass null. */

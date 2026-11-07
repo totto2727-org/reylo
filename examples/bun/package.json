@@ -11,10 +11,10 @@
     "start:dist": "bun dist/main.js"
   },
   "dependencies": {
-    "reylo": "link:../../dist/reylo"
+    "@totto2727/reylo": "link:../../dist/reylo"
   },
   "devDependencies": {
-    "@reylosql/sqlite": "link:../../dist/sqlite",
+    "@totto2727/reylo-sqlite": "link:../../dist/sqlite",
     "@types/bun": "^1.4.3",
     "typescript": "7.1.0-beta"
   }

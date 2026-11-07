@@ -29,25 +29,25 @@ test("setup", { skip }, () => {
   assert.equal(spawnSync(process.execPath, ["setup.mjs"], { cwd: lab }).status, 0);
 });
 
-test("Jest's runtime never asks Node's loader: the reylo/register preload leaves a .sql file to Jest, which reads it as JavaScript", { skip }, () => {
-  const r = jest(["--config", JSON.stringify({ watchman: false, testPathIgnorePatterns: ["/node_modules/", "/probe/"], extensionsToTreatAsEsm: [".sql"] })], "--experimental-vm-modules --import reylo/register");
+test("Jest's runtime never asks Node's loader: the @totto2727/reylo/register preload leaves a .sql file to Jest, which reads it as JavaScript", { skip }, () => {
+  const r = jest(["--config", JSON.stringify({ watchman: false, testPathIgnorePatterns: ["/node_modules/", "/probe/"], extensionsToTreatAsEsm: [".sql"] })], "--experimental-vm-modules --import @totto2727/reylo/register");
   assert.equal(r.status, 1, r.output);
   assert.match(r.output, /SyntaxError: Unexpected identifier 'id'/);
 });
 
-test("reylo/jest: a CommonJS run, with reylo's runtime compiled to CommonJS by babel-jest", { skip }, () => {
+test("@totto2727/reylo/jest: a CommonJS run, with reylo's runtime compiled to CommonJS by babel-jest", { skip }, () => {
   const r = jest(["-c", "jest.cjs.config.cjs", "query.test.cjs"]);
   assert.equal(r.status, 0, r.output);
   assert.match(r.output, /Tests:\s+1 passed, 1 total/);
 });
 
-test("reylo/jest: an ESM run (--experimental-vm-modules), a CommonJS and an ESM test", { skip }, () => {
+test("@totto2727/reylo/jest: an ESM run (--experimental-vm-modules), a CommonJS and an ESM test", { skip }, () => {
   const r = jest(["-c", "jest.esm.config.cjs"], "--experimental-vm-modules");
   assert.equal(r.status, 0, r.output);
   assert.match(r.output, /Tests:\s+2 passed, 2 total/);
 });
 
-test("Vitest needs nothing beyond reylo/vite", { skip }, () => {
+test("Vitest needs nothing beyond @totto2727/reylo/vite", { skip }, () => {
   const r = run("vitest/vitest.mjs", ["run"]);
   assert.equal(r.status, 0, r.output);
   assert.match(r.output, /Tests\s+1 passed/);
@@ -58,13 +58,13 @@ test("Vitest needs nothing beyond reylo/vite", { skip }, () => {
 // `maybeOne`. Each run of its test adds the cardinality its module carries to `seen.txt`.
 function cachedProject() {
   const dir = mkdtempSync(join(tmpdir(), "reylo-vitest-"));
-  mkdirSync(`${dir}/node_modules/@reylosql`, { recursive: true });
+  mkdirSync(`${dir}/node_modules/@totto2727`, { recursive: true });
   symlinkSync(`${lab}/node_modules/vitest`, `${dir}/node_modules/vitest`);
-  symlinkSync(root, `${dir}/node_modules/reylo`);
-  symlinkSync(`${root}/packages/sqlite`, `${dir}/node_modules/@reylosql/sqlite`);
+  symlinkSync(root, `${dir}/node_modules/@totto2727/reylo`);
+  symlinkSync(`${root}/packages/sqlite`, `${dir}/node_modules/@totto2727/reylo-sqlite`);
   writeFileSync(`${dir}/package.json`, `{ "private": true }\n`);
   writeFileSync(`${dir}/.reylo.yaml`, "direct_url: file:./app.db\n");
-  writeFileSync(`${dir}/vitest.config.mjs`, `import reylo from "reylo/vite";\nexport default { plugins: [reylo()], test: { globals: true, fsModuleCache: true } };\n`);
+  writeFileSync(`${dir}/vitest.config.mjs`, `import reylo from "@totto2727/reylo/vite";\nexport default { plugins: [reylo()], test: { globals: true, fsModuleCache: true } };\n`);
   writeFileSync(`${dir}/by-email.sql`, "select id, name from users where email = :email\n");
   writeFileSync(`${dir}/by-email.test.mjs`, `import { appendFileSync } from "node:fs";\nimport query from "./by-email.sql";\ntest("by-email", () => appendFileSync(new URL("./seen.txt", import.meta.url), query.cardinality + "\\n"));\n`);
   const exec = (sql: string) => {

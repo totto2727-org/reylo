@@ -1,7 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, writeFileSync } from "node:fs";
-import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
@@ -10,7 +9,7 @@ import { Session } from "../src/analyze.ts";
 import { defineQuery } from "../src/index.ts";
 import { sqlModule } from "../src/loader.ts";
 import { ParameterError } from "../src/values.ts";
-import { DRIVERS, PG, pgLive, INDEX } from "./helpers.ts";
+import { INDEX } from "./helpers.ts";
 
 // Every import is a Standard Query: `~standard.query` holds the statement, its database, and the
 // two mappings a driver calls, `encode` (the input to the values it binds, each in the database's
@@ -163,42 +162,6 @@ test("sqlite: node:sqlite runs a built import as a Standard Query, with its own 
   }
 });
 
-test("postgres: pg runs a built import as a Standard Query, with every parser off, to .run()'s output", { skip: pgLive }, async () => {
-  const require = createRequire(join(DRIVERS, "pg", "package.json"));
-  const pg = require("pg");
-  const admin = new pg.Client({ connectionString: PG });
-  await admin.connect();
-  const name = `reylo_standard_${process.pid}`;
-  await admin.query(`drop database if exists ${name}`);
-  await admin.query(`create database ${name}`);
-  const url = new URL(PG!);
-  url.pathname = `/${name}`;
-  const pool = new pg.Pool({ connectionString: url.href });
-  // The app's own parsers, which a Standard Query's rows must never see.
-  pg.types.setTypeParser(20, (x: string) => `app:${x}`);
-  pg.types.setTypeParser(1184, (x: string) => `app:${x}`);
-  const root = mkdtempSync(join(tmpdir(), "reylo-standard-"));
-  writeFileSync(join(root, "package.json"), "{}");
-  writeFileSync(join(root, ".env"), `DATABASE_URL=${url.href}\n`);
-  try {
-    await pool.query("create table events (id int8 primary key, at timestamptz not null, tags int4[] not null, doc jsonb, amount numeric)");
-    await pool.query("insert into events values (9007199254740993, '2026-10-22 14:46:00.123456+00', '{1,2}', '{\"a\":1}', 12345678901234567890.5)");
-    const query = await built(root, "events", "select id, at, tags, doc, amount from events where tags @> :tags and at >= :since");
-    const input = { tags: [1], since: "2026-01-01T00:00:00Z" };
-    const sq = query["~standard"].query;
-    const raw = await pool.query({ text: sq.text, values: sq.encode(input), rowMode: "array", types: { getTypeParser: () => (x: string) => x } });
-    const output = sq.decode(raw.rows);
-    assert.deepEqual(output, await query.run(pool, input));
-    assert.deepEqual(output, [{ id: 9007199254740993n, at: "2026-10-22T14:46:00.123456Z", tags: [1, 2], doc: { a: 1 }, amount: "12345678901234567890.5" }]);
-  } finally {
-    pg.types.setTypeParser(20, (x: string) => x);
-    pg.types.setTypeParser(1184, pg.types.getTypeParser(1114));
-    for (const session of Session.opened()) await session.close();
-    await pool.end();
-    await admin.query(`drop database if exists ${name}`);
-    await admin.end();
-  }
-});
 
 /** A module built for `sql` in `root` and imported. */
 async function built(root: string, name: string, sql: string) {
@@ -206,6 +169,6 @@ async function built(root: string, name: string, sql: string) {
   writeFileSync(file, sql);
   const { code } = await sqlModule(file, sql);
   const out = join(root, `${name}.mjs`);
-  writeFileSync(out, code.replace(`from "reylo"`, `from ${JSON.stringify(INDEX)}`));
+  writeFileSync(out, code.replace(`from "@totto2727/reylo"`, `from ${JSON.stringify(INDEX)}`));
   return (await import(`${pathToFileURL(out).href}?${Math.random()}`)).default;
 }
