@@ -1,9 +1,0 @@
-node_modules/
-.data/
-.out/
-*.db
-*.db-*
-*.sqlite
-# Written by every run; RESULTS.md is the readable record that is kept.
-results.json
-typecheck/results.json

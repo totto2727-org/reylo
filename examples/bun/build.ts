@@ -1,4 +1,4 @@
-import reylo from "reylo/esbuild";
+import reylo from "@totto2727/reylo/esbuild";
 
 // Reylo's esbuild plugin builds each .sql import into the bundle, which then runs without the preload
 const result = await Bun.build({

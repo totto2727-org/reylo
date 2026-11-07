@@ -31,22 +31,21 @@ Each run of `start` adds a post; `nub run setup` starts over. The tests roll the
 
 ## How Reylo is wired in
 
-- In `package.json`, `reylo` is a dependency, because the preload runs in the app; the SQLite engine `@reylosql/sqlite`, `typescript` 7.1 and Bun's types `@types/bun` are dev dependencies, used by the type check. SQLite needs no driver package: `bun:sqlite` is built into Bun.
-- The `bunfig.toml` file sets `preload = ["reylo/register"]`, which Bun loads before the app, so `bun src/main.ts` imports `.sql` files with no flag; and the same line under `[test]`, because `bun test` reads its own preload and not the top-level one.
-- The `build.ts` file runs `Bun.build` with `plugins: [reylo()]` from `reylo/esbuild`, which builds each `.sql` import into the bundle at build time, analyzed against the database. The bundle `dist/main.js` then carries the statements, Reylo's runtime and nothing else it needs: it runs without the preload, `node_modules` or `.env`.
+- In `package.json`, `@totto2727/reylo` is a dependency, because the preload runs in the app; the SQLite engine `@totto2727/reylo-sqlite`, `typescript` 7.1 and Bun's types `@types/bun` are dev dependencies, used by the type check. SQLite needs no driver package: `bun:sqlite` is built into Bun.
+- The `bunfig.toml` file sets `preload = ["@totto2727/reylo/register"]`, which Bun loads before the app, so `bun src/main.ts` imports `.sql` files with no flag; and the same line under `[test]`, because `bun test` reads its own preload and not the top-level one.
+- The `build.ts` file runs `Bun.build` with `plugins: [reylo()]` from `@totto2727/reylo/esbuild`, which builds each `.sql` import into the bundle at build time, analyzed against the database. The bundle `dist/main.js` then carries the statements, Reylo's runtime and nothing else it needs: it runs without the preload, `node_modules` or `.env`.
 - In the `package.json` scripts, `typecheck` is `tsc --noEmit --runExternalCode`, the flag that lets `tsc` run the content mapper. The `start` script is `bun src/main.ts`, `test` is `bun test`, `build` is `bun build.ts` and `start:dist` is `bun dist/main.js`.
-- In `tsconfig.json`, `contentMappers` names `reylo` for `.sql`, which types each import from the database, and for the project file, `.reylo.yaml` or `.reylo.yml`; `types: ["bun"]` loads Bun's types, which TypeScript 7 loads only when named. The `include` option is `src`, `setup.ts` and `build.ts`, so `setup.sql`, a schema rather than one query, stays out of the type check.
+- In `tsconfig.json`, `contentMappers` names `@totto2727/reylo` for `.sql`, which types each import from the database, and for the project file, `.reylo.yaml` or `.reylo.yml`; `types: ["bun"]` loads Bun's types, which TypeScript 7 loads only when named. The `include` option is `src`, `setup.ts` and `build.ts`, so `setup.sql`, a schema rather than one query, stays out of the type check.
 - The `.env` file sets `DATABASE_URL=file:./app.db`, the SQLite file Reylo analyzes each statement against, its path starting at `package.json`. Reylo reads it for the type check, the editor, the preload and the build, and Bun loads `.env` on its own. The script `src/main.ts` opens the same file, `app.db`.
 - The `queries/*.sql` files hold one statement per file, with `:name` parameters, imported from `src/` with a relative path. The query `get_user.sql` resolves to a row or `null`, `list_posts.sql` to an array, and `create_post.sql`, an insert with `returning`, to the row it wrote; `src/main.ts` runs it with `.runSync()`, which `bun:sqlite` allows.
 - In `.vscode/settings.json` and `.vscode/extensions.json`, the TypeScript 7 extension is pointed at this project's TypeScript, so the editor shows the queries' types and errors ([Editors](https://reylo.dev/#editors)). In Zed, `.zed/settings.json` does the same.
 
 ## In your own project
 
-- Install from npm instead of the `link:` dependencies: `bun add reylo` and `bun add -d @reylosql/sqlite typescript@beta @types/bun`.
-- The `.npmrc` file (`minimumReleaseAge=0`) exists only because this machine holds fresh releases back; drop it.
+- Install from npm instead of the `link:` dependencies: `bun add @totto2727/reylo` and `bun add -d @totto2727/reylo-sqlite typescript@beta @types/bun`.
 
 ## Notes
 
 - Without the `[test]` preload, `bun test` imports each `.sql` file as its path, a string, and the tests fail with a `TypeError` such as `createPost.runSync is not a function`.
 - Running `bun dist/main.js` still loads the preload of `bunfig.toml` in this directory, though the bundle never uses it: copied with `app.db` into an empty directory, `bun main.js` prints the same rows.
-- SQLite infers no union from a `check` constraint, so `role` is a `string` here, where Postgres's enum gives `"admin" | "member"`.
+- SQLite infers no literal union from a `check` constraint, so `role` is a `string` here.

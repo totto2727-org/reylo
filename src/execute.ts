@@ -530,7 +530,7 @@ function postgresText(query: QueryModule, name: string, v: unknown): string | nu
 /** The checks a parameter needs (src/checks.ts): every build step passes them where its statement has such a parameter. */
 function checksFor(query: QueryModule, name: string): Checks {
   if (query.checks) return query.checks;
-  throw new ParameterError(`Parameter "${name}" is a typed JSON, structured or cast parameter, which the run time checks with Reylo's checks; a query defined by hand passes them: defineQuery({ …, checks }) with checks from "reylo".`);
+  throw new ParameterError(`Parameter "${name}" is a typed JSON, structured or cast parameter, which the run time checks with Reylo's checks; a query defined by hand passes them: defineQuery({ …, checks }) with checks from "@totto2727/reylo".`);
 }
 
 /** Where an array, or an array inside it (a multidimensional one), holds null or undefined: `[2]`, `[1][0]`. */

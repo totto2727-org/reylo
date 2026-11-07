@@ -1,6 +1,6 @@
 # Reylo's preload: `bun src/main.ts` imports .sql files with no flag
-preload = ["reylo/register"]
+preload = ["@totto2727/reylo/register"]
 
 # bun test reads its own preload, not the one above
 [test]
-preload = ["reylo/register"]
+preload = ["@totto2727/reylo/register"]

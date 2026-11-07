@@ -7,16 +7,8 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { Session } from "../src/analyze.ts";
 import { sqlModule } from "../src/loader.ts";
-import { mapperHandlers } from "../src/mapper-server.ts";
-import { mysqlStandIn } from "./mysql-stand-in.ts";
 import { refusedLogin, Unreachable } from "../src/connection.ts";
 import { defineQuery } from "../src/index.ts";
-import { DRIVERS, PG, postgresDatabase } from "./helpers.ts";
-
-// A throwaway Postgres server for the tests that need one, never a database anyone uses: each such
-// test makes a database of its own there and drops it after. The driver is the labs', never the
-// package's own.
-const live = !PG ? "REYLO_TEST_PG names no server" : !existsSync(join(DRIVERS, "postgres")) ? "lab/drivers is not installed" : false;
 
 // A SQLite project: a package, its database, and DATABASE_URL naming it.
 function project(): { root: string; env: Record<string, string> } {
@@ -39,9 +31,6 @@ async function analyze(root: string, env: Record<string, string>, sql: string, o
 }
 
 const SELECT = "select id, name from users where id = :id";
-
-// A project file's command runs in the system's shell, cmd.exe on Windows, and these tests write theirs for a POSIX shell.
-const posixShell = process.platform === "win32" && "its command is written for a POSIX shell, and Windows runs it in cmd.exe";
 
 test("a statement is analyzed against the database once, and read from .reylo/ by every process after", async () => {
   const { root, env } = project();
@@ -117,8 +106,8 @@ test("two databases the project uses in turn keep an entry each, so neither anal
 test("a build that cannot reach the database reads .reylo/ with another URL, with none, and in a copy of the project elsewhere", async () => {
   const { root, env } = project();
   // The project installs its database's engine, which names the dialect where no URL does.
-  mkdirSync(join(root, "node_modules", "@reylosql"), { recursive: true });
-  symlinkSync(fileURLToPath(new URL("../packages/sqlite", import.meta.url)), join(root, "node_modules", "@reylosql", "sqlite"));
+  mkdirSync(join(root, "node_modules", "@totto2727"), { recursive: true });
+  symlinkSync(fileURLToPath(new URL("../packages/sqlite", import.meta.url)), join(root, "node_modules", "@totto2727", "reylo-sqlite"));
   const typed = await analyze(root, env, SELECT);
   assert.ok(typed.ok);
   assert.equal(typed.source, "database");
@@ -157,7 +146,7 @@ test("the module a build step emits carries the analysis and reads nothing at ru
     // file, the only one of the project's files that exists.
     assert.deepEqual(watched, [join(root, ".env")]);
     assert.equal(code, [
-      `import { defineQuery } from "reylo";`,
+      `import { defineQuery } from "@totto2727/reylo";`,
       `export const sql = "select id, name from users where id = ?";`,
       `export const raw = ${JSON.stringify(SELECT)};`,
       `export const params = ["id"];`,
@@ -276,277 +265,6 @@ test("a parameter as a whole sort key is an error the type check places, and a b
     assert.match(code, /export const params = \["sort"\];/);
   } finally {
     for (const session of Session.opened()) await session.close();
-  }
-});
-
-test("the Postgres fingerprint runs on the server, holds while nothing changes, and moves with each catalog the analysis reads, under a search path that puts a user's `||` first", { skip: live }, async () => {
-  const own = await postgresDatabase("reylo_fingerprint");
-  const url = new URL(own.url);
-  const db = own.sql;
-  const root = mkdtempSync(join(tmpdir(), "reylo-fingerprint-"));
-  writeFileSync(join(root, "package.json"), "{}");
-  mkdirSync(join(root, "node_modules"));
-  symlinkSync(join(DRIVERS, "postgres"), join(root, "node_modules", "postgres"));
-  // A session per call, as a process of its own, so that none answers from a fingerprint it took.
-  const fingerprint = async () => {
-    const session = await Session.open(root, { DATABASE_URL: url.href });
-    try {
-      return (await session.schema()).value;
-    } finally {
-      await session.close();
-    }
-  };
-  try {
-    await db.unsafe(`create table a (x int, s text); create table b (x int, s text);
-      create function skip() returns trigger language plpgsql as 'begin return null; end';
-      create function to_one(boolean) returns int8 language sql as 'select 1::int8';
-      create function plus(int, int) returns int language sql as 'select $1 + $2'`);
-    // A query the server refuses gives "unverified <pid> <time>", a value no entry ever matches.
-    const first = await fingerprint();
-    assert.match(first ?? "", /^[0-9a-f]{16}$/);
-    assert.equal(await fingerprint(), first);
-    // A user's `||` that answers NULL, which a search path naming pg_catalog after public puts
-    // before the built-in: the query builds its text with pg_catalog's own, so every row still
-    // reads, and the fingerprint moves with each change below.
-    await db.unsafe(`create function cat_null(text, text) returns text language sql immutable as 'select null::pg_catalog.text';
-      create operator public.|| (leftarg = text, rightarg = text, function = cat_null)`);
-    await db.unsafe(`alter database ${url.pathname.slice(1)} set search_path = public, pg_catalog`);
-    const hostile = await fingerprint();
-    assert.notEqual(hostile, first);
-    assert.equal(await fingerprint(), hostile);
-    // Each change touches only a catalog the row count or the trust check reads: rows of b are read
-    // by a scan of a, a BEFORE ROW trigger can skip an INSERT's row and a rule can replace it, a
-    // key holds only under the index's collation, and a user's operator, cast, default argument,
-    // volatility or strictness decides which call the server makes and what it may answer.
-    let last = hostile;
-    for (const change of [
-      "alter table b inherit a",
-      "create trigger skip before insert on a for each row execute function skip()",
-      "alter table a disable trigger skip",
-      "create rule nothing as on insert to b do instead nothing",
-      `alter table a alter column s type text collate "C"`,
-      "create operator === (leftarg = int, rightarg = int, function = int4eq)",
-      "create cast (boolean as int8) with function to_one(boolean)",
-      "drop cast (boolean as int8); create cast (boolean as int8) with function to_one(boolean) as implicit",
-      "create or replace function plus(int, int default 1) returns int language sql as 'select $1 + $2'",
-      "alter function plus(int, int) immutable",
-      "alter function plus(int, int) strict",
-    ]) {
-      await db.unsafe(change);
-      const next = await fingerprint();
-      assert.notEqual(next, last, change);
-      assert.equal(await fingerprint(), next, change);
-      last = next;
-    }
-  } finally {
-    await own.drop();
-  }
-});
-
-// A project on MySQL whose server is a stand-in (tests/mysql-stand-in.ts), named in .env so that a
-// build step, which reads the process's environment, finds it too.
-function standInProject(port: number): string {
-  const root = mkdtempSync(join(tmpdir(), "reylo-not-mysql-"));
-  writeFileSync(join(root, "package.json"), "{}");
-  writeFileSync(join(root, ".env"), `DATABASE_URL=mysql://root@127.0.0.1:${port}/app\n`);
-  return root;
-}
-
-test("a MariaDB server is refused by the type check, once per connection, with an error that says to type-check against MySQL", async () => {
-  const server = await mysqlStandIn({ version: "11.8.2-MariaDB-ubu2404" });
-  const root = standInProject(server.port);
-  const session = await Session.open(root, {});
-  try {
-    for (const sql of ["select 1 as one", "select 2 as two"]) {
-      const outcome = await session.analyze(sql);
-      assert.ok(!outcome.ok);
-      assert.equal(outcome.code, 5);
-      assert.equal(
-        outcome.message,
-        `Cannot type-check against the database at 127.0.0.1:${server.port}/app (DATABASE_URL in .env): it is MariaDB 11.8.2, and Reylo type-checks MySQL statements against MySQL. Point the type check's URL at a MySQL server, 8.4 or later, with the same schema.`,
-      );
-    }
-    // One connection asked once, then closed; nothing else ran on it.
-    assert.deepEqual(server.queries, ["select version()"]);
-    assert.ok(server.ended());
-    assert.ok((await session.schema()).fatal);
-  } finally {
-    await session.close();
-  }
-  // A build step, which reads the process's environment, fails at the file with the same error.
-  const saved = process.env.DATABASE_URL;
-  delete process.env.DATABASE_URL;
-  try {
-    await assert.rejects(sqlModule(join(root, "q.sql"), "select 1"), /q\.sql: Cannot type-check against .* it is MariaDB 11\.8\.2/);
-  } finally {
-    if (saved !== undefined) process.env.DATABASE_URL = saved;
-    for (const session of Session.opened()) await session.close();
-    await server.close();
-  }
-});
-
-test("a MySQL server is not refused: the type check goes on to read its schema", async () => {
-  const server = await mysqlStandIn({ version: "8.4.6" });
-  const session = await Session.open(standInProject(server.port), {});
-  try {
-    const schema = await session.schema();
-    assert.ok(!schema.fatal);
-    assert.match(schema.value ?? "", /^[0-9a-f]{16}$/);
-    assert.equal(server.queries[0], "select version()");
-    assert.equal(server.queries.length, 2);
-  } finally {
-    await session.close();
-    await server.close();
-  }
-});
-
-// A MySQL stand-in that takes one password, and refuses any other at the login as MySQL does (error 1045).
-const TOKENS = ["token-1", "token-2", "token-3"];
-
-test("a login the server refuses runs direct_url's command again, once, so that an expired token is replaced", async () => {
-  let current = "token-1";
-  const server = await mysqlStandIn({ version: "8.4.6", accepts: () => current, passwords: TOKENS });
-  const root = mkdtempSync(join(tmpdir(), "reylo-token-"));
-  writeFileSync(join(root, "package.json"), "{}");
-  writeFileSync(join(root, "token.txt"), "token-1");
-  writeFileSync(join(root, ".reylo.yaml"), `direct_url: mysql://root:$(cat token.txt)@127.0.0.1:${server.port}/app\n`);
-  const session = await Session.open(root, {});
-  try {
-    // The token the session read at its start has expired, and the command now prints the next.
-    current = "token-2";
-    writeFileSync(join(root, "token.txt"), "token-2");
-    const schema = await session.schema();
-    assert.equal(schema.error, undefined);
-    assert.match(schema.value ?? "", /^[0-9a-f]{16}$/);
-    assert.deepEqual(server.tried, ["token-1", "token-2"]);
-    // A command whose fresh output is refused too is asked once, and the refusal is the error.
-    current = "token-3";
-    await session.release();
-    assert.ok(await session.recheck());
-    const refused = await session.schema();
-    assert.equal(refused.value, null);
-    assert.match(refused.error ?? "", /Access denied for user 'root'/);
-    assert.deepEqual(server.tried, ["token-1", "token-2", "token-2"]);
-  } finally {
-    await session.close();
-    await server.close();
-  }
-});
-
-// The same on Postgres against the live server, where a role that does not exist is a refused login
-// (SQLSTATE 28000) as an expired password is.
-test("on Postgres, a login the server refuses runs direct_url's command again, once", { skip: live }, async () => {
-  const root = mkdtempSync(join(tmpdir(), "reylo-pg-token-"));
-  writeFileSync(join(root, "package.json"), "{}");
-  const server = new URL(PG!);
-  writeFileSync(join(root, "role.txt"), "reylo_no_such_role");
-  writeFileSync(join(root, ".reylo.yaml"), `direct_url: postgres://$(cat role.txt)@${server.host}${server.pathname}\n`);
-  const session = await Session.open(root, {});
-  try {
-    // The role the session read at its start is refused, and the command now prints one that logs in.
-    writeFileSync(join(root, "role.txt"), server.username || "postgres");
-    const schema = await session.schema();
-    assert.equal(schema.error, undefined);
-    assert.match(schema.value ?? "", /^[0-9a-f]{16}$/);
-    // The connection the fresh URL opened is the one the analysis runs on.
-    const outcome = await session.analyze("select 1 as one", { force: true });
-    assert.deepEqual(outcome.ok && outcome.analysis.columns.map((c) => c.name), ["one"]);
-  } finally {
-    await session.close();
-  }
-});
-
-test("calls refused together when a token expires share one run of the command and one new connection", { skip: posixShell }, async () => {
-  let current = "token-1";
-  const server = await mysqlStandIn({ version: "8.4.6", accepts: () => current, passwords: TOKENS });
-  const root = mkdtempSync(join(tmpdir(), "reylo-token-"));
-  writeFileSync(join(root, "package.json"), "{}");
-  writeFileSync(join(root, "token.txt"), "token-1");
-  writeFileSync(join(root, ".reylo.yaml"), `direct_url: mysql://root:$(echo run >> runs.txt; cat token.txt)@127.0.0.1:${server.port}/app\n`);
-  const runs = () => readFileSync(join(root, "runs.txt"), "utf8").split("\n").filter(Boolean).length;
-  const session = await Session.open(root, {});
-  try {
-    assert.match((await session.schema()).value ?? "", /^[0-9a-f]{16}$/);
-    const before = runs();
-    // The token expires while the session's connection is closed, and two reads of the schema then
-    // ask for one at once: the refused login runs the command once, for one new connection.
-    current = "token-2";
-    writeFileSync(join(root, "token.txt"), "token-2");
-    await session.release();
-    const [changed, schema] = await Promise.all([session.recheck(), session.schema()]);
-    assert.equal(changed, false);
-    assert.match(schema.value ?? "", /^[0-9a-f]{16}$/);
-    assert.equal(runs() - before, 1);
-    assert.deepEqual(server.tried, ["token-1", "token-1", "token-2"]);
-    assert.equal(server.open(), 1);
-  } finally {
-    await session.close();
-  }
-  // The engine's goodbye reaches the server before the session's close returns.
-  await new Promise((resolve) => setTimeout(resolve, 50));
-  assert.equal(server.open(), 0);
-  await server.close();
-});
-
-test("a session kept open runs a failed direct_url command again once its failure has stood a minute", { skip: posixShell }, async (t) => {
-  t.mock.timers.enable({ apis: ["Date"], now: Date.now() });
-  const server = await mysqlStandIn({ version: "8.4.6", accepts: () => "token-1", passwords: TOKENS });
-  const root = mkdtempSync(join(tmpdir(), "reylo-token-"));
-  writeFileSync(join(root, "package.json"), "{}");
-  writeFileSync(join(root, ".reylo.yaml"), `direct_url: mysql://root:$(echo run >> runs.txt; cat token.txt)@127.0.0.1:${server.port}/app\n`);
-  const runs = () => readFileSync(join(root, "runs.txt"), "utf8").split("\n").filter(Boolean).length;
-  // The password manager is locked when the session opens, as the type check's may be at the editor's start.
-  const session = await Session.open(root, {});
-  try {
-    const failed = await session.analyze("select 1");
-    assert.equal(failed.ok, false);
-    assert.equal(!failed.ok && failed.code, 11);
-    assert.match(!failed.ok ? failed.message : "", /runs `echo run >> runs.txt; cat token.txt`, which exited with code 1/);
-    // Unlocked, the command is not run again within the minute, so that a prompt is not asked again per file.
-    writeFileSync(join(root, "token.txt"), "token-1");
-    const soon = await session.analyze("select 1");
-    assert.equal(!soon.ok && soon.code, 11);
-    assert.equal(runs(), 1);
-    // After it, the next analysis runs the command, and the session logs in with what it prints.
-    t.mock.timers.tick(60_000);
-    const later = await session.analyze("select 1");
-    // The stand-in prepares nothing, so the analysis itself still fails, past the project.
-    assert.equal(!later.ok && later.code, 5);
-    assert.equal(session.project.error, undefined);
-    assert.equal(runs(), 2);
-    // The connection the stand-in drops at the prepare is opened once more for the same analysis.
-    assert.deepEqual(server.tried, ["token-1", "token-1"]);
-  } finally {
-    await session.close();
-    await server.close();
-  }
-});
-
-test("the type check names the dialect of the project a kept session recovers to", async (t) => {
-  t.mock.timers.enable({ apis: ["Date"], now: Date.now() });
-  const server = await mysqlStandIn({ version: "8.4.6", accepts: () => "token-1", passwords: TOKENS });
-  const root = mkdtempSync(join(tmpdir(), "reylo-token-"));
-  writeFileSync(join(root, "package.json"), "{}");
-  writeFileSync(join(root, ".reylo.yaml"), `direct_url: mysql://root:$(cat token.txt)@127.0.0.1:${server.port}/app\n`);
-  const mapper = mapperHandlers();
-  const projectHandle = `recovers-${root}`;
-  await mapper.openProject!({ projectHandle, configFileName: join(root, ".reylo.yaml") });
-  const transform = async () => (await mapper.transform!({ fileName: join(root, "q.sql"), content: "select 1", projectHandle })) as { text: string; diagnostics: { code: number }[] };
-  try {
-    // With no URL, and no engine installed in the project, the dialect is Postgres's.
-    const before = await transform();
-    assert.deepEqual(before.diagnostics.map((d) => d.code), [11]);
-    assert.match(before.text, /QueryError<"postgres">/);
-    writeFileSync(join(root, "token.txt"), "token-1");
-    t.mock.timers.tick(60_000);
-    // The stand-in prepares nothing, so the analysis fails past the project, in MySQL's terms.
-    const after = await transform();
-    assert.deepEqual(after.diagnostics.map((d) => d.code), [5]);
-    assert.match(after.text, /QueryError<"mysql">/);
-    assert.match(after.text, /"many", "mysql", QueryError>/);
-  } finally {
-    await mapper.closeProject!({ projectHandle });
-    await server.close();
   }
 });
 

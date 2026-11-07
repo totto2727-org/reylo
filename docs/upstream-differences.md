@@ -3,6 +3,25 @@
 This page records the retained source differences in this fork.
 The upstream base is [`colinhacks/reylo@73562e513ef50d54df51daefa5243fa8427df7af`](https://github.com/colinhacks/reylo/commit/73562e513ef50d54df51daefa5243fa8427df7af).
 
+## Fork package namespace
+
+The fork publishes only `@totto2727/reylo` and its exact-version SQLite engine `@totto2727/reylo-sqlite`.
+The manifests, generated Content Mapper declarations, runtime module imports, adapter paths, engine discovery, and consumer examples use these names so the fork does not depend on or publish upstream-owned npm packages.
+The `reylo` CLI name and `.reylo.yaml` configuration remain unchanged.
+Install the runtime and SQLite engine at the same version.
+
+## SQLite-only distribution scope
+
+The maintained consumer surface is runtime execution with SQLite drivers and analysis from SQLite files or static Atlas HCL.
+Postgres, MySQL, and DuckDB npm packages and their consumer projects are absent from the distribution.
+The root dependency set and publication workflow contain only the runtime and SQLite engine.
+Examples retain small SQLite consumers and a local HCL analysis example instead of framework deployments.
+The test fixtures retain only SQLite driver dependencies and the Jest/Vitest integration lab.
+Shared multi-dialect TypeScript branches, decoder code, and the upstream Rust workspace remain where removal would increase future merge conflicts.
+These retained branches do not constitute supported npm engines or require external database servers for maintained checks.
+The SQLite component, inference rules, and runtime query execution API remain upstream behavior.
+The HCL adapter and package/distribution scope are source customizations, not deployment-only configuration.
+
 ## Local Atlas HCL schema analysis
 
 The fork accepts a local `hcl:./schema.hcl` SQLite analysis source.
@@ -41,6 +60,15 @@ SQL syntax and schema replay remain the responsibility of the existing embedded 
 HCL content hashes replace database fingerprint queries and are checked before cached analysis is reused.
 HCL edits immediately discard the catalog answers and analysis cache before another query is analyzed, including callers without a bundler watcher.
 
+## Atlas parity regression
+
+The test in `tests/hcl-parity.test.ts` compares direct HCL inference with the same schema applied by Atlas to a disposable SQLite database.
+It compares inferred parameters, result columns, nullability, cardinality, and Content Mapper declarations for primary keys, unique indexes, joins, aggregates, and nullable inputs.
+This optional regression requires Atlas on `PATH`; maintained production HCL analysis does not.
+Run `node --test tests/hcl-parity.test.ts` with Atlas available on `PATH`.
+The reference database exists only under the test's temporary directory and is removed when the test finishes.
+Production HCL analysis remains independent of Atlas and host databases.
+
 ## Native SQLite and D1 execution
 
 Native batching uses the existing Standard Query interface, `query["~standard"].query.text` and `.encode(input)`, with the driver's own prepared statements.
@@ -56,13 +84,31 @@ An application must validate D1 execution with its own native `prepare()`, `bind
 
 ## Package build and license packaging
 
-Package builds retain the upstream `scripts/build.ts` behavior: `nub run build` replaces `dist/`, builds all four engine packages, and includes the playground in `dist/reylo`.
-Use upstream's nub 0.9.6 on Node 24 and run `nub install --frozen-lockfile` at the repository root and in `site/` before building.
-Local SQLite consumers link `dist/reylo` and `dist/sqlite` from that complete build.
-The retained packaging change copies `licenses/` into each engine distribution and declares its combined MIT and MPL-2.0 contents because each tooling bundle includes the native HCL parser port.
+Package builds write only `dist/reylo` and `dist/sqlite`.
+Use nub 0.9.6 on Node 24 or later and install the repository's dependencies before building.
+Local SQLite consumers link those two built distributions.
+The packaging copies `licenses/` into the engine distribution and declares its combined MIT and MPL-2.0 contents because the tooling bundle includes the native HCL parser port.
 
 Raw TypeScript source links can load natively after Node resolves symlinks outside `node_modules`, but they also expose implementation files to the consuming application's compiler options.
 Built links expose the official JavaScript and declarations instead, preserving application type checks without rewriting upstream implementation or weakening compiler settings.
-No package publishing, duplicate compiler, custom execution driver or toolchain migration is required.
+No duplicate compiler, custom execution driver or toolchain migration is required.
+
+## Fork npm publication
+
+`.github/workflows/publish.yml` runs on pushes to `main`, without a tag or release trigger.
+It follows the library template's workflow structure, pinned checkout with credentials disabled, job permissions, Nix shell loading, and shared `setup-nix`, `setup-typescript`, and `publish-npm` action order.
+The template reference is [`template-vite-plus-lib@bba7ce226000366b8f20fe4bc26623f98acccc20`](https://github.com/totto2727-org/template-vite-plus-lib/tree/bba7ce226000366b8f20fe4bc26623f98acccc20).
+That revision still has a tag filter despite its main-push policy comments; this fork uses the required main-push trigger.
+Keep other template settings unchanged unless this fork requires a difference.
+Nub builds the two maintained distributions, and the shared publisher stages the SQLite engine before the runtime.
+Nub setup, the upstream build command instead of `vp pack`, and the two package directories are required differences because upstream already builds separate runtime and engine distributions.
+On Node 24, Nub also supplies the Temporal API used by retained shared value tests; direct `node --test` is not equivalent to `nub run test`.
+CI retains the upstream Node test runner, the Linux and Windows matrix, and Atlas for the optional HCL parity regression instead of the template's Vite+ checks.
+The minimal `flake.nix` supplies only the empty Linux shell required by the shared publisher, using the library template's locked Nixpkgs input.
+It installs no JavaScript runtime, package manager, or build tool through Nix.
+The package manifests declare public npm publication without changing source-package privacy.
+The fork's publication entry point is `publish.yml`, restricted to the two maintained packages.
+Publication requires the npm scope owner's trusted-publisher configuration and separate npm approval of staged versions.
+See [the publishing guide](publishing.md) for setup and package boundaries.
 
 When syncing upstream, update the exact base hash above and maintain this record with the retained source changes.

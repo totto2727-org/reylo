@@ -77,7 +77,7 @@ export async function sqlModule(path: string, sql: string): Promise<SqlModule> {
   // to learn whether that schema allows null.
   const checked = analysis.params.some((p) => p.schema !== undefined || p.cast !== undefined || p.type.kind === "rows" || (p.type.kind === "json" && p.type.schema !== undefined && !p.nullable));
   const code = [
-    `import { defineQuery${checked ? ", checks" : ""} } from "reylo";`,
+    `import { defineQuery${checked ? ", checks" : ""} } from "@totto2727/reylo";`,
     // `sql` is the compiled statement and `raw` the file as written; the definition's own `sql` is
     // the statement as written and its `text` the compiled one. The comment naming the file
     // (src/sqlcommenter.ts) is added where the statement is sent, so `sql` leaves it out.

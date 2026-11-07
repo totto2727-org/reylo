@@ -106,7 +106,7 @@ WASI_SDK_PATH=$(cd "$WASI_SDK_PATH" && pwd)
 SYSROOT="$WASI_SDK_PATH/share/wasi-sysroot"
 STUBS="$(pwd)/postgres/vendor/stubs"
 JCO="$(cd .. && pwd)/node_modules/@bytecodealliance/jco/dist/jco.js"
-[ -f "$JCO" ] || { echo "jco not found: nub install at the repository's root" >&2; exit 1; }
+[ -f "$JCO" ] || { echo "jco not found: install @bytecodealliance/jco@1.39.0 locally before regenerating engines" >&2; exit 1; }
 
 # The components are published, so they name no path on the machine that built them: the checkout,
 # the Cargo registry and wasi-sdk are written as /reylo, /cargo and /wasi-sdk wherever the Rust
