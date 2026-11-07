@@ -1,180 +1,86 @@
-<h1 align="center">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="site/public/readme-logo-dark.svg" />
-    <img src="site/public/readme-logo-light.svg" width="160" alt="Reylo" />
-  </picture>
-</h1>
+# Reylo: SQLite and HCL
 
-<p align="center">Import <code>.sql</code> files into your TypeScript code with full type inference</p>
-
-<p align="center">
-  <a href="https://github.com/colinhacks/reylo/actions/workflows/test.yml"><img src="https://github.com/colinhacks/reylo/actions/workflows/test.yml/badge.svg?branch=main" alt="test status" /></a>
-  <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/github/license/colinhacks/reylo?style=flat" alt="License: MIT" /></a>
-  <a href="https://www.npmjs.com/package/@totto2727/reylo"><img src="https://img.shields.io/npm/v/%40totto2727%2Freylo" alt="npm version" /></a>
-  <a href="https://github.com/colinhacks/reylo"><img src="https://img.shields.io/github/stars/colinhacks/reylo" alt="GitHub stars" /></a>
-</p>
-
-<div align="center">
-  <a href="https://reylo.dev">Read the docs →</a>
-</div>
-
-<br/>
-
-Fork maintainers: see [publishing scoped packages](docs/publishing.md) for npm trusted-publisher setup and staged release approval.
-
-<p align="center">
-  <img src="site/public/readme-demo.gif" alt="An editor: hovering a query's result shows its type, which follows the SQL as the SQL changes" />
-</p>
-
-<br/>
-
-If you have a file like this:
-
-```sql
--- get_author.sql
-select u.id, u.name, count(p.id)::int as post_count
-from users u
-left join posts p on p.user_id = u.id
-where u.id = :id::int
-group by u.id
-```
-
-You can import it directly from a TypeScript file like this:
-
-```ts
-// main.ts
-import postgres from "postgres";
-import getAuthor from "./get_author.sql";
-
-const db = postgres(process.env.DATABASE_URL);
-
-const author = await getAuthor.run(db, { id: 1 });
-// { id: number; name: string; post_count: number } | null
-```
-
-Reylo is powered by TypeScript [content mappers](https://github.com/microsoft/typescript-go/pull/4712), introduced in TypeScript 7.1 (currently [in beta](https://devblogs.microsoft.com/typescript/announcing-typescript-7-1-beta/)), which let you dynamically define static types for external file types and integrate them directly into TypeScript compilation.
-
-Reylo is the perfect option for the agent era:
-
-- 💪 **The full power of SQL** — any syntax, function or operator your database supports
-- 🌵 **DRY** — no redundant hand-written types
-- 🎯 **Checked against your database** — a misspelled column is a type error
-- 🤖 **Agent-friendly** — DRY code is more maintainable for agents
-- 🧩 **Postgres, MySQL, SQLite and DuckDB** — Neon, PlanetScale, Cloudflare D1, Turso and more
-- 🔌 **Bring your own driver** — `pg`, postgres.js, `mysql2`, `better-sqlite3` and [more](#supported-drivers)
-- ⚡ **No codegen** — no generated files, no watcher
+This fork of [Reylo](https://github.com/colinhacks/reylo) imports `.sql` files as typed TypeScript queries.
+It maintains only the runtime `@totto2727/reylo` and the SQLite engine `@totto2727/reylo-sqlite`.
+Analysis reads a local SQLite database or a static Atlas HCL schema.
+The application supplies its own SQLite driver for execution.
 
 ## Setup
 
-To install Reylo, you'll need:
-
-- **TypeScript 7.1 (currently in beta).** The first release with content mappers.
-- **Node 24 or later.**
-- **A running dev database.** Postgres, MySQL 8.0.22 or later, or a SQLite or DuckDB file: Reylo reads your current schema from it.
-
-Install Reylo, the engine for your database and TypeScript 7.1:
+Use Node 24 or later and TypeScript 7.1 with content mapper support.
+Install the runtime and SQLite engine at the same version:
 
 ```sh
-npm install @totto2727/reylo
-npm install -D @totto2727/reylo-postgres  # or @totto2727/reylo-mysql, @totto2727/reylo-sqlite, @totto2727/reylo-duckdb
-npm install -D typescript@beta
+nub add @totto2727/reylo
+nub add -D @totto2727/reylo-sqlite typescript@7.1.0-beta
 ```
 
-Add Reylo to `tsconfig.json`, for `.sql` files and for its project file, `.reylo.yaml` or `.reylo.yml`:
+Configure the content mapper in `tsconfig.json`:
 
-```jsonc
-// tsconfig.json
+```json
 {
-  "compilerOptions": { /* ... */ },
+  "compilerOptions": {
+    "target": "esnext",
+    "module": "nodenext",
+    "strict": true,
+    "noEmit": true
+  },
   "contentMappers": [
-    { "package": "@totto2727/reylo", "extensions": [".sql", ".reylo.yaml", ".reylo.yml"] }
+    {
+      "package": "@totto2727/reylo",
+      "extensions": [".sql", ".reylo.yaml", ".reylo.yml"]
+    }
   ]
 }
 ```
 
-Then type-check with `--runExternalCode`, which lets `tsc` run content mappers:
+Choose one analysis source in `.reylo.yaml`:
 
-```jsonc
-// package.json
-{
-  "scripts": {
-    "typecheck": "tsc --noEmit --runExternalCode"
-  }
-}
+```yaml
+# A local database that already contains the schema:
+direct_url: file:./app.db
 ```
 
-Point Reylo at your dev database with `DATABASE_URL`, in your environment or in `.env`. Its scheme tells Reylo which database you use:
-
-```sh
-# .env
-DATABASE_URL=postgres://localhost:5432/app  # or mysql://…, file:./app.db for SQLite, duckdb:./app.duckdb for DuckDB
+```yaml
+# Or a local static Atlas SQLite schema:
+direct_url: hcl:./schema.hcl
 ```
 
-To make `.sql` imports work at run time too, load Reylo where your code runs. On Node:
+HCL analysis needs no Atlas executable, database server, or migration execution.
+It supports static SQLite `main` schemas, not arbitrary HCL evaluation.
+The schema is an analysis input, not a runtime connection or a migration.
+The application must create and maintain its runtime database separately.
 
-```sh
-node --env-file=.env --import @totto2727/reylo/register main.ts
-```
-
-For Bun, Nub, Vite, Next.js, esbuild, webpack, Rspack, Cloudflare Workers and Jest, add [the plugin for your setup](https://reylo.dev/#plugins), or copy its complete [example project](https://github.com/colinhacks/reylo/tree/main/examples). To see the types as you type, set up [your editor](https://reylo.dev/#editors).
-
-## Usage
-
-Write a query in a `.sql` file, import it, and run it with your database driver:
+## Use typed SQL
 
 ```sql
 -- get_user.sql
-select id, name, email from users where id = :id::int
+select id, name from users where id = :id
 ```
 
 ```ts
+import { DatabaseSync } from "node:sqlite";
 import getUser from "./get_user.sql";
 
-const user = await getUser.run(db, { id: 1 });
-// { id: number; name: string; email: string | null } | null
+const db = new DatabaseSync("app.db");
+const user = getUser.runSync(db, { id: 1 });
+console.log(user);
+db.close();
 ```
 
-Name each parameter with a colon, and give it a type with a cast where the query doesn't pin one down. Pass `.run()` your driver's client: a pool, a client, or a connection or transaction taken from one.
+Enable the loader with `node --import @totto2727/reylo/register main.ts`, or use the preload configuration in the [nub example](examples/nub/README.md).
+Run the type check with `nubx tsc --noEmit --runExternalCode`.
+See the [examples](examples/README.md) for complete SQLite and HCL projects, and the [usage skill](skills/using-reylo/SKILL.md) for configuration and native-driver guidance.
 
-It resolves to the rows, shaped by how many the query can return:
+## Maintenance
 
-| The query | Resolves to |
-| --- | --- |
-| A match on a primary or unique key, or `limit 1` | `Row \| null` |
-| An aggregate without `group by`, a one-row `insert … returning` | `Row` |
-| An `insert`, `update` or `delete` without `returning` | `void` |
-| Anything else | `Row[]` |
-
-An imported query also has `.runSync()`, `.try()`, `.with()`, `.sql`, `.raw` and `.source` ([Usage](https://reylo.dev/#usage)). Every query Reylo runs is published on Node's tracing channel `reylo:query`, for a tracer or a logger to subscribe to ([Tracing](https://reylo.dev/#tracing)).
-
-## What Reylo infers
-
-To type a query, Reylo has your dev database prepare it, without running it, and reads back the type of every column and parameter. On top of that, it infers:
-
-- **Nulls** — a column is nullable unless its schema, a join or a `where` test rules null out.
-- **Cardinality** — a match on a unique key is one row or `null`, and an aggregate is exactly one row.
-- **Unions** — an enum, or a column whose check constraint lists its values, is a union of them.
-- **JSON** — JSON the query builds, and a JSON column with a JSON Schema check, keep their shape.
-
-Each has examples in [Inference](https://reylo.dev/#inference).
-
-## Supported drivers
-
-Reylo is bring-your-own-driver. Pass `.run()` a client from any of these, or a Drizzle database over one:
-
-- **Postgres** — `pg`, postgres.js, `Bun.sql`, PGlite, Neon, `pg-promise`, `slonik`, `@vercel/postgres`
-- **MySQL** — `mysql2`, `mariadb`, PlanetScale, `Bun.sql`
-- **SQLite** — `better-sqlite3`, `node:sqlite`, `Bun.sql`, libSQL, Turso, Cloudflare D1 and Durable Objects, `sqlite3`, `sqlite`
-- **DuckDB** — `@duckdb/node-api`, which also types DuckDB's statements
-
-## Documentation
-
-[reylo.dev](https://reylo.dev) covers the rest: every plugin and editor, configuration, errors, each database's data types and edge cases, and advanced examples. Agents can read it all as Markdown at [reylo.dev/llms.txt](https://reylo.dev/llms.txt).
-
-## Fork differences
-
-This fork adds local Atlas HCL schema analysis for SQLite. Native batches use the existing Standard Query interface. Package builds use the upstream nub workflow, including all engines and the playground. See [upstream differences](docs/upstream-differences.md) for the exact base revision, scope and limits.
+Read [AGENTS.md](AGENTS.md) before changing this repository.
+The [upstream differences](docs/upstream-differences.md) record the exact upstream base and retained shared code.
+The [publishing guide](docs/publishing.md) describes the two-package release.
+Upstream's [documentation](https://reylo.dev) describes a broader product and is not this fork's support matrix.
 
 ## License
 
-[MIT](LICENSE)
+Reylo retains its [MIT license](LICENSE).
+The translated native HCL parser carries [MPL-2.0](licenses/hashicorp-hcl-MPL-2.0.txt), with additional notices in [licenses/](licenses/).
+See the [upstream source](https://github.com/colinhacks/reylo) and this fork's [source](https://github.com/totto2727-org/reylo).

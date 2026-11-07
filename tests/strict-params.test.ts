@@ -1,16 +1,14 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, symlinkSync, writeFileSync } from "node:fs";
-import { createRequire } from "node:module";
 import { DatabaseSync } from "node:sqlite";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { transform, DRIVERS, PG, MYSQL, pgLive, mysqlLive } from "./helpers.ts";
+import { transform, DRIVERS } from "./helpers.ts";
 
 // A parameter nothing in the statement types is error reylo12 in the type check unless the project
 // file says `strict_params: false`. The content
-// mapper runs as the type check runs it, through its own JSON-RPC process. Postgres and MySQL run
-// on throwaway servers (REYLO_TEST_PG, REYLO_TEST_MYSQL), each in a database of its own.
+// mapper runs as the type check runs it, through its own JSON-RPC process.
 
 function project(url: string, reylo: string | undefined, driver?: string, name = ".reylo.yaml"): string {
   const root = mkdtempSync(join(tmpdir(), "reylo-strict-"));
@@ -92,43 +90,4 @@ test("SQLite: a parameter as a whole sort or group key is error reylo17 at the p
   assert.match(out["grouped.sql"]!.text, /export type Row = \{ n: number \}/);
   // The case the message suggests chooses the column with the parameter.
   assert.deepEqual(out["chosen.sql"]!.diagnostics, []);
-});
-
-test("Postgres: a JSON cast without a schema is no untyped parameter", { skip: pgLive }, async () => {
-  const require = createRequire(join(DRIVERS, "postgres", "package.json"));
-  const postgres = require("postgres");
-  const admin = postgres(PG!, { max: 1, onnotice: () => {} });
-  const name = `reylo_strict_${process.pid}`;
-  await admin.unsafe(`drop database if exists ${name}`);
-  await admin.unsafe(`create database ${name}`);
-  const url = new URL(PG!);
-  url.pathname = `/${name}`;
-  try {
-    await jsonCast(url.href, "select :doc::jsonb ->> 'a' as a, :plain::json as plain\n", "postgres");
-  } finally {
-    await admin.unsafe(`drop database if exists ${name} with (force)`);
-    await admin.end();
-  }
-});
-
-test("MySQL: a JSON cast without a schema is no untyped parameter, and every cast types its parameter", { skip: mysqlLive }, async () => {
-  const require = createRequire(join(DRIVERS, "mysql2", "package.json"));
-  const mysql = require("mysql2/promise");
-  const server = new URL(MYSQL!);
-  const admin = await mysql.createConnection({ host: server.hostname, port: Number(server.port), user: decodeURIComponent(server.username) || "root", password: decodeURIComponent(server.password) });
-  const name = `reylo_strict_${process.pid}`;
-  await admin.query(`drop database if exists ${name}`);
-  await admin.query(`create database ${name}`);
-  const url = new URL(MYSQL!);
-  url.pathname = `/${name}`;
-  try {
-    await jsonCast(url.href, "select json_extract(:doc::json, '$.a') as a\n", "mysql2");
-    await admin.query(`create table ${name}.users (id bigint primary key, name varchar(50) not null)`);
-    const casts = await transform(project(url.href, undefined, "mysql2"), CASTS);
-    for (const file of Object.keys(CASTS)) assert.deepEqual(casts[file]!.diagnostics, [], file);
-    assert.match(casts["casts.sql"]!.text, CAST_TYPES);
-  } finally {
-    await admin.query(`drop database if exists ${name}`);
-    await admin.end();
-  }
 });

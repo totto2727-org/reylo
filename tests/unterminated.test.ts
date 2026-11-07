@@ -6,13 +6,13 @@ import { DatabaseSync } from "node:sqlite";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { withinFile } from "../src/module-types.ts";
-import { DRIVERS, PG, pgLive, ROOT } from "./helpers.ts";
+import { ROOT } from "./helpers.ts";
 
 // A statement that ends inside a string, a quoted name or a comment is an error at what it leaves
 // open, and its module is still typed. The error once sat at the end of the text, one byte past
 // the end of the file, and TypeScript refused the whole transform ("The content mapper returned an
 // invalid transform response"), which made the import `any`. The type check runs as a project runs
-// it, `tsc` with runExternalCode: over SQLite, and over Postgres where REYLO_TEST_PG names a server.
+// it, `tsc` with runExternalCode over SQLite.
 // TypeScript's own launcher, run by this Node: node_modules/.bin holds a shell script, which Windows cannot start.
 const TSC = join(ROOT, "node_modules", "typescript", "bin", "tsc");
 
@@ -50,13 +50,6 @@ test("SQLite: an unterminated string, quoted name or comment is an error at its 
   assert.deepEqual(out.split("\n").sort(), EXPECTED, out);
 });
 
-test("Postgres: an unterminated string, quoted name or comment is an error at its start, in a typed module", { skip: pgLive }, () => {
-  const out = check(PG!, "postgres", (root) => {
-    mkdirSync(join(root, "node_modules"), { recursive: true });
-    symlinkSync(join(DRIVERS, "postgres"), join(root, "node_modules", "postgres"));
-  });
-  assert.deepEqual(out.split("\n").sort(), EXPECTED, out);
-});
 
 test("a diagnostic's range is cut at the end of the file, never past it", () => {
   assert.deepEqual(withinFile(7, 1, 9), { start: 7, length: 1 });

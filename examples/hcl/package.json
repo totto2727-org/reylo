@@ -1,0 +1,17 @@
+{
+  "name": "reylo-example-hcl",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc --noEmit --runExternalCode",
+    "start": "node --import @totto2727/reylo/register main.ts"
+  },
+  "dependencies": {
+    "@totto2727/reylo": "link:../../dist/reylo"
+  },
+  "devDependencies": {
+    "@totto2727/reylo-sqlite": "link:../../dist/sqlite",
+    "@types/node": "^26.6.5",
+    "typescript": "7.1.0-beta"
+  }
+}

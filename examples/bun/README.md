@@ -43,10 +43,9 @@ Each run of `start` adds a post; `nub run setup` starts over. The tests roll the
 ## In your own project
 
 - Install from npm instead of the `link:` dependencies: `bun add @totto2727/reylo` and `bun add -d @totto2727/reylo-sqlite typescript@beta @types/bun`.
-- The `.npmrc` file (`minimumReleaseAge=0`) exists only because this machine holds fresh releases back; drop it.
 
 ## Notes
 
 - Without the `[test]` preload, `bun test` imports each `.sql` file as its path, a string, and the tests fail with a `TypeError` such as `createPost.runSync is not a function`.
 - Running `bun dist/main.js` still loads the preload of `bunfig.toml` in this directory, though the bundle never uses it: copied with `app.db` into an empty directory, `bun main.js` prints the same rows.
-- SQLite infers no union from a `check` constraint, so `role` is a `string` here, where Postgres's enum gives `"admin" | "member"`.
+- SQLite infers no literal union from a `check` constraint, so `role` is a `string` here.

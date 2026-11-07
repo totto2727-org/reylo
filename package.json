@@ -45,30 +45,16 @@
     "test": "node --test 'tests/**/*.test.ts'"
   },
   "devDependencies": {
-    "@bytecodealliance/jco": "1.39.0",
     "@bytecodealliance/preview2-shim": "0.30.0",
-    "@duckdb/node-api": "2.0.0-r.1",
-    "@totto2727/reylo-duckdb": "link:packages/duckdb",
-    "@totto2727/reylo-mysql": "link:packages/mysql",
-    "@totto2727/reylo-postgres": "link:packages/postgres",
     "@totto2727/reylo-sqlite": "link:packages/sqlite",
     "@types/node": "^26.6.1",
     "esbuild": "^0.28.2",
-    "slonik": "49.12.0",
     "typescript": "^7.1.0-dev.20260918.1"
   },
   "peerDependencies": {
-    "@totto2727/reylo-duckdb": "0.6.0",
-    "@totto2727/reylo-mysql": "0.6.0",
-    "@totto2727/reylo-postgres": "0.6.0",
-    "@totto2727/reylo-sqlite": "0.6.0",
-    "slonik": ">=49.12.0"
+    "@totto2727/reylo-sqlite": "0.6.0"
   },
   "peerDependenciesMeta": {
-    "@totto2727/reylo-duckdb": { "optional": true },
-    "@totto2727/reylo-mysql": { "optional": true },
-    "@totto2727/reylo-postgres": { "optional": true },
-    "@totto2727/reylo-sqlite": { "optional": true },
-    "slonik": { "optional": true }
+    "@totto2727/reylo-sqlite": { "optional": true }
   }
 }

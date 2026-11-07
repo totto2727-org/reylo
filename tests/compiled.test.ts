@@ -7,12 +7,11 @@ import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { sqlModule } from "../src/loader.ts";
 import { defineQuery } from "../src/index.ts";
-import { declarations, DRIVERS, pgLive, mysqlLive, INDEX, postgresDatabase, closeSessions, mysqlDatabase } from "./helpers.ts";
+import { declarations, DRIVERS, INDEX, closeSessions } from "./helpers.ts";
 
 // A query's `sql` is the statement as Reylo sends it to the database, the engine's compiled text,
 // and `raw` the file as written. Both are the module's exports too,
-// and the content mapper declares both as string literals. Postgres and MySQL run on throwaway
-// servers (REYLO_TEST_PG, REYLO_TEST_MYSQL), each test in a database of its own.
+// and the content mapper declares both as string literals.
 
 function project(url: string, driver?: string): string {
   const root = mkdtempSync(join(tmpdir(), "reylo-compiled-"));
@@ -134,109 +133,8 @@ test("SQLite: a statement that fires no trigger declares its QueryError narrowed
   }
 });
 
-test("Postgres: `sql` numbers the parameters and keeps a typed JSON parameter's cast as `$1::jsonb`", { skip: pgLive }, async () => {
-  const own = await postgresDatabase("reylo_compiled");
-  const url = new URL(own.url);
-  const sql = own.sql;
-  const root = project(url.href, "postgres");
-  const names = `select :names::jsonb('{ "type": "array", "items": { "type": "string" } }') as names\n`;
-  try {
-    await sql.unsafe(`create table users (id int generated always as identity primary key, name text not null, email text); insert into users (name, email) values ('Ada', 'ada@example.com')`).simple();
-    const getUser = await built(root, "get_user", GET_USER);
-    assert.equal(getUser.default.sql, "select id, name, email from users where id = $1");
-    assert.equal(getUser.sql, getUser.default.sql);
-    assert.equal(getUser.default.raw, GET_USER);
-    assert.equal(getUser.raw, GET_USER);
-    assert.deepEqual({ ...((await getUser.default.run(sql, { id: 1 })) as object) }, { id: 1, name: "Ada", email: "ada@example.com" });
-    const json = await built(root, "names", names);
-    assert.equal(json.default.sql, "select $1::jsonb as names");
-    assert.equal(json.default.raw, names);
-    assert.deepEqual({ ...((await json.default.run(sql, { names: ["a", "b"] })) as object) }, { names: ["a", "b"] });
-    await closeSessions();
-    const declared = await declarations(root, { "get_user.sql": GET_USER, "names.sql": names });
-    assert.deepEqual(texts(declared["get_user.sql"]!), [
-      `export declare const sql: "select id, name, email from users where id = $1";`,
-      `export declare const raw: "select id, name, email from users where id = :id\\n";`,
-      `declare const query: Query<…> & {`,
-      `  readonly sql: typeof sql;`,
-      `  readonly raw: typeof raw;`,
-      `  readonly source: string;`,
-    ]);
-    assert.deepEqual(texts(declared["names.sql"]!).slice(0, 2), [`export declare const sql: "select $1::jsonb as names";`, `export declare const raw: ${JSON.stringify(names)};`]);
-  } finally {
-    await closeSessions();
-    await own.drop();
-  }
-});
 
-test("Postgres: a statement that runs only the server's own code declares its QueryError narrowed to what it writes through, and one a trigger runs on the whole of it", { skip: pgLive }, async () => {
-  const own = await postgresDatabase("reylo_query_error");
-  const url = new URL(own.url);
-  const sql = own.sql;
-  const root = project(url.href, "postgres");
-  const insert = "insert into users (email, age) values (:email::text, :age::int)\n";
-  const audited = "insert into audited (id) values (:id::int)\n";
-  const select = "select id, email from users\n";
-  try {
-    await sql.unsafe(`
-      create table users (id int generated always as identity primary key, email text unique not null, age int constraint adult check (age >= 18));
-      create table audited (id int primary key);
-      create function audit() returns trigger language plpgsql as $$ begin return new; end $$;
-      create trigger audited_audit before insert on audited for each row execute function audit();
-    `).simple();
-    const declared = await declarations(root, { "insert_user.sql": insert, "insert_audited.sql": audited, "list_users.sql": select });
-    const queryError = (file: string) => /^export type QueryError = ([\s\S]*?>);$/m.exec(declared[file]!)![1];
-    assert.equal(queryError("insert_user.sql"), [
-      `import("@totto2727/reylo").PostgresQueryError<{`,
-      `  "23502": { column: "email" | "id"; table: "users" };`,
-      `  "23505": { constraint: "users_email_key" | "users_pkey"; table: "users" };`,
-      `  "23514": { constraint: "adult"; table: "users" };`,
-      `}>`,
-    ].join("\n"));
-    assert.equal(queryError("insert_audited.sql"), `import("@totto2727/reylo").QueryError<"postgres">`);
-    assert.equal(queryError("list_users.sql"), `import("@totto2727/reylo").PostgresQueryError<{}>`);
-    assert.match(declared["insert_user.sql"]!, /^declare const query: Query<.*, "none", "postgres", QueryError> & \{$/m);
-  } finally {
-    await closeSessions();
-    await own.drop();
-  }
-});
 
-test("MySQL: `sql` has `?` placeholders and writes a typed JSON parameter's cast as `cast(? as json)`", { skip: mysqlLive }, async () => {
-  const own = await mysqlDatabase("reylo_compiled");
-  const url = new URL(own.url);
-  const db = own.db;
-  const root = project(url.href, "mysql2");
-  const names = `select :names::json('{ "type": "array", "items": { "type": "string" } }') as names\n`;
-  try {
-    await db.query("create table users (id int auto_increment primary key, name varchar(100) not null, email varchar(100))");
-    await db.query("insert into users (name, email) values ('Ada', 'ada@example.com')");
-    const getUser = await built(root, "get_user", GET_USER);
-    assert.equal(getUser.default.sql, "select id, name, email from users where id = ?");
-    assert.equal(getUser.sql, getUser.default.sql);
-    assert.equal(getUser.default.raw, GET_USER);
-    assert.equal(getUser.raw, GET_USER);
-    assert.deepEqual({ ...((await getUser.default.run(db, { id: 1 })) as object) }, { id: 1, name: "Ada", email: "ada@example.com" });
-    const json = await built(root, "names", names);
-    assert.equal(json.default.sql, "select cast(? as json) as names");
-    assert.equal(json.default.raw, names);
-    assert.deepEqual({ ...((await json.default.run(db, { names: ["a", "b"] })) as object) }, { names: ["a", "b"] });
-    await closeSessions();
-    const declared = await declarations(root, { "get_user.sql": GET_USER, "names.sql": names });
-    assert.deepEqual(texts(declared["get_user.sql"]!), [
-      `export declare const sql: "select id, name, email from users where id = ?";`,
-      `export declare const raw: "select id, name, email from users where id = :id\\n";`,
-      `declare const query: Query<…> & {`,
-      `  readonly sql: typeof sql;`,
-      `  readonly raw: typeof raw;`,
-      `  readonly source: string;`,
-    ]);
-    assert.deepEqual(texts(declared["names.sql"]!).slice(0, 2), [`export declare const sql: "select cast(? as json) as names";`, `export declare const raw: ${JSON.stringify(names)};`]);
-  } finally {
-    await closeSessions();
-    await own.drop();
-  }
-});
 
 test("the comment naming the file is sent and left out of sql, sqlcommenter: false leaves it off, and a running build sees the change", async () => {
   const root = project("file:./app.db");

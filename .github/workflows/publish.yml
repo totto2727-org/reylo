@@ -19,21 +19,10 @@ jobs:
         with:
           nub-version: '0.9.6'
           node-version: '24'
-      - run: nub install --frozen-lockfile
-        working-directory: site
       - run: nub run build
       - uses: totto2727-org/monorepo/.github/actions/publish-npm@main
         with:
-          working-directory: dist/postgres
-      - uses: totto2727-org/monorepo/.github/actions/publish-npm@main
-        with:
           working-directory: dist/sqlite
-      - uses: totto2727-org/monorepo/.github/actions/publish-npm@main
-        with:
-          working-directory: dist/mysql
-      - uses: totto2727-org/monorepo/.github/actions/publish-npm@main
-        with:
-          working-directory: dist/duckdb
       - uses: totto2727-org/monorepo/.github/actions/publish-npm@main
         with:
           working-directory: dist/reylo

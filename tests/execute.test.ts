@@ -1,12 +1,10 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { createRequire } from "node:module";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { arrayLiteral, execute, executeSync, type QueryModule } from "../src/execute.ts";
 import { checks, defineQuery } from "../src/index.ts";
 import type { EngineType, JsonSchema } from "../src/engine-type.ts";
-import { DRIVERS, pgLive, postgresDatabase } from "./helpers.ts";
 
 // Each fake client records what execute handed it and answers the way its driver does; the
 // driver behaviour each one copies was checked against the real package (lab/driver-matrix).
@@ -376,39 +374,6 @@ test("postgres: Neon's neon() before 1.0 is called with (text, values)", async (
   assert.deepEqual(Object.keys(calls[0]!.args[2] as object), ["fullResults", "arrayMode", "types"]);
 });
 
-// postgres.js on a throwaway server (REYLO_TEST_PG), in a database of its own; the driver is lab/drivers'.
-
-test("postgres.js: a statement with parameters is prepared on its connection and run again from there, unless the client was made with prepare: false", { skip: pgLive }, async () => {
-  const postgres = createRequire(join(DRIVERS, "postgres", "package.json"))("postgres");
-  const own = await postgresDatabase("reylo_execute_prepare");
-  const url = new URL(own.url);
-  const prepared = own.sql;
-  const unprepared = postgres(url.href, { max: 1, prepare: false, onnotice: () => {} });
-  const q: QueryModule<"postgres"> = { dialect: "postgres", sql: "select id, name from users where id = :id::int", params: ["id"] };
-  const text = "select id, name from users where id = $1::int";
-  // pg_prepared_statements lists the statements of the connection that reads it, and how often
-  // each ran: two plans for two runs is one statement prepared once and run twice.
-  const statements = async (c: { unsafe(text: string): Promise<Record<string, unknown>[]> }) =>
-    [...(await c.unsafe("select statement, custom_plans + generic_plans as runs from pg_prepared_statements where statement = '" + text + "'"))].map((r) => ({ ...r }));
-  try {
-    await prepared.unsafe("create table users (id int primary key, name text not null); insert into users values (1, 'Ada')");
-    for (const client of [prepared, unprepared]) {
-      const reserved = await client.reserve();
-      try {
-        for (let i = 0; i < 2; i++) assert.deepEqual((await execute(reserved, q, { id: 1 })).map((r) => ({ ...(r as object) })), [{ id: 1, name: "Ada" }]);
-        assert.deepEqual(await statements(reserved), client === prepared ? [{ statement: text, runs: "2" }] : []);
-      } finally {
-        reserved.release();
-      }
-    }
-    // A transaction runs on one connection of the client, prepared too.
-    assert.deepEqual(await prepared.begin(async (tx: never) => (await execute(tx, q, { id: 1 }), statements(tx))), [{ statement: text, runs: "3" }]);
-  } finally {
-    await unprepared.end();
-    await own.drop();
-  }
-});
-
 test("a parameter left out binds NULL, which postgres.js, mysql2, node:sqlite and libSQL would reject", async () => {
   const seen: unknown[][] = [];
   const client = { unsafe: async (_: string, values?: unknown[]) => (seen.push(values!), []) };
@@ -693,56 +658,6 @@ test("the driver's own error comes through unchanged", async () => {
   await assert.rejects(() => execute({ query: async () => Promise.reject(duplicate) }, pg, { id: 1 }) as Promise<unknown>, (e) => e === duplicate);
   const db = new DatabaseSync(":memory:");
   assert.throws(() => execute(db, { dialect: "sqlite", sql: "selec 1", params: [] }), /syntax error/);
-});
-
-test("postgres: Slonik, through a tag from its own createSqlTag that passes every converted type through as text", async () => {
-  const sent: { sql: string; values: unknown[]; typeParsers?: { name: string }[] }[] = [];
-  // Slonik's pool, connections and transactions: query() runs a token and gives pg's rows and fields.
-  // A pool has its settings on configuration; a connection, transaction or savepoint on clientConfiguration.
-  const client = (rows: Record<string, unknown>[], fields: { name: string; dataTypeId: number }[], configuration?: object, on: "configuration" | "clientConfiguration" = "configuration") => ({
-    [on]: configuration,
-    maybeOneFirst() {},
-    anyFirst() {},
-    query: async (token: (typeof sent)[number]) => (sent.push(token), { rows: rows.map((r) => ({ ...r })), fields }),
-  });
-  const row = { n: "12345678901234567890.123456789", at: "2026-10-23 05:34:56.123456-07", iv: "-1 days", nums: ["1.10", null], flag: "t", price: "$1.50" };
-  const fields = [["n", 1700], ["at", 1184], ["iv", 1186], ["nums", 1231], ["flag", 16], ["price", 790]].map(([name, dataTypeId]) => ({ name: name as string, dataTypeId: dataTypeId as number }));
-  const decoded = { n: "12345678901234567890.123456789", at: "2026-10-23T12:34:56.123456Z", iv: "-P1D", nums: ["1.10", null], flag: true, price: "$1.50" };
-  const q: QueryModule<"postgres"> = {
-    dialect: "postgres",
-    sql: "select n, at, iv, nums, flag, '$1.50'::money as price from t -- :x\nwhere id = :id and raw = :raw and note is not distinct from :note",
-    params: ["id", "raw", "note"],
-    columns: [["n", "decimal"], ["at", "timestamptz"], ["iv", "interval"], ["nums", "decimal[]"], ["flag", "bool"], ["price", "text"]],
-  };
-  assert.deepEqual(await execute(client([row], fields, { typeParsers: [{ name: "citext" }] }), q, { id: 9007199254740993n, raw: Uint8Array.of(1, 2) }), [decoded]);
-  // The statement as written, the literal and the comment untouched; the values in its order, as the tag takes them.
-  assert.equal(sent[0]!.sql, "select n, at, iv, nums, flag, '$1.50'::money as price from t -- :x\nwhere id = $slonik_1 and raw = $slonik_2 and note is not distinct from $slonik_3");
-  assert.deepEqual(sent[0]!.values, [9007199254740993n, "\\x0102", null]);
-  const names = sent[0]!.typeParsers!.map((p) => p.name);
-  for (const name of ["numeric", "timestamptz", "interval", "int8", "date", "json", "citext"]) assert.ok(names.includes(name), name);
-  // Positional placeholders out of order bind in the order they appear.
-  sent.length = 0;
-  const positional: QueryModule<"postgres"> = { dialect: "postgres", sql: "select $2::int as b, $1::text as a", params: ["1", "2"] };
-  await execute(client([], []), positional, { 1: "x", 2: 7 });
-  assert.deepEqual(sent[0]!.values, [7, "x"]);
-  // A query defined by hand, with no kinds: each column by its type's oid.
-  assert.deepEqual(await execute(client([{ at: "2026-10-23 05:34:56.123456-07" }], [{ name: "at", dataTypeId: 1184 }]), { dialect: "postgres", sql: "select at from t", params: [] }), [{ at: "2026-10-23T12:34:56.123456Z" }]);
-  // A parameter used twice would be two parameters to Slonik's tag.
-  await assert.rejects(() => execute(client([], []), pg, { id: 1, name: "ada" }) as Promise<unknown>, /uses a parameter more than once, and Slonik's sql tag binds each use on its own/);
-  // A value the driver converted anyway (a custom driverFactory ignores the query's parsers).
-  await assert.rejects(() => execute(client([{ ...row, n: 12345678901234567000 }], fields), q, { id: 1, raw: Uint8Array.of(1) }) as Promise<unknown>, /Column "n" reached Reylo already converted by Slonik's driver \(number\)/);
-  // An interceptor that rewrites rows, on a pool or a transaction, is refused before anything runs.
-  sent.length = 0;
-  const transform = (_ctx: unknown, _query: unknown, r: object) => r;
-  for (const on of ["configuration", "clientConfiguration"] as const) {
-    for (const hook of ["transformRow", "transformRowAsync"]) {
-      const interceptor = { name: "camel", [hook]: hook === "transformRow" ? transform : async (...a: [unknown, unknown, object]) => transform(...a) };
-      await assert.rejects(() => execute(client([row], fields, { interceptors: [interceptor] }, on), q, { id: 1, raw: Uint8Array.of(1) }) as Promise<unknown>, /one of its interceptors rewrites every row/);
-    }
-  }
-  assert.equal(sent.length, 0);
-  // An interceptor that leaves the rows alone is fine.
-  assert.deepEqual(await execute(client([row], fields, { interceptors: [{ name: "log", afterQueryExecution() {} }] }, "clientConfiguration"), q, { id: 9007199254740993n, raw: Uint8Array.of(1, 2) }), [decoded]);
 });
 
 test("an unsupported client rejects, naming what it has and what reylo takes", async () => {
