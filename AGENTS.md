@@ -92,3 +92,7 @@ Use Conventional Commits with lowercase imperative subjects, at most 72 characte
 Commit finished, verified steps and keep unrelated changes separate.
 Do not commit temporary reports, local notes, or generated test databases.
 Read [docs/publishing.md](docs/publishing.md) when changing release packaging or trusted publishing.
+Keep CI and publication settings aligned with the library template unless this fork requires a difference.
+Keep publication on pushes to `main`, not tag or release triggers.
+Retain the upstream Nub build and the two distribution directories rather than migrating the toolchain to match the template.
+Record required differences and their operational impact in [upstream differences](docs/upstream-differences.md).

@@ -1,8 +1,11 @@
 name: Publish to npm
 
+# Keep this trigger when creating a project from the template.
+# Change it only for an explicit user request or a demonstrated project requirement.
+# Do not replace main-push publication with tag or release triggers.
 on:
   push:
-    tags: ['v*']
+    branches: [main]
 
 jobs:
   publish:
@@ -12,14 +15,19 @@ jobs:
       contents: read
       id-token: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
       - uses: totto2727-org/monorepo/.github/actions/setup-nix@main
       - uses: totto2727-org/monorepo/.github/actions/setup-typescript@main
       - uses: nubjs/setup-nub@c7b970ec04655a2f0a111cd436cc182a3b660e7a # v0.6.0
         with:
           nub-version: '0.9.6'
           node-version: '24'
-      - run: nub run build
+      - name: Build npm artifact
+        run: |
+          eval "$(nix print-dev-env "$GITHUB_WORKSPACE#default")"
+          nub run build
       - uses: totto2727-org/monorepo/.github/actions/publish-npm@main
         with:
           working-directory: dist/sqlite

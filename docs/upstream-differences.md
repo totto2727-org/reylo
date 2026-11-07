@@ -95,8 +95,14 @@ No duplicate compiler, custom execution driver or toolchain migration is require
 
 ## Fork npm publication
 
-`.github/workflows/publish.yml` uses the library template's `v*` tag trigger and shared `setup-nix`, `setup-typescript`, and `publish-npm` actions.
+`.github/workflows/publish.yml` runs on pushes to `main`, without a tag or release trigger.
+It follows the library template's workflow structure, pinned checkout with credentials disabled, job permissions, Nix shell loading, and shared `setup-nix`, `setup-typescript`, and `publish-npm` action order.
+The template reference is [`template-vite-plus-lib@bba7ce226000366b8f20fe4bc26623f98acccc20`](https://github.com/totto2727-org/template-vite-plus-lib/tree/bba7ce226000366b8f20fe4bc26623f98acccc20).
+That revision still has a tag filter despite its main-push policy comments; this fork uses the required main-push trigger.
+Keep other template settings unchanged unless this fork requires a difference.
 Nub builds the two maintained distributions, and the shared publisher stages the SQLite engine before the runtime.
+Nub setup, the upstream build command instead of `vp pack`, and the two package directories are required differences because upstream already builds separate runtime and engine distributions.
+CI retains the upstream Node test runner, the Linux and Windows matrix, and Atlas for the optional HCL parity regression instead of the template's Vite+ checks.
 The minimal `flake.nix` supplies only the empty Linux shell required by the shared publisher, using the library template's locked Nixpkgs input.
 It installs no JavaScript runtime, package manager, or build tool through Nix.
 The package manifests declare public npm publication without changing source-package privacy.
