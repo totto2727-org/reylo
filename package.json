@@ -1,6 +1,6 @@
 {
   "name": "@totto2727/reylo",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "private": true,
   "publishConfig": { "access": "public", "registry": "https://registry.npmjs.org/" },
   "description": "Import SQL files as fully typed queries. A TypeScript content mapper plus a runtime loader.",
@@ -52,7 +52,7 @@
     "typescript": "^7.1.0-dev.20260918.1"
   },
   "peerDependencies": {
-    "@totto2727/reylo-sqlite": "0.6.0"
+    "@totto2727/reylo-sqlite": "0.7.0"
   },
   "peerDependenciesMeta": {
     "@totto2727/reylo-sqlite": { "optional": true }

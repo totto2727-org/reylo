@@ -4483,7 +4483,7 @@ let gen= (function* _initGenerator () {
         throw new TypeError('invalid variant discriminant for expected');
       }
     }
-    _debugLog('[iface="wasi:cli/exit@0.2.12", function="exit"] [Instruction::CallInterface] (sync, @ enter)');
+    _debugLog('[iface="wasi:cli/exit@0.2.9", function="exit"] [Instruction::CallInterface] (sync, @ enter)');
     const hostProvided = true;
     
     let parentTask;
@@ -4551,7 +4551,7 @@ let gen= (function* _initGenerator () {
       
     }
     
-    _debugLog('[iface="wasi:cli/exit@0.2.12", function="exit"][Instruction::Return]', {
+    _debugLog('[iface="wasi:cli/exit@0.2.9", function="exit"][Instruction::Return]', {
       funcName: 'exit',
       paramCount: 0,
       async: false,
@@ -4560,7 +4560,7 @@ let gen= (function* _initGenerator () {
     task.resolve([ret]);
     task.exit();
   }
-  _trampoline7.fnName = 'wasi:cli/exit@0.2.12#exit';
+  _trampoline7.fnName = 'wasi:cli/exit@0.2.9#exit';
   
   const handleTable0 = [T_FLAG, 0];
   handleTable0._createdReps = new Set();
@@ -4584,7 +4584,7 @@ let gen= (function* _initGenerator () {
     }
     
     curResourceBorrows.push(rsc0);
-    _debugLog('[iface="wasi:io/poll@0.2.12", function="[method]pollable.block"] [Instruction::CallInterface] (sync, @ enter)');
+    _debugLog('[iface="wasi:io/poll@0.2.9", function="[method]pollable.block"] [Instruction::CallInterface] (sync, @ enter)');
     const hostProvided = true;
     
     let parentTask;
@@ -4662,7 +4662,7 @@ let gen= (function* _initGenerator () {
       rsc[symbolRscHandle] = undefined;
     }
     curResourceBorrows = [];
-    _debugLog('[iface="wasi:io/poll@0.2.12", function="[method]pollable.block"][Instruction::Return]', {
+    _debugLog('[iface="wasi:io/poll@0.2.9", function="[method]pollable.block"][Instruction::Return]', {
       funcName: '[method]pollable.block',
       paramCount: 0,
       async: false,
@@ -4671,7 +4671,7 @@ let gen= (function* _initGenerator () {
     task.resolve([ret]);
     task.exit();
   }
-  _trampoline8.fnName = 'wasi:io/poll@0.2.12#block';
+  _trampoline8.fnName = 'wasi:io/poll@0.2.9#block';
   
   const handleTable2 = [T_FLAG, 0];
   handleTable2._createdReps = new Set();
@@ -4695,7 +4695,7 @@ let gen= (function* _initGenerator () {
     }
     
     curResourceBorrows.push(rsc0);
-    _debugLog('[iface="wasi:io/streams@0.2.12", function="[method]input-stream.subscribe"] [Instruction::CallInterface] (sync, @ enter)');
+    _debugLog('[iface="wasi:io/streams@0.2.9", function="[method]input-stream.subscribe"] [Instruction::CallInterface] (sync, @ enter)');
     const hostProvided = true;
     
     let parentTask;
@@ -4784,7 +4784,7 @@ let gen= (function* _initGenerator () {
       handle3 = rscTableCreateOwn(handleTable0, rep);
     }
     
-    _debugLog('[iface="wasi:io/streams@0.2.12", function="[method]input-stream.subscribe"][Instruction::Return]', {
+    _debugLog('[iface="wasi:io/streams@0.2.9", function="[method]input-stream.subscribe"][Instruction::Return]', {
       funcName: '[method]input-stream.subscribe',
       paramCount: 1,
       async: false,
@@ -4794,7 +4794,7 @@ let gen= (function* _initGenerator () {
     task.exit();
     return handle3;
   }
-  _trampoline9.fnName = 'wasi:io/streams@0.2.12#subscribe';
+  _trampoline9.fnName = 'wasi:io/streams@0.2.9#subscribe';
   
   const handleTable3 = [T_FLAG, 0];
   handleTable3._createdReps = new Set();
@@ -4818,7 +4818,7 @@ let gen= (function* _initGenerator () {
     }
     
     curResourceBorrows.push(rsc0);
-    _debugLog('[iface="wasi:io/streams@0.2.12", function="[method]output-stream.subscribe"] [Instruction::CallInterface] (sync, @ enter)');
+    _debugLog('[iface="wasi:io/streams@0.2.9", function="[method]output-stream.subscribe"] [Instruction::CallInterface] (sync, @ enter)');
     const hostProvided = true;
     
     let parentTask;
@@ -4907,7 +4907,7 @@ let gen= (function* _initGenerator () {
       handle3 = rscTableCreateOwn(handleTable0, rep);
     }
     
-    _debugLog('[iface="wasi:io/streams@0.2.12", function="[method]output-stream.subscribe"][Instruction::Return]', {
+    _debugLog('[iface="wasi:io/streams@0.2.9", function="[method]output-stream.subscribe"][Instruction::Return]', {
       funcName: '[method]output-stream.subscribe',
       paramCount: 1,
       async: false,
@@ -4917,10 +4917,10 @@ let gen= (function* _initGenerator () {
     task.exit();
     return handle3;
   }
-  _trampoline10.fnName = 'wasi:io/streams@0.2.12#subscribe';
+  _trampoline10.fnName = 'wasi:io/streams@0.2.9#subscribe';
   
   const _trampoline11 = function() {
-    _debugLog('[iface="wasi:cli/stdin@0.2.12", function="get-stdin"] [Instruction::CallInterface] (sync, @ enter)');
+    _debugLog('[iface="wasi:cli/stdin@0.2.9", function="get-stdin"] [Instruction::CallInterface] (sync, @ enter)');
     const hostProvided = true;
     
     let parentTask;
@@ -4999,7 +4999,7 @@ let gen= (function* _initGenerator () {
       handle0 = rscTableCreateOwn(handleTable2, rep);
     }
     
-    _debugLog('[iface="wasi:cli/stdin@0.2.12", function="get-stdin"][Instruction::Return]', {
+    _debugLog('[iface="wasi:cli/stdin@0.2.9", function="get-stdin"][Instruction::Return]', {
       funcName: 'get-stdin',
       paramCount: 1,
       async: false,
@@ -5009,10 +5009,10 @@ let gen= (function* _initGenerator () {
     task.exit();
     return handle0;
   }
-  _trampoline11.fnName = 'wasi:cli/stdin@0.2.12#getStdin';
+  _trampoline11.fnName = 'wasi:cli/stdin@0.2.9#getStdin';
   
   const _trampoline12 = function() {
-    _debugLog('[iface="wasi:cli/stdout@0.2.12", function="get-stdout"] [Instruction::CallInterface] (sync, @ enter)');
+    _debugLog('[iface="wasi:cli/stdout@0.2.9", function="get-stdout"] [Instruction::CallInterface] (sync, @ enter)');
     const hostProvided = true;
     
     let parentTask;
@@ -5091,7 +5091,7 @@ let gen= (function* _initGenerator () {
       handle0 = rscTableCreateOwn(handleTable3, rep);
     }
     
-    _debugLog('[iface="wasi:cli/stdout@0.2.12", function="get-stdout"][Instruction::Return]', {
+    _debugLog('[iface="wasi:cli/stdout@0.2.9", function="get-stdout"][Instruction::Return]', {
       funcName: 'get-stdout',
       paramCount: 1,
       async: false,
@@ -5101,10 +5101,10 @@ let gen= (function* _initGenerator () {
     task.exit();
     return handle0;
   }
-  _trampoline12.fnName = 'wasi:cli/stdout@0.2.12#getStdout';
+  _trampoline12.fnName = 'wasi:cli/stdout@0.2.9#getStdout';
   
   const _trampoline13 = function() {
-    _debugLog('[iface="wasi:cli/stderr@0.2.12", function="get-stderr"] [Instruction::CallInterface] (sync, @ enter)');
+    _debugLog('[iface="wasi:cli/stderr@0.2.9", function="get-stderr"] [Instruction::CallInterface] (sync, @ enter)');
     const hostProvided = true;
     
     let parentTask;
@@ -5183,7 +5183,7 @@ let gen= (function* _initGenerator () {
       handle0 = rscTableCreateOwn(handleTable3, rep);
     }
     
-    _debugLog('[iface="wasi:cli/stderr@0.2.12", function="get-stderr"][Instruction::Return]', {
+    _debugLog('[iface="wasi:cli/stderr@0.2.9", function="get-stderr"][Instruction::Return]', {
       funcName: 'get-stderr',
       paramCount: 1,
       async: false,
@@ -5193,10 +5193,10 @@ let gen= (function* _initGenerator () {
     task.exit();
     return handle0;
   }
-  _trampoline13.fnName = 'wasi:cli/stderr@0.2.12#getStderr';
+  _trampoline13.fnName = 'wasi:cli/stderr@0.2.9#getStderr';
   
   const _trampoline14 = function() {
-    _debugLog('[iface="wasi:clocks/monotonic-clock@0.2.12", function="now"] [Instruction::CallInterface] (sync, @ enter)');
+    _debugLog('[iface="wasi:clocks/monotonic-clock@0.2.9", function="now"] [Instruction::CallInterface] (sync, @ enter)');
     const hostProvided = true;
     
     let parentTask;
@@ -5264,7 +5264,7 @@ let gen= (function* _initGenerator () {
       
     }
     
-    _debugLog('[iface="wasi:clocks/monotonic-clock@0.2.12", function="now"][Instruction::Return]', {
+    _debugLog('[iface="wasi:clocks/monotonic-clock@0.2.9", function="now"][Instruction::Return]', {
       funcName: 'now',
       paramCount: 1,
       async: false,
@@ -5274,10 +5274,10 @@ let gen= (function* _initGenerator () {
     task.exit();
     return toUint64(ret);
   }
-  _trampoline14.fnName = 'wasi:clocks/monotonic-clock@0.2.12#now';
+  _trampoline14.fnName = 'wasi:clocks/monotonic-clock@0.2.9#now';
   
   const _trampoline15 = function(arg0) {
-    _debugLog('[iface="wasi:clocks/monotonic-clock@0.2.12", function="subscribe-instant"] [Instruction::CallInterface] (sync, @ enter)');
+    _debugLog('[iface="wasi:clocks/monotonic-clock@0.2.9", function="subscribe-instant"] [Instruction::CallInterface] (sync, @ enter)');
     const hostProvided = true;
     
     let parentTask;
@@ -5356,7 +5356,7 @@ let gen= (function* _initGenerator () {
       handle0 = rscTableCreateOwn(handleTable0, rep);
     }
     
-    _debugLog('[iface="wasi:clocks/monotonic-clock@0.2.12", function="subscribe-instant"][Instruction::Return]', {
+    _debugLog('[iface="wasi:clocks/monotonic-clock@0.2.9", function="subscribe-instant"][Instruction::Return]', {
       funcName: 'subscribe-instant',
       paramCount: 1,
       async: false,
@@ -5366,10 +5366,10 @@ let gen= (function* _initGenerator () {
     task.exit();
     return handle0;
   }
-  _trampoline15.fnName = 'wasi:clocks/monotonic-clock@0.2.12#subscribeInstant';
+  _trampoline15.fnName = 'wasi:clocks/monotonic-clock@0.2.9#subscribeInstant';
   
   const _trampoline16 = function(arg0) {
-    _debugLog('[iface="wasi:clocks/monotonic-clock@0.2.12", function="subscribe-duration"] [Instruction::CallInterface] (sync, @ enter)');
+    _debugLog('[iface="wasi:clocks/monotonic-clock@0.2.9", function="subscribe-duration"] [Instruction::CallInterface] (sync, @ enter)');
     const hostProvided = true;
     
     let parentTask;
@@ -5448,7 +5448,7 @@ let gen= (function* _initGenerator () {
       handle0 = rscTableCreateOwn(handleTable0, rep);
     }
     
-    _debugLog('[iface="wasi:clocks/monotonic-clock@0.2.12", function="subscribe-duration"][Instruction::Return]', {
+    _debugLog('[iface="wasi:clocks/monotonic-clock@0.2.9", function="subscribe-duration"][Instruction::Return]', {
       funcName: 'subscribe-duration',
       paramCount: 1,
       async: false,
@@ -5458,14 +5458,14 @@ let gen= (function* _initGenerator () {
     task.exit();
     return handle0;
   }
-  _trampoline16.fnName = 'wasi:clocks/monotonic-clock@0.2.12#subscribeDuration';
+  _trampoline16.fnName = 'wasi:clocks/monotonic-clock@0.2.9#subscribeDuration';
   let exports1;
   let memory0;
   let realloc0;
   let realloc0Async;
   
   const _trampoline17 = function(arg0) {
-    _debugLog('[iface="wasi:random/insecure-seed@0.2.12", function="insecure-seed"] [Instruction::CallInterface] (sync, @ enter)');
+    _debugLog('[iface="wasi:random/insecure-seed@0.2.9", function="insecure-seed"] [Instruction::CallInterface] (sync, @ enter)');
     const hostProvided = true;
     
     let parentTask;
@@ -5536,7 +5536,7 @@ let gen= (function* _initGenerator () {
     var [tuple0_0, tuple0_1] = ret;
     dataView(memory0).setBigInt64(((arg0 >>> 0)) + 0, toUint64(tuple0_0), true);
     dataView(memory0).setBigInt64(((arg0 >>> 0)) + 8, toUint64(tuple0_1), true);
-    _debugLog('[iface="wasi:random/insecure-seed@0.2.12", function="insecure-seed"][Instruction::Return]', {
+    _debugLog('[iface="wasi:random/insecure-seed@0.2.9", function="insecure-seed"][Instruction::Return]', {
       funcName: 'insecure-seed',
       paramCount: 0,
       async: false,
@@ -5545,7 +5545,7 @@ let gen= (function* _initGenerator () {
     task.resolve([ret]);
     task.exit();
   }
-  _trampoline17.fnName = 'wasi:random/insecure-seed@0.2.12#insecureSeed';
+  _trampoline17.fnName = 'wasi:random/insecure-seed@0.2.9#insecureSeed';
   
   const _trampoline18 = function(arg0, arg1, arg2) {
     var len3 = arg1;
@@ -5568,7 +5568,7 @@ let gen= (function* _initGenerator () {
       curResourceBorrows.push(rsc0);
       result3.push(rsc0);
     }
-    _debugLog('[iface="wasi:io/poll@0.2.12", function="poll"] [Instruction::CallInterface] (sync, @ enter)');
+    _debugLog('[iface="wasi:io/poll@0.2.9", function="poll"] [Instruction::CallInterface] (sync, @ enter)');
     const hostProvided = true;
     
     let parentTask;
@@ -5670,7 +5670,7 @@ let gen= (function* _initGenerator () {
     
     dataView(memory0).setUint32(((arg2 >>> 0)) + 4, len4, true);
     dataView(memory0).setUint32(((arg2 >>> 0)) + 0, ptr4, true);
-    _debugLog('[iface="wasi:io/poll@0.2.12", function="poll"][Instruction::Return]', {
+    _debugLog('[iface="wasi:io/poll@0.2.9", function="poll"][Instruction::Return]', {
       funcName: 'poll',
       paramCount: 0,
       async: false,
@@ -5679,7 +5679,7 @@ let gen= (function* _initGenerator () {
     task.resolve([ret]);
     task.exit();
   }
-  _trampoline18.fnName = 'wasi:io/poll@0.2.12#poll';
+  _trampoline18.fnName = 'wasi:io/poll@0.2.9#poll';
   
   const handleTable1 = [T_FLAG, 0];
   handleTable1._createdReps = new Set();
@@ -5703,7 +5703,7 @@ let gen= (function* _initGenerator () {
     }
     
     curResourceBorrows.push(rsc0);
-    _debugLog('[iface="wasi:io/streams@0.2.12", function="[method]input-stream.read"] [Instruction::CallInterface] (sync, @ enter)');
+    _debugLog('[iface="wasi:io/streams@0.2.9", function="[method]input-stream.read"] [Instruction::CallInterface] (sync, @ enter)');
     const hostProvided = true;
     
     let parentTask;
@@ -5843,7 +5843,7 @@ let gen= (function* _initGenerator () {
         throw new TypeError('invalid variant specified for result');
       }
     }
-    _debugLog('[iface="wasi:io/streams@0.2.12", function="[method]input-stream.read"][Instruction::Return]', {
+    _debugLog('[iface="wasi:io/streams@0.2.9", function="[method]input-stream.read"][Instruction::Return]', {
       funcName: '[method]input-stream.read',
       paramCount: 0,
       async: false,
@@ -5852,7 +5852,7 @@ let gen= (function* _initGenerator () {
     task.resolve([ret]);
     task.exit();
   }
-  _trampoline19.fnName = 'wasi:io/streams@0.2.12#read';
+  _trampoline19.fnName = 'wasi:io/streams@0.2.9#read';
   
   const _trampoline20 = function(arg0, arg1) {
     var handle1 = arg0;
@@ -5866,7 +5866,7 @@ let gen= (function* _initGenerator () {
     }
     
     curResourceBorrows.push(rsc0);
-    _debugLog('[iface="wasi:io/streams@0.2.12", function="[method]output-stream.check-write"] [Instruction::CallInterface] (sync, @ enter)');
+    _debugLog('[iface="wasi:io/streams@0.2.9", function="[method]output-stream.check-write"] [Instruction::CallInterface] (sync, @ enter)');
     const hostProvided = true;
     
     let parentTask;
@@ -5983,7 +5983,7 @@ let gen= (function* _initGenerator () {
         throw new TypeError('invalid variant specified for result');
       }
     }
-    _debugLog('[iface="wasi:io/streams@0.2.12", function="[method]output-stream.check-write"][Instruction::Return]', {
+    _debugLog('[iface="wasi:io/streams@0.2.9", function="[method]output-stream.check-write"][Instruction::Return]', {
       funcName: '[method]output-stream.check-write',
       paramCount: 0,
       async: false,
@@ -5992,7 +5992,7 @@ let gen= (function* _initGenerator () {
     task.resolve([ret]);
     task.exit();
   }
-  _trampoline20.fnName = 'wasi:io/streams@0.2.12#checkWrite';
+  _trampoline20.fnName = 'wasi:io/streams@0.2.9#checkWrite';
   
   const _trampoline21 = function(arg0, arg1, arg2, arg3) {
     var handle1 = arg0;
@@ -6011,7 +6011,7 @@ let gen= (function* _initGenerator () {
     if (ptr3 < 0 || len3 < 0 || len3 > 268435455 || ptr3 > memory0.buffer.byteLength || len3 > Math.floor((memory0.buffer.byteLength - ptr3) / 1)) throw new WebAssemblyRuntimeError('wasm trap: out of bounds memory access');
     if (ptr3 % 1 !== 0) throw new TypeError(`list pointer [${ptr3}] is not aligned to 1`);
     var result3 = new Uint8Array(memory0.buffer.slice(ptr3, ptr3 + len3 * 1));
-    _debugLog('[iface="wasi:io/streams@0.2.12", function="[method]output-stream.write"] [Instruction::CallInterface] (sync, @ enter)');
+    _debugLog('[iface="wasi:io/streams@0.2.9", function="[method]output-stream.write"] [Instruction::CallInterface] (sync, @ enter)');
     const hostProvided = true;
     
     let parentTask;
@@ -6127,7 +6127,7 @@ let gen= (function* _initGenerator () {
         throw new TypeError('invalid variant specified for result');
       }
     }
-    _debugLog('[iface="wasi:io/streams@0.2.12", function="[method]output-stream.write"][Instruction::Return]', {
+    _debugLog('[iface="wasi:io/streams@0.2.9", function="[method]output-stream.write"][Instruction::Return]', {
       funcName: '[method]output-stream.write',
       paramCount: 0,
       async: false,
@@ -6136,7 +6136,7 @@ let gen= (function* _initGenerator () {
     task.resolve([ret]);
     task.exit();
   }
-  _trampoline21.fnName = 'wasi:io/streams@0.2.12#write';
+  _trampoline21.fnName = 'wasi:io/streams@0.2.9#write';
   
   const _trampoline22 = function(arg0, arg1) {
     var handle1 = arg0;
@@ -6150,7 +6150,7 @@ let gen= (function* _initGenerator () {
     }
     
     curResourceBorrows.push(rsc0);
-    _debugLog('[iface="wasi:io/streams@0.2.12", function="[method]output-stream.blocking-flush"] [Instruction::CallInterface] (sync, @ enter)');
+    _debugLog('[iface="wasi:io/streams@0.2.9", function="[method]output-stream.blocking-flush"] [Instruction::CallInterface] (sync, @ enter)');
     const hostProvided = true;
     
     let parentTask;
@@ -6266,7 +6266,7 @@ let gen= (function* _initGenerator () {
         throw new TypeError('invalid variant specified for result');
       }
     }
-    _debugLog('[iface="wasi:io/streams@0.2.12", function="[method]output-stream.blocking-flush"][Instruction::Return]', {
+    _debugLog('[iface="wasi:io/streams@0.2.9", function="[method]output-stream.blocking-flush"][Instruction::Return]', {
       funcName: '[method]output-stream.blocking-flush',
       paramCount: 0,
       async: false,
@@ -6275,7 +6275,7 @@ let gen= (function* _initGenerator () {
     task.resolve([ret]);
     task.exit();
   }
-  _trampoline22.fnName = 'wasi:io/streams@0.2.12#blockingFlush';
+  _trampoline22.fnName = 'wasi:io/streams@0.2.9#blockingFlush';
   
   const handleTable6 = [T_FLAG, 0];
   handleTable6._createdReps = new Set();
@@ -6299,7 +6299,7 @@ let gen= (function* _initGenerator () {
     }
     
     curResourceBorrows.push(rsc0);
-    _debugLog('[iface="wasi:filesystem/types@0.2.12", function="[method]descriptor.read-via-stream"] [Instruction::CallInterface] (sync, @ enter)');
+    _debugLog('[iface="wasi:filesystem/types@0.2.9", function="[method]descriptor.read-via-stream"] [Instruction::CallInterface] (sync, @ enter)');
     const hostProvided = true;
     
     let parentTask;
@@ -6560,7 +6560,7 @@ let gen= (function* _initGenerator () {
         throw new TypeError('invalid variant specified for result');
       }
     }
-    _debugLog('[iface="wasi:filesystem/types@0.2.12", function="[method]descriptor.read-via-stream"][Instruction::Return]', {
+    _debugLog('[iface="wasi:filesystem/types@0.2.9", function="[method]descriptor.read-via-stream"][Instruction::Return]', {
       funcName: '[method]descriptor.read-via-stream',
       paramCount: 0,
       async: false,
@@ -6569,7 +6569,7 @@ let gen= (function* _initGenerator () {
     task.resolve([ret]);
     task.exit();
   }
-  _trampoline23.fnName = 'wasi:filesystem/types@0.2.12#readViaStream';
+  _trampoline23.fnName = 'wasi:filesystem/types@0.2.9#readViaStream';
   
   const _trampoline24 = function(arg0, arg1, arg2) {
     var handle1 = arg0;
@@ -6583,7 +6583,7 @@ let gen= (function* _initGenerator () {
     }
     
     curResourceBorrows.push(rsc0);
-    _debugLog('[iface="wasi:filesystem/types@0.2.12", function="[method]descriptor.write-via-stream"] [Instruction::CallInterface] (sync, @ enter)');
+    _debugLog('[iface="wasi:filesystem/types@0.2.9", function="[method]descriptor.write-via-stream"] [Instruction::CallInterface] (sync, @ enter)');
     const hostProvided = true;
     
     let parentTask;
@@ -6844,7 +6844,7 @@ let gen= (function* _initGenerator () {
         throw new TypeError('invalid variant specified for result');
       }
     }
-    _debugLog('[iface="wasi:filesystem/types@0.2.12", function="[method]descriptor.write-via-stream"][Instruction::Return]', {
+    _debugLog('[iface="wasi:filesystem/types@0.2.9", function="[method]descriptor.write-via-stream"][Instruction::Return]', {
       funcName: '[method]descriptor.write-via-stream',
       paramCount: 0,
       async: false,
@@ -6853,7 +6853,7 @@ let gen= (function* _initGenerator () {
     task.resolve([ret]);
     task.exit();
   }
-  _trampoline24.fnName = 'wasi:filesystem/types@0.2.12#writeViaStream';
+  _trampoline24.fnName = 'wasi:filesystem/types@0.2.9#writeViaStream';
   
   const _trampoline25 = function(arg0, arg1) {
     var handle1 = arg0;
@@ -6867,7 +6867,7 @@ let gen= (function* _initGenerator () {
     }
     
     curResourceBorrows.push(rsc0);
-    _debugLog('[iface="wasi:filesystem/types@0.2.12", function="[method]descriptor.append-via-stream"] [Instruction::CallInterface] (sync, @ enter)');
+    _debugLog('[iface="wasi:filesystem/types@0.2.9", function="[method]descriptor.append-via-stream"] [Instruction::CallInterface] (sync, @ enter)');
     const hostProvided = true;
     
     let parentTask;
@@ -7128,7 +7128,7 @@ let gen= (function* _initGenerator () {
         throw new TypeError('invalid variant specified for result');
       }
     }
-    _debugLog('[iface="wasi:filesystem/types@0.2.12", function="[method]descriptor.append-via-stream"][Instruction::Return]', {
+    _debugLog('[iface="wasi:filesystem/types@0.2.9", function="[method]descriptor.append-via-stream"][Instruction::Return]', {
       funcName: '[method]descriptor.append-via-stream',
       paramCount: 0,
       async: false,
@@ -7137,7 +7137,7 @@ let gen= (function* _initGenerator () {
     task.resolve([ret]);
     task.exit();
   }
-  _trampoline25.fnName = 'wasi:filesystem/types@0.2.12#appendViaStream';
+  _trampoline25.fnName = 'wasi:filesystem/types@0.2.9#appendViaStream';
   
   const _trampoline26 = function(arg0, arg1) {
     var handle1 = arg0;
@@ -7151,7 +7151,7 @@ let gen= (function* _initGenerator () {
     }
     
     curResourceBorrows.push(rsc0);
-    _debugLog('[iface="wasi:filesystem/types@0.2.12", function="[method]descriptor.get-flags"] [Instruction::CallInterface] (sync, @ enter)');
+    _debugLog('[iface="wasi:filesystem/types@0.2.9", function="[method]descriptor.get-flags"] [Instruction::CallInterface] (sync, @ enter)');
     const hostProvided = true;
     
     let parentTask;
@@ -7407,7 +7407,7 @@ let gen= (function* _initGenerator () {
         throw new TypeError('invalid variant specified for result');
       }
     }
-    _debugLog('[iface="wasi:filesystem/types@0.2.12", function="[method]descriptor.get-flags"][Instruction::Return]', {
+    _debugLog('[iface="wasi:filesystem/types@0.2.9", function="[method]descriptor.get-flags"][Instruction::Return]', {
       funcName: '[method]descriptor.get-flags',
       paramCount: 0,
       async: false,
@@ -7416,7 +7416,7 @@ let gen= (function* _initGenerator () {
     task.resolve([ret]);
     task.exit();
   }
-  _trampoline26.fnName = 'wasi:filesystem/types@0.2.12#getFlags';
+  _trampoline26.fnName = 'wasi:filesystem/types@0.2.9#getFlags';
   
   const _trampoline27 = function(arg0, arg1, arg2) {
     var handle1 = arg0;
@@ -7430,7 +7430,7 @@ let gen= (function* _initGenerator () {
     }
     
     curResourceBorrows.push(rsc0);
-    _debugLog('[iface="wasi:filesystem/types@0.2.12", function="[method]descriptor.set-size"] [Instruction::CallInterface] (sync, @ enter)');
+    _debugLog('[iface="wasi:filesystem/types@0.2.9", function="[method]descriptor.set-size"] [Instruction::CallInterface] (sync, @ enter)');
     const hostProvided = true;
     
     let parentTask;
@@ -7679,7 +7679,7 @@ let gen= (function* _initGenerator () {
         throw new TypeError('invalid variant specified for result');
       }
     }
-    _debugLog('[iface="wasi:filesystem/types@0.2.12", function="[method]descriptor.set-size"][Instruction::Return]', {
+    _debugLog('[iface="wasi:filesystem/types@0.2.9", function="[method]descriptor.set-size"][Instruction::Return]', {
       funcName: '[method]descriptor.set-size',
       paramCount: 0,
       async: false,
@@ -7688,7 +7688,7 @@ let gen= (function* _initGenerator () {
     task.resolve([ret]);
     task.exit();
   }
-  _trampoline27.fnName = 'wasi:filesystem/types@0.2.12#setSize';
+  _trampoline27.fnName = 'wasi:filesystem/types@0.2.9#setSize';
   
   const _trampoline28 = function(arg0, arg1) {
     var handle1 = arg0;
@@ -7702,7 +7702,7 @@ let gen= (function* _initGenerator () {
     }
     
     curResourceBorrows.push(rsc0);
-    _debugLog('[iface="wasi:filesystem/types@0.2.12", function="[method]descriptor.sync"] [Instruction::CallInterface] (sync, @ enter)');
+    _debugLog('[iface="wasi:filesystem/types@0.2.9", function="[method]descriptor.sync"] [Instruction::CallInterface] (sync, @ enter)');
     const hostProvided = true;
     
     let parentTask;
@@ -7951,7 +7951,7 @@ let gen= (function* _initGenerator () {
         throw new TypeError('invalid variant specified for result');
       }
     }
-    _debugLog('[iface="wasi:filesystem/types@0.2.12", function="[method]descriptor.sync"][Instruction::Return]', {
+    _debugLog('[iface="wasi:filesystem/types@0.2.9", function="[method]descriptor.sync"][Instruction::Return]', {
       funcName: '[method]descriptor.sync',
       paramCount: 0,
       async: false,
@@ -7960,7 +7960,7 @@ let gen= (function* _initGenerator () {
     task.resolve([ret]);
     task.exit();
   }
-  _trampoline28.fnName = 'wasi:filesystem/types@0.2.12#sync';
+  _trampoline28.fnName = 'wasi:filesystem/types@0.2.9#sync';
   
   const _trampoline29 = function(arg0, arg1, arg2, arg3) {
     var handle1 = arg0;
@@ -7977,7 +7977,7 @@ let gen= (function* _initGenerator () {
     var ptr3 = (arg1 >>> 0) >>> 0;
     var len3 = arg2;
     var result3 = TEXT_DECODER_UTF8.decode(new Uint8Array(memory0.buffer, ptr3, len3));
-    _debugLog('[iface="wasi:filesystem/types@0.2.12", function="[method]descriptor.create-directory-at"] [Instruction::CallInterface] (sync, @ enter)');
+    _debugLog('[iface="wasi:filesystem/types@0.2.9", function="[method]descriptor.create-directory-at"] [Instruction::CallInterface] (sync, @ enter)');
     const hostProvided = true;
     
     let parentTask;
@@ -8226,7 +8226,7 @@ let gen= (function* _initGenerator () {
         throw new TypeError('invalid variant specified for result');
       }
     }
-    _debugLog('[iface="wasi:filesystem/types@0.2.12", function="[method]descriptor.create-directory-at"][Instruction::Return]', {
+    _debugLog('[iface="wasi:filesystem/types@0.2.9", function="[method]descriptor.create-directory-at"][Instruction::Return]', {
       funcName: '[method]descriptor.create-directory-at',
       paramCount: 0,
       async: false,
@@ -8235,7 +8235,7 @@ let gen= (function* _initGenerator () {
     task.resolve([ret]);
     task.exit();
   }
-  _trampoline29.fnName = 'wasi:filesystem/types@0.2.12#createDirectoryAt';
+  _trampoline29.fnName = 'wasi:filesystem/types@0.2.9#createDirectoryAt';
   
   const _trampoline30 = function(arg0, arg1) {
     var handle1 = arg0;
@@ -8249,7 +8249,7 @@ let gen= (function* _initGenerator () {
     }
     
     curResourceBorrows.push(rsc0);
-    _debugLog('[iface="wasi:filesystem/types@0.2.12", function="[method]descriptor.stat"] [Instruction::CallInterface] (sync, @ enter)');
+    _debugLog('[iface="wasi:filesystem/types@0.2.9", function="[method]descriptor.stat"] [Instruction::CallInterface] (sync, @ enter)');
     const hostProvided = true;
     
     let parentTask;
@@ -8575,7 +8575,7 @@ let gen= (function* _initGenerator () {
         throw new TypeError('invalid variant specified for result');
       }
     }
-    _debugLog('[iface="wasi:filesystem/types@0.2.12", function="[method]descriptor.stat"][Instruction::Return]', {
+    _debugLog('[iface="wasi:filesystem/types@0.2.9", function="[method]descriptor.stat"][Instruction::Return]', {
       funcName: '[method]descriptor.stat',
       paramCount: 0,
       async: false,
@@ -8584,7 +8584,7 @@ let gen= (function* _initGenerator () {
     task.resolve([ret]);
     task.exit();
   }
-  _trampoline30.fnName = 'wasi:filesystem/types@0.2.12#stat';
+  _trampoline30.fnName = 'wasi:filesystem/types@0.2.9#stat';
   
   const _trampoline31 = function(arg0, arg1, arg2, arg3, arg4) {
     var handle1 = arg0;
@@ -8607,7 +8607,7 @@ let gen= (function* _initGenerator () {
     var ptr4 = (arg2 >>> 0) >>> 0;
     var len4 = arg3;
     var result4 = TEXT_DECODER_UTF8.decode(new Uint8Array(memory0.buffer, ptr4, len4));
-    _debugLog('[iface="wasi:filesystem/types@0.2.12", function="[method]descriptor.stat-at"] [Instruction::CallInterface] (sync, @ enter)');
+    _debugLog('[iface="wasi:filesystem/types@0.2.9", function="[method]descriptor.stat-at"] [Instruction::CallInterface] (sync, @ enter)');
     const hostProvided = true;
     
     let parentTask;
@@ -8933,7 +8933,7 @@ let gen= (function* _initGenerator () {
         throw new TypeError('invalid variant specified for result');
       }
     }
-    _debugLog('[iface="wasi:filesystem/types@0.2.12", function="[method]descriptor.stat-at"][Instruction::Return]', {
+    _debugLog('[iface="wasi:filesystem/types@0.2.9", function="[method]descriptor.stat-at"][Instruction::Return]', {
       funcName: '[method]descriptor.stat-at',
       paramCount: 0,
       async: false,
@@ -8942,7 +8942,7 @@ let gen= (function* _initGenerator () {
     task.resolve([ret]);
     task.exit();
   }
-  _trampoline31.fnName = 'wasi:filesystem/types@0.2.12#statAt';
+  _trampoline31.fnName = 'wasi:filesystem/types@0.2.9#statAt';
   
   const _trampoline32 = function(arg0, arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8, arg9, arg10) {
     var handle1 = arg0;
@@ -9021,7 +9021,7 @@ let gen= (function* _initGenerator () {
         throw new TypeError('invalid variant discriminant for NewTimestamp');
       }
     }
-    _debugLog('[iface="wasi:filesystem/types@0.2.12", function="[method]descriptor.set-times-at"] [Instruction::CallInterface] (sync, @ enter)');
+    _debugLog('[iface="wasi:filesystem/types@0.2.9", function="[method]descriptor.set-times-at"] [Instruction::CallInterface] (sync, @ enter)');
     const hostProvided = true;
     
     let parentTask;
@@ -9270,7 +9270,7 @@ let gen= (function* _initGenerator () {
         throw new TypeError('invalid variant specified for result');
       }
     }
-    _debugLog('[iface="wasi:filesystem/types@0.2.12", function="[method]descriptor.set-times-at"][Instruction::Return]', {
+    _debugLog('[iface="wasi:filesystem/types@0.2.9", function="[method]descriptor.set-times-at"][Instruction::Return]', {
       funcName: '[method]descriptor.set-times-at',
       paramCount: 0,
       async: false,
@@ -9279,7 +9279,7 @@ let gen= (function* _initGenerator () {
     task.resolve([ret]);
     task.exit();
   }
-  _trampoline32.fnName = 'wasi:filesystem/types@0.2.12#setTimesAt';
+  _trampoline32.fnName = 'wasi:filesystem/types@0.2.9#setTimesAt';
   
   const _trampoline33 = function(arg0, arg1, arg2, arg3, arg4, arg5, arg6) {
     var handle1 = arg0;
@@ -9322,7 +9322,7 @@ let gen= (function* _initGenerator () {
       requestedWriteSync: Boolean(arg5 & 16),
       mutateDirectory: Boolean(arg5 & 32),
     };
-    _debugLog('[iface="wasi:filesystem/types@0.2.12", function="[method]descriptor.open-at"] [Instruction::CallInterface] (sync, @ enter)');
+    _debugLog('[iface="wasi:filesystem/types@0.2.9", function="[method]descriptor.open-at"] [Instruction::CallInterface] (sync, @ enter)');
     const hostProvided = true;
     
     let parentTask;
@@ -9583,7 +9583,7 @@ let gen= (function* _initGenerator () {
         throw new TypeError('invalid variant specified for result');
       }
     }
-    _debugLog('[iface="wasi:filesystem/types@0.2.12", function="[method]descriptor.open-at"][Instruction::Return]', {
+    _debugLog('[iface="wasi:filesystem/types@0.2.9", function="[method]descriptor.open-at"][Instruction::Return]', {
       funcName: '[method]descriptor.open-at',
       paramCount: 0,
       async: false,
@@ -9592,7 +9592,7 @@ let gen= (function* _initGenerator () {
     task.resolve([ret]);
     task.exit();
   }
-  _trampoline33.fnName = 'wasi:filesystem/types@0.2.12#openAt';
+  _trampoline33.fnName = 'wasi:filesystem/types@0.2.9#openAt';
   
   const _trampoline34 = function(arg0, arg1, arg2, arg3) {
     var handle1 = arg0;
@@ -9609,7 +9609,7 @@ let gen= (function* _initGenerator () {
     var ptr3 = (arg1 >>> 0) >>> 0;
     var len3 = arg2;
     var result3 = TEXT_DECODER_UTF8.decode(new Uint8Array(memory0.buffer, ptr3, len3));
-    _debugLog('[iface="wasi:filesystem/types@0.2.12", function="[method]descriptor.readlink-at"] [Instruction::CallInterface] (sync, @ enter)');
+    _debugLog('[iface="wasi:filesystem/types@0.2.9", function="[method]descriptor.readlink-at"] [Instruction::CallInterface] (sync, @ enter)');
     const hostProvided = true;
     
     let parentTask;
@@ -9865,7 +9865,7 @@ let gen= (function* _initGenerator () {
         throw new TypeError('invalid variant specified for result');
       }
     }
-    _debugLog('[iface="wasi:filesystem/types@0.2.12", function="[method]descriptor.readlink-at"][Instruction::Return]', {
+    _debugLog('[iface="wasi:filesystem/types@0.2.9", function="[method]descriptor.readlink-at"][Instruction::Return]', {
       funcName: '[method]descriptor.readlink-at',
       paramCount: 0,
       async: false,
@@ -9874,7 +9874,7 @@ let gen= (function* _initGenerator () {
     task.resolve([ret]);
     task.exit();
   }
-  _trampoline34.fnName = 'wasi:filesystem/types@0.2.12#readlinkAt';
+  _trampoline34.fnName = 'wasi:filesystem/types@0.2.9#readlinkAt';
   
   const _trampoline35 = function(arg0, arg1, arg2, arg3) {
     var handle1 = arg0;
@@ -9891,7 +9891,7 @@ let gen= (function* _initGenerator () {
     var ptr3 = (arg1 >>> 0) >>> 0;
     var len3 = arg2;
     var result3 = TEXT_DECODER_UTF8.decode(new Uint8Array(memory0.buffer, ptr3, len3));
-    _debugLog('[iface="wasi:filesystem/types@0.2.12", function="[method]descriptor.remove-directory-at"] [Instruction::CallInterface] (sync, @ enter)');
+    _debugLog('[iface="wasi:filesystem/types@0.2.9", function="[method]descriptor.remove-directory-at"] [Instruction::CallInterface] (sync, @ enter)');
     const hostProvided = true;
     
     let parentTask;
@@ -10140,7 +10140,7 @@ let gen= (function* _initGenerator () {
         throw new TypeError('invalid variant specified for result');
       }
     }
-    _debugLog('[iface="wasi:filesystem/types@0.2.12", function="[method]descriptor.remove-directory-at"][Instruction::Return]', {
+    _debugLog('[iface="wasi:filesystem/types@0.2.9", function="[method]descriptor.remove-directory-at"][Instruction::Return]', {
       funcName: '[method]descriptor.remove-directory-at',
       paramCount: 0,
       async: false,
@@ -10149,7 +10149,7 @@ let gen= (function* _initGenerator () {
     task.resolve([ret]);
     task.exit();
   }
-  _trampoline35.fnName = 'wasi:filesystem/types@0.2.12#removeDirectoryAt';
+  _trampoline35.fnName = 'wasi:filesystem/types@0.2.9#removeDirectoryAt';
   
   const _trampoline36 = function(arg0, arg1, arg2, arg3) {
     var handle1 = arg0;
@@ -10166,7 +10166,7 @@ let gen= (function* _initGenerator () {
     var ptr3 = (arg1 >>> 0) >>> 0;
     var len3 = arg2;
     var result3 = TEXT_DECODER_UTF8.decode(new Uint8Array(memory0.buffer, ptr3, len3));
-    _debugLog('[iface="wasi:filesystem/types@0.2.12", function="[method]descriptor.unlink-file-at"] [Instruction::CallInterface] (sync, @ enter)');
+    _debugLog('[iface="wasi:filesystem/types@0.2.9", function="[method]descriptor.unlink-file-at"] [Instruction::CallInterface] (sync, @ enter)');
     const hostProvided = true;
     
     let parentTask;
@@ -10415,7 +10415,7 @@ let gen= (function* _initGenerator () {
         throw new TypeError('invalid variant specified for result');
       }
     }
-    _debugLog('[iface="wasi:filesystem/types@0.2.12", function="[method]descriptor.unlink-file-at"][Instruction::Return]', {
+    _debugLog('[iface="wasi:filesystem/types@0.2.9", function="[method]descriptor.unlink-file-at"][Instruction::Return]', {
       funcName: '[method]descriptor.unlink-file-at',
       paramCount: 0,
       async: false,
@@ -10424,7 +10424,7 @@ let gen= (function* _initGenerator () {
     task.resolve([ret]);
     task.exit();
   }
-  _trampoline36.fnName = 'wasi:filesystem/types@0.2.12#unlinkFileAt';
+  _trampoline36.fnName = 'wasi:filesystem/types@0.2.9#unlinkFileAt';
   
   const _trampoline37 = function(arg0, arg1) {
     var handle1 = arg0;
@@ -10438,7 +10438,7 @@ let gen= (function* _initGenerator () {
     }
     
     curResourceBorrows.push(rsc0);
-    _debugLog('[iface="wasi:filesystem/types@0.2.12", function="[method]descriptor.metadata-hash"] [Instruction::CallInterface] (sync, @ enter)');
+    _debugLog('[iface="wasi:filesystem/types@0.2.9", function="[method]descriptor.metadata-hash"] [Instruction::CallInterface] (sync, @ enter)');
     const hostProvided = true;
     
     let parentTask;
@@ -10690,7 +10690,7 @@ let gen= (function* _initGenerator () {
         throw new TypeError('invalid variant specified for result');
       }
     }
-    _debugLog('[iface="wasi:filesystem/types@0.2.12", function="[method]descriptor.metadata-hash"][Instruction::Return]', {
+    _debugLog('[iface="wasi:filesystem/types@0.2.9", function="[method]descriptor.metadata-hash"][Instruction::Return]', {
       funcName: '[method]descriptor.metadata-hash',
       paramCount: 0,
       async: false,
@@ -10699,7 +10699,7 @@ let gen= (function* _initGenerator () {
     task.resolve([ret]);
     task.exit();
   }
-  _trampoline37.fnName = 'wasi:filesystem/types@0.2.12#metadataHash';
+  _trampoline37.fnName = 'wasi:filesystem/types@0.2.9#metadataHash';
   
   const _trampoline38 = function(arg0, arg1, arg2, arg3, arg4) {
     var handle1 = arg0;
@@ -10722,7 +10722,7 @@ let gen= (function* _initGenerator () {
     var ptr4 = (arg2 >>> 0) >>> 0;
     var len4 = arg3;
     var result4 = TEXT_DECODER_UTF8.decode(new Uint8Array(memory0.buffer, ptr4, len4));
-    _debugLog('[iface="wasi:filesystem/types@0.2.12", function="[method]descriptor.metadata-hash-at"] [Instruction::CallInterface] (sync, @ enter)');
+    _debugLog('[iface="wasi:filesystem/types@0.2.9", function="[method]descriptor.metadata-hash-at"] [Instruction::CallInterface] (sync, @ enter)');
     const hostProvided = true;
     
     let parentTask;
@@ -10974,7 +10974,7 @@ let gen= (function* _initGenerator () {
         throw new TypeError('invalid variant specified for result');
       }
     }
-    _debugLog('[iface="wasi:filesystem/types@0.2.12", function="[method]descriptor.metadata-hash-at"][Instruction::Return]', {
+    _debugLog('[iface="wasi:filesystem/types@0.2.9", function="[method]descriptor.metadata-hash-at"][Instruction::Return]', {
       funcName: '[method]descriptor.metadata-hash-at',
       paramCount: 0,
       async: false,
@@ -10983,10 +10983,10 @@ let gen= (function* _initGenerator () {
     task.resolve([ret]);
     task.exit();
   }
-  _trampoline38.fnName = 'wasi:filesystem/types@0.2.12#metadataHashAt';
+  _trampoline38.fnName = 'wasi:filesystem/types@0.2.9#metadataHashAt';
   
   const _trampoline39 = function(arg0) {
-    _debugLog('[iface="wasi:cli/environment@0.2.12", function="get-environment"] [Instruction::CallInterface] (sync, @ enter)');
+    _debugLog('[iface="wasi:cli/environment@0.2.9", function="get-environment"] [Instruction::CallInterface] (sync, @ enter)');
     const hostProvided = true;
     
     let parentTask;
@@ -11078,7 +11078,7 @@ let gen= (function* _initGenerator () {
     }
     dataView(memory0).setUint32(((arg0 >>> 0)) + 4, len3, true);
     dataView(memory0).setUint32(((arg0 >>> 0)) + 0, result3, true);
-    _debugLog('[iface="wasi:cli/environment@0.2.12", function="get-environment"][Instruction::Return]', {
+    _debugLog('[iface="wasi:cli/environment@0.2.9", function="get-environment"][Instruction::Return]', {
       funcName: 'get-environment',
       paramCount: 0,
       async: false,
@@ -11087,7 +11087,7 @@ let gen= (function* _initGenerator () {
     task.resolve([ret]);
     task.exit();
   }
-  _trampoline39.fnName = 'wasi:cli/environment@0.2.12#getEnvironment';
+  _trampoline39.fnName = 'wasi:cli/environment@0.2.9#getEnvironment';
   
   const handleTable4 = [T_FLAG, 0];
   handleTable4._createdReps = new Set();
@@ -11100,7 +11100,7 @@ let gen= (function* _initGenerator () {
   HANDLE_TABLES[4] = handleTable4;
   
   const _trampoline40 = function(arg0) {
-    _debugLog('[iface="wasi:cli/terminal-stdin@0.2.12", function="get-terminal-stdin"] [Instruction::CallInterface] (sync, @ enter)');
+    _debugLog('[iface="wasi:cli/terminal-stdin@0.2.9", function="get-terminal-stdin"] [Instruction::CallInterface] (sync, @ enter)');
     const hostProvided = true;
     
     let parentTask;
@@ -11187,7 +11187,7 @@ let gen= (function* _initGenerator () {
       
       dataView(memory0).setInt32(((arg0 >>> 0)) + 4, handle0, true);
     }
-    _debugLog('[iface="wasi:cli/terminal-stdin@0.2.12", function="get-terminal-stdin"][Instruction::Return]', {
+    _debugLog('[iface="wasi:cli/terminal-stdin@0.2.9", function="get-terminal-stdin"][Instruction::Return]', {
       funcName: 'get-terminal-stdin',
       paramCount: 0,
       async: false,
@@ -11196,7 +11196,7 @@ let gen= (function* _initGenerator () {
     task.resolve([ret]);
     task.exit();
   }
-  _trampoline40.fnName = 'wasi:cli/terminal-stdin@0.2.12#getTerminalStdin';
+  _trampoline40.fnName = 'wasi:cli/terminal-stdin@0.2.9#getTerminalStdin';
   
   const handleTable5 = [T_FLAG, 0];
   handleTable5._createdReps = new Set();
@@ -11209,7 +11209,7 @@ let gen= (function* _initGenerator () {
   HANDLE_TABLES[5] = handleTable5;
   
   const _trampoline41 = function(arg0) {
-    _debugLog('[iface="wasi:cli/terminal-stdout@0.2.12", function="get-terminal-stdout"] [Instruction::CallInterface] (sync, @ enter)');
+    _debugLog('[iface="wasi:cli/terminal-stdout@0.2.9", function="get-terminal-stdout"] [Instruction::CallInterface] (sync, @ enter)');
     const hostProvided = true;
     
     let parentTask;
@@ -11296,7 +11296,7 @@ let gen= (function* _initGenerator () {
       
       dataView(memory0).setInt32(((arg0 >>> 0)) + 4, handle0, true);
     }
-    _debugLog('[iface="wasi:cli/terminal-stdout@0.2.12", function="get-terminal-stdout"][Instruction::Return]', {
+    _debugLog('[iface="wasi:cli/terminal-stdout@0.2.9", function="get-terminal-stdout"][Instruction::Return]', {
       funcName: 'get-terminal-stdout',
       paramCount: 0,
       async: false,
@@ -11305,10 +11305,10 @@ let gen= (function* _initGenerator () {
     task.resolve([ret]);
     task.exit();
   }
-  _trampoline41.fnName = 'wasi:cli/terminal-stdout@0.2.12#getTerminalStdout';
+  _trampoline41.fnName = 'wasi:cli/terminal-stdout@0.2.9#getTerminalStdout';
   
   const _trampoline42 = function(arg0) {
-    _debugLog('[iface="wasi:cli/terminal-stderr@0.2.12", function="get-terminal-stderr"] [Instruction::CallInterface] (sync, @ enter)');
+    _debugLog('[iface="wasi:cli/terminal-stderr@0.2.9", function="get-terminal-stderr"] [Instruction::CallInterface] (sync, @ enter)');
     const hostProvided = true;
     
     let parentTask;
@@ -11395,7 +11395,7 @@ let gen= (function* _initGenerator () {
       
       dataView(memory0).setInt32(((arg0 >>> 0)) + 4, handle0, true);
     }
-    _debugLog('[iface="wasi:cli/terminal-stderr@0.2.12", function="get-terminal-stderr"][Instruction::Return]', {
+    _debugLog('[iface="wasi:cli/terminal-stderr@0.2.9", function="get-terminal-stderr"][Instruction::Return]', {
       funcName: 'get-terminal-stderr',
       paramCount: 0,
       async: false,
@@ -11404,10 +11404,10 @@ let gen= (function* _initGenerator () {
     task.resolve([ret]);
     task.exit();
   }
-  _trampoline42.fnName = 'wasi:cli/terminal-stderr@0.2.12#getTerminalStderr';
+  _trampoline42.fnName = 'wasi:cli/terminal-stderr@0.2.9#getTerminalStderr';
   
   const _trampoline43 = function(arg0) {
-    _debugLog('[iface="wasi:clocks/wall-clock@0.2.12", function="now"] [Instruction::CallInterface] (sync, @ enter)');
+    _debugLog('[iface="wasi:clocks/wall-clock@0.2.9", function="now"] [Instruction::CallInterface] (sync, @ enter)');
     const hostProvided = true;
     
     let parentTask;
@@ -11478,7 +11478,7 @@ let gen= (function* _initGenerator () {
     var {seconds: v0_0, nanoseconds: v0_1 } = ret;
     dataView(memory0).setBigInt64(((arg0 >>> 0)) + 0, toUint64(v0_0), true);
     dataView(memory0).setInt32(((arg0 >>> 0)) + 8, toUint32(v0_1), true);
-    _debugLog('[iface="wasi:clocks/wall-clock@0.2.12", function="now"][Instruction::Return]', {
+    _debugLog('[iface="wasi:clocks/wall-clock@0.2.9", function="now"][Instruction::Return]', {
       funcName: 'now',
       paramCount: 0,
       async: false,
@@ -11487,10 +11487,10 @@ let gen= (function* _initGenerator () {
     task.resolve([ret]);
     task.exit();
   }
-  _trampoline43.fnName = 'wasi:clocks/wall-clock@0.2.12#now$1';
+  _trampoline43.fnName = 'wasi:clocks/wall-clock@0.2.9#now$1';
   
   const _trampoline44 = function(arg0) {
-    _debugLog('[iface="wasi:filesystem/preopens@0.2.12", function="get-directories"] [Instruction::CallInterface] (sync, @ enter)');
+    _debugLog('[iface="wasi:filesystem/preopens@0.2.9", function="get-directories"] [Instruction::CallInterface] (sync, @ enter)');
     const hostProvided = true;
     
     let parentTask;
@@ -11587,7 +11587,7 @@ let gen= (function* _initGenerator () {
     }
     dataView(memory0).setUint32(((arg0 >>> 0)) + 4, len3, true);
     dataView(memory0).setUint32(((arg0 >>> 0)) + 0, result3, true);
-    _debugLog('[iface="wasi:filesystem/preopens@0.2.12", function="get-directories"][Instruction::Return]', {
+    _debugLog('[iface="wasi:filesystem/preopens@0.2.9", function="get-directories"][Instruction::Return]', {
       funcName: 'get-directories',
       paramCount: 0,
       async: false,
@@ -11596,7 +11596,7 @@ let gen= (function* _initGenerator () {
     task.resolve([ret]);
     task.exit();
   }
-  _trampoline44.fnName = 'wasi:filesystem/preopens@0.2.12#getDirectories';
+  _trampoline44.fnName = 'wasi:filesystem/preopens@0.2.9#getDirectories';
   let exports2;
   let postReturn0;
   let postReturn0Async;
@@ -15273,7 +15273,7 @@ let gen= (function* _initGenerator () {
       '[resource-drop]input-stream': Object.assign(_guardTrap(0, _guardMayLeave(0, trampoline2), true), { _jcoMaySuspend: false }),
       '[resource-drop]output-stream': Object.assign(_guardTrap(0, _guardMayLeave(0, trampoline3), true), { _jcoMaySuspend: false }),
     },
-    'wasi:random/insecure-seed@0.2.12': {
+    'wasi:random/insecure-seed@0.2.9': {
       'insecure-seed': Object.assign(exports0['0'], { _jcoMaySuspend: false }),
     },
   }));

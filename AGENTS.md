@@ -21,6 +21,7 @@ Record fork-specific behavior and operational impact in [docs/upstream-differenc
 | `src/hclsyntax/` | Private native HCL parser port with MPL-2.0 notices |
 | `packages/sqlite/` | SQLite engine package and committed WebAssembly component |
 | `engine/` | Upstream Rust workspace, shared core and database implementations |
+| `spec/type-descriptor.ts` | Settled, living upstream descriptor contract. Agree format changes with a maintainer before editing |
 | `oracle/` | Rust soundness oracle and upstream regression cases |
 | `tests/` | Loader, runtime, SQLite and HCL regression tests |
 | `examples/` | Minimal SQLite and HCL consumers linked to built distributions |

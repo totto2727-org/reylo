@@ -72,6 +72,13 @@ Enable the loader with `node --import @totto2727/reylo/register main.ts`, or use
 Run the type check with `nubx tsc --noEmit --runExternalCode`.
 See the [examples](examples/README.md) for complete SQLite and HCL projects, and the [usage skill](skills/using-reylo/SKILL.md) for configuration and native-driver guidance.
 
+## Version 0.7 compatibility
+
+Unconstrained JSON values use the exported `Json` union rather than `unknown`.
+The previous generic `Json<T>` row-to-JSON utility is now named `AsJson<T>`.
+Date and timestamp values outside years 0000 through 9999 use ISO 8601 extended years.
+The fork still installs the two scoped packages above and runs the SQLite WebAssembly engine, not upstream's platform-specific native npm packages.
+
 ## Maintenance
 
 Read [AGENTS.md](AGENTS.md) before changing this repository.
