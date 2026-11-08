@@ -19,7 +19,9 @@ If its platform package is missing, follow the error's installation guidance or 
 ## Setup
 
 Use Node 24 or later and TypeScript 7.1 with content mapper support.
-Install the runtime and engine at the same version:
+Install the two fork packages, runtime and SQLite/HCL tooling, at the same version:
+
+Fork package release `0.7.1` uses the unchanged upstream native engine `0.7.0`.
 
 ```sh
 nub add @totto2727/reylo

@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { anyEngine, engine, MissingEngine, Unreachable } from "../src/engine.ts";
 import { nativeBinary, PLATFORM_PACKAGES, platformPackage } from "../src/native.ts";
 import { resolveProject } from "../src/project.ts";
+import { ENGINE_VERSION } from "../src/engine-version.ts";
 
 const VERSION: string = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")).version;
 const noShell = process.platform === "win32" && "stand-in executables require a POSIX shell";
@@ -28,16 +29,16 @@ async function withEngine<T>(body: string, run: (path: string) => Promise<T>): P
 }
 
 /** Answer the first request, which always has id 1, then exit. */
-function ping(version = VERSION, database = "sqlite"): string {
+function ping(version: string = ENGINE_VERSION, database = "sqlite"): string {
   return `read -r line\nprintf '%s\\n' '${JSON.stringify({ status: "ok", version, database, fingerprint: "0123456789abcdef", id: 1 })}'`;
 }
 
-test("native packages cover supported platforms at the runtime's exact version", () => {
+test("native packages cover supported platforms at the exact upstream engine version", () => {
   const manifest = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
   assert.equal(Object.keys(PLATFORM_PACKAGES).length, 8);
   for (const [key, pkg] of Object.entries(PLATFORM_PACKAGES)) {
     assert.equal(pkg, `@reylosql/engine-${key}`);
-    assert.equal(manifest.optionalDependencies[pkg], VERSION);
+    assert.equal(manifest.optionalDependencies[pkg], ENGINE_VERSION);
   }
   const { key, pkg } = platformPackage();
   assert.equal(pkg, PLATFORM_PACKAGES[key]);
@@ -72,13 +73,22 @@ test("a mismatched native version is refused and a failed load can be retried", 
     for (let attempt = 0; attempt < 2; attempt++) {
       await assert.rejects(engine("sqlite"), (e: Error) => {
         assert.ok(e instanceof MissingEngine);
-        assert.equal(e.message, `reylo ${VERSION} runs with its engine at ${VERSION}, and ${path} is 9.9.9: install reylo again, point REYLO_ENGINE_PATH at the engine of reylo ${VERSION}, or in a checkout of reylo's repository build it with cargo build --release -p reylo`);
+        assert.equal(e.message, `reylo ${VERSION} runs with its engine at ${ENGINE_VERSION}, and ${path} is 9.9.9: install reylo again, point REYLO_ENGINE_PATH at the engine of reylo ${ENGINE_VERSION}, or in a checkout of reylo's repository build it with cargo build --release -p reylo`);
         return true;
       });
     }
-    writeFileSync(path, `#!/bin/sh\n${ping(VERSION, "postgres")}\n`);
+    writeFileSync(path, `#!/bin/sh\n${ping(ENGINE_VERSION, "postgres")}\n`);
     await assert.rejects(engine("sqlite"), { message: `${path} serves postgres's engine when asked for sqlite's` });
   });
+});
+
+test("a fork patch version does not replace the required upstream native release", { skip: noShell }, async () => {
+  const mismatched = VERSION === ENGINE_VERSION ? "9.9.9" : VERSION;
+  await withEngine(ping(mismatched), (path) =>
+    assert.rejects(engine("sqlite"), (error: Error) =>
+      error instanceof MissingEngine && error.message.includes(`runs with its engine at ${ENGINE_VERSION}, and ${path} is ${mismatched}`),
+    ),
+  );
 });
 
 test("an executable that exits or never answers is refused", { skip: noShell }, async () => {

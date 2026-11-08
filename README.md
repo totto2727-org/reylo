@@ -8,7 +8,7 @@ The application supplies its own SQLite driver for execution.
 ## Setup
 
 Use Node 24 or later and TypeScript 7.1 with content mapper support.
-Install the runtime and SQLite engine at the same version:
+Install the two fork packages, runtime and SQLite/HCL tooling, at the same version:
 
 ```sh
 nub add @totto2727/reylo
@@ -85,6 +85,7 @@ Unconstrained JSON values use the exported `Json` union rather than `unknown`.
 The previous generic `Json<T>` row-to-JSON utility is now named `AsJson<T>`.
 Date and timestamp values outside years 0000 through 9999 use ISO 8601 extended years.
 The fork keeps the two scoped packages above and reuses upstream `@reylosql/engine-*` native binaries, pinned to `0.7.0`.
+The fork packages are `0.7.1`; this fork-only patch does not change the required native release.
 The package manager installs the binary for the host platform through optional dependencies.
 Do not omit optional dependencies when installing analysis tooling.
 Analysis starts the engine as a child process, including when its schema comes from HCL.

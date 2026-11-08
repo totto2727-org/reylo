@@ -91,7 +91,9 @@ Do not rebuild or publish platform packages from this fork.
 ## Version policy
 
 Follow the upstream published release version by default, without independent fork version bumps.
-Keep the root package, SQLite/HCL tooling package, exact tooling peer dependency, retained Cargo workspace, and upstream native optional dependencies at that same release version.
+Keep the root package, SQLite/HCL tooling package, and exact tooling peer dependency equal.
+Keep `src/engine-version.ts`, the retained Cargo workspace, and upstream native optional dependencies at the compatible published native release.
+The approved fork-only patch release is `0.7.1`, using the unchanged upstream native release `0.7.0`.
 When syncing upstream, update these versions together with the lockfile and exact comparison revision in `docs/upstream-differences.md`.
 Use a published release with available native packages, not an unreleased `main` version.
 Do not overwrite an existing npm version or add a fork suffix automatically.

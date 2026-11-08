@@ -27,7 +27,7 @@ members = [
   "oracle",
 ]
 
-# reylo's version, which the engine reports on ping and the npm package `reylo` must equal.
+# The upstream native release, reported on ping; fork-only npm patches do not change it.
 [workspace.package]
 version = "0.7.0"
 
