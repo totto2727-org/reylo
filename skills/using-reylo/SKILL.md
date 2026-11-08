@@ -15,6 +15,7 @@ Keep the two scoped fork packages and allow their pinned upstream native optiona
 Do not use `--omit=optional` when installing analysis tooling.
 The native engine runs as a child process, including for HCL schema analysis.
 If its platform package is missing, follow the error's installation guidance or explicitly set `REYLO_ENGINE_PATH` to a compatible `reylo 0.7.0` binary.
+Local `target/` binaries are never selected automatically, and this fork does not maintain native engine sources or build tools.
 
 ## Setup
 

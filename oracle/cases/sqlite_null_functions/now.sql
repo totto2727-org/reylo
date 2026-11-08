@@ -1,1 +1,0 @@
-select date('now') as d, date() as e, datetime('now', 'localtime') as l, unixepoch('now', 'subsec') as s, strftime('%Y-%m-%d %H:%M', 'now') as f, date('now', 'start of month', '+1 month', '-1 day') as m, timediff('now', 'now') as z, unixepoch() as u, julianday('now', 'utc') as j from o

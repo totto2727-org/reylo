@@ -4,10 +4,9 @@
 // is found from reylo's own install, never the project's: the run time never reaches this file, and
 // a bundler or a host's file tracing never pulls the binary into a function.
 import { execSync } from "node:child_process";
-import { existsSync, statSync } from "node:fs";
+import { existsSync } from "node:fs";
 import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
 
 /** The platform packages, by `<platform>-<arch>`, with `-musl` on a musl Linux. */
 export const PLATFORM_PACKAGES: Record<string, string> = {
@@ -52,9 +51,7 @@ let found: string | undefined;
 
 /**
  * The path of the `reylo` executable: `REYLO_ENGINE_PATH`; else this platform's package, from
- * reylo's own install; else, in a checkout of reylo's repository, its cargo build (the newer of
- * `target/release/reylo` and `target/debug/reylo`). Throws, saying how to get one, where there is
- * none.
+ * reylo's own install. Throws with installation guidance when neither is available.
  */
 export function nativeBinary(): string {
   const named = process.env.REYLO_ENGINE_PATH;
@@ -74,10 +71,6 @@ export function nativeBinary(): string {
       } catch {}
     }
   }
-  // The checkout's newer build, so that the one just made with either profile is the one that runs.
-  const checkout = fileURLToPath(new URL("../target/", import.meta.url));
-  const built = ["release", "debug"].map((profile) => join(checkout, profile, exe)).filter((path) => existsSync(path));
-  if (built.length) return (found = built.reduce((a, b) => (statSync(b).mtimeMs > statSync(a).mtimeMs ? b : a)));
   const why = pkg ? `${pkg} is not installed (an install with --no-optional, or --omit=optional, leaves it out)` : `reylo ships no binary for ${key}`;
-  throw new Error(`reylo's engine, the reylo executable, is missing: ${why}. Install reylo again on a supported platform (${Object.keys(PLATFORM_PACKAGES).join(", ")}), or set REYLO_ENGINE_PATH to a reylo executable; in a checkout of reylo's repository, cargo build --release -p reylo builds one.`);
+  throw new Error(`reylo's engine, the reylo executable, is missing: ${why}. Install reylo again with optional dependencies enabled on a supported platform (${Object.keys(PLATFORM_PACKAGES).join(", ")}), or set REYLO_ENGINE_PATH to a compatible reylo executable.`);
 }

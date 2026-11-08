@@ -1,1 +1,0 @@
-update users set n = coalesce(:n::nullable(integer), n), doc = coalesce(:doc::nullable(json), doc) where coalesce(:guard::nullable(json), 'none') = 'none' or id = CAST(:id AS INTEGER) returning n, doc

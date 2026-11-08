@@ -1,1 +1,0 @@
-with recent as (select id, title from posts order by id desc limit 5) select (select count(*) from users) as user_count, (select coalesce(json_arrayagg(json_object('id', r.id, 'title', r.title)), json_array()) from recent r) as recent_posts

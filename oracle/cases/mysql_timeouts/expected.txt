@@ -1,5 +1,0 @@
-forever.sql: one () -> { slept: int8 }
-forever_rows.sql: many () -> { c: int8 }
-forever_update.sql: none () -> {  }
-quick.sql: maybeOne (id: int4) -> { id: int4, name: text? }
-sometimes.sql: maybeOne (id: int4) -> { id: int4 }

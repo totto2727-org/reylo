@@ -1,1 +1,0 @@
-select cast(whole as char) as c, cast(v as signed) as s, cast(v as unsigned) as u, cast(v as decimal(10,2)) as n, cast(v as double) as d, cast(v as float) as f, cast(v as date) as day, cast(v as datetime) as at, cast(v as time) as t, cast(v as year) as y, cast(v as json) as j, cast(v as binary) as b, cast(whole as json) as wj from everything where v = '1'

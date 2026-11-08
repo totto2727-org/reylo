@@ -1,1 +1,0 @@
-select status from pt

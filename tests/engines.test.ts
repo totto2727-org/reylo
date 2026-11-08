@@ -73,7 +73,7 @@ test("a mismatched native version is refused and a failed load can be retried", 
     for (let attempt = 0; attempt < 2; attempt++) {
       await assert.rejects(engine("sqlite"), (e: Error) => {
         assert.ok(e instanceof MissingEngine);
-        assert.equal(e.message, `reylo ${VERSION} runs with its engine at ${ENGINE_VERSION}, and ${path} is 9.9.9: install reylo again, point REYLO_ENGINE_PATH at the engine of reylo ${ENGINE_VERSION}, or in a checkout of reylo's repository build it with cargo build --release -p reylo`);
+        assert.equal(e.message, `reylo ${VERSION} runs with its engine at ${ENGINE_VERSION}, and ${path} is 9.9.9: install reylo again with optional dependencies enabled, or point REYLO_ENGINE_PATH at the engine of reylo ${ENGINE_VERSION}`);
         return true;
       });
     }

@@ -15,7 +15,7 @@ Both fork packages follow the upstream published release version by default, wit
 The tooling peer stays at the fork package version.
 Already-published npm versions remain immutable; a fork-only release outside this policy requires explicit approval.
 The approved fork-only patch is `0.7.1` for both scoped packages and their exact tooling peer.
-The native optional dependencies and retained Cargo workspace stay at upstream `0.7.0`.
+The native optional dependencies stay at upstream `0.7.0`.
 
 ## SQLite-only distribution scope
 
@@ -25,7 +25,7 @@ The publication workflow stages only the runtime and SQLite/HCL tooling.
 Their optional dependencies refer to upstream native platform engines, not database-specific npm engines.
 Examples retain small SQLite consumers and a local HCL analysis example instead of framework deployments.
 The test fixtures retain only SQLite driver dependencies and the Jest/Vitest integration lab.
-Shared multi-dialect TypeScript branches, decoder code, and the upstream Rust workspace remain where removal would increase future merge conflicts.
+Shared multi-dialect TypeScript branches and decoder code remain where removal would increase future merge conflicts.
 These retained branches do not constitute supported npm engines or require external database servers for maintained checks.
 The SQLite inference rules and runtime query execution API remain upstream behavior.
 The HCL adapter and package/distribution scope are source customizations, not deployment-only configuration.
@@ -55,8 +55,14 @@ The retained host changes restrict analysis to SQLite, select SQLite for core co
 Engine function signatures, asynchronous lexer calls, and the cached engine fingerprint follow upstream without compatibility arguments or an extra synchronous ping.
 The runtime and tooling retain their separate scoped package boundary, with the HCL parser bundled into `dist/sqlite/tooling.js`.
 Committed SQLite WASM artifacts, the component worker and host, and the WASI shim dependency are removed.
-The retained Rust workspace is reference and oracle source, not the engine installed by consumers.
-A fork change to Rust inference does not change the upstream binary and requires a separately coordinated compatible engine release before consumers can use it.
+The fork does not retain the upstream `engine/` or `oracle/` source trees, their vendored dependencies, Cargo manifests and lockfiles, or `.cargo/` build configuration.
+The oracle-only JSON Schema probe inputs and recorded database matrices under `wiki/json-schema-checks/` are also removed; maintained TypeScript tests do not consume them.
+Native inference implementation, source-level oracle cases, and platform builds are maintained in the [upstream repository at the comparison revision](https://github.com/colinhacks/reylo/tree/7a3928a8ff4dfb387b34ed584ab1319aa72f3f3b).
+The engine-dependent error-code generator and unused WebAssembly component types are also absent; the runtime retains the upstream-generated error-code tables.
+The build checks the pinned native package versions directly and does not read a Cargo workspace version.
+The resolver uses only an explicit `REYLO_ENGINE_PATH` or the installed upstream platform package, never a checkout's `target/` binaries.
+Missing or incompatible engines produce installation or explicit-override guidance, not local build instructions.
+Inference fixes require a compatible upstream engine release; this source cleanup does not change the installed engine or SQLite inference behavior.
 The release's JSON value type, ISO 8601 extended-year representation, and [`descriptor specification`](../spec/type-descriptor.ts) remain upstream behavior.
 The existing main-push publication workflow and template-derived settings are unchanged.
 

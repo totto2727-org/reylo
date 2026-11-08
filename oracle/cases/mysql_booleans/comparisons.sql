@@ -1,1 +1,0 @@
-select a = b as eq, a <> b as ne, a < b as lt, a <=> b as nse, a is null as isnull, a is not true as nottrue, a in (1, 2) as inl, a between 1 and 2 as btw, label like 'a%' as lk, label regexp 'a' as re, not a as nota, a and b as andab, a or b as orab, a xor b as xorab, true as t, false as f from flags

@@ -1,6 +1,6 @@
 // The error `.try()` gives: one the database raised, read from the driver's own error into one
 // shape per database, whichever driver ran the statement. The codes are the database's own, every
-// one it defines (scripts/error-codes.ts writes the lists). Any other error, a refused connection,
+// one it defines (the lists are synced from upstream Reylo). Any other error, a refused connection,
 // a client Reylo cannot run on, a value Reylo refuses or a row count the analysis got wrong, is not
 // the database's, and `.try()` throws it as `.run()` does.
 //

@@ -1,1 +1,0 @@
-select length(:a) as a, year(:b) as b, datediff(:c, :d) as c, char_length(:e) as d, ascii(:f) as e, unix_timestamp(:g) as f, to_days(:h) as g, hour(:i) as h, crc32(:j) as i, locate(:k, 'abc') as j, cast(:l as unsigned) + 1 as k, date(:m) as l, timestamp(:n) as m, last_day(:o) as n, time_to_sec(:p) as o

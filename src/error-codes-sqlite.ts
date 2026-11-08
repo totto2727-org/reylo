@@ -1,4 +1,4 @@
-// Written by scripts/error-codes.ts from the sqlite3.h of SQLite 3.53.4; run it again rather than editing this file.
+// Upstream-generated table from the sqlite3.h of SQLite 3.53.4. Sync with upstream Reylo rather than regenerating locally.
 
 /** Every primary and extended result code of an error, by name. */
 export const SQLITE_CODES = {

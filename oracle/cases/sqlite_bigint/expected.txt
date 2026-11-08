@@ -1,9 +1,0 @@
-aggregates.sql: one () -> { c: integer, t: real, most: int8? }
-columns.sql: many () -> { id: integer, user_id: int8, ref: int8?, big: int8?, wide: int8?, n: integer, r: real? }
-computed.sql: many () -> { minus: integer, times: integer, neg: integer?, a: integer?, ci: integer?, cr: real, half: real }
-insert.sql: one (user_id: int8, ref: int8?, n: integer) -> { id: integer, user_id: int8, ref: int8? }
-keyed.sql: maybeOne (id: int8) -> { id: int8, row_id: integer, name: text? }
-params.sql: many (user_id: int8, a: int8, b: int8, lo: int8, hi: int8) -> { id: integer }
-passed_through.sql: many () -> { user_id: int8, through_view: int8, most: int8, least: int8?, co: int8, ifn: int8, cs: int8, pos: int8, nul: int8?, sub: int8? }
-union_arms.sql: many () -> { user_id: int8 }
-windows.sql: many () -> { prev: int8?, first: int8?, smaller: int8? }

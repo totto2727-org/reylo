@@ -1,9 +1,0 @@
-pipes_in_select.sql: many () -> { label: text? }
-pipes_join_strings.sql: maybeOne (a: text, b: text) -> { id: int4 }
-pipes_on_date_key.sql: maybeOne (a: text, b: text) -> { id: int4 }
-quoted_identifier_key.sql: maybeOne (id: int4) -> { id: int4 }
-quoted_is_a_column.sql: many () -> { id: int4 }
-quoted_is_a_column_object.sql: many () -> { o: json? }
-quoted_names_in_json.sql: maybeOne (id: int4) -> { o: { id: int4, name: text, at: timestamp } }
-quoted_names_in_json_list.sql: one () -> { l: [{ id: int4, email: text }]? }
-single_quoted.sql: maybeOne () -> { id: int4 }

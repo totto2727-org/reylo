@@ -1,1 +1,0 @@
-select json_object('sub', (select id > 0), 'max', (select max(p.id > 0) from posts p), 'lit', (select true from posts limit 1), 'cmp', (select p.id > 0 from posts p where p.user_id = users.id limit 1), 'count', (select count(*) > 0 from posts p where p.user_id = users.id)) as o from users

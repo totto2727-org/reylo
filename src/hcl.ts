@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { sqliteSchemaFromHcl } from "./hcl-sqlite.ts";
 import { AnswerCache, type EngineCore, type EngineIo } from "./engine-core.ts";
 
-// These are the two catalog requests defined by engine/sqlite/src/sqlite.rs.
+// These are the two catalog requests defined by upstream engine/sqlite/src/sqlite.rs.
 const DDL_QUERY = "select sql from sqlite_schema where sql is not null and type in ('table', 'view', 'index', 'trigger') order by rowid";
 const FUNCTIONS_QUERY = "select name, narg, type from pragma_function_list";
 

@@ -1,1 +1,0 @@
-select cast(:a as signed) as a, cast(:b as char) as b, cast(:c as decimal(10,2)) as c, cast(:d as date) as d, cast(:e as json) as e, cast(:f as double) as f, cast(:g as unsigned) as g, cast(:h as datetime) as h, cast(:i as time) as i, cast(:j as binary) as j, cast(:k as year) as k, cast(:l as float) as l

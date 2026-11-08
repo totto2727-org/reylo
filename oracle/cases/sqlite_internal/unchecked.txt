@@ -1,1 +1,0 @@
-error_alone.sql: no such column: nope in select nope from t at offset 7

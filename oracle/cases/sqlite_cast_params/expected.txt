@@ -1,6 +1,0 @@
-coalesced.sql: many (n: integer?, doc: json?, guard: json?, id: integer) -> { n: integer?, doc: text? }
-update_row_value.sql: maybeOne (name: text, email: text, id: integer) -> { name: text, email: text? }
-update_set.sql: maybeOne (email: text, name: text, n: integer, doc: text, id: integer) -> { email: text?, n: integer?, doc: text? }
-upsert.sql: one (name: text, email: text) -> { id: integer }
-upsert_set.sql: one (email: text, n: integer, name: text) -> { email: text?, n: integer? }
-values_rows.sql: many (name: text, email: text, score: real, n: integer, name2: text, email2: text, score2: numeric, n2: integer) -> { id: integer, email: text?, n: integer? }

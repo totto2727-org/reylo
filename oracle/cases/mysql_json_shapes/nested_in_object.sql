@@ -1,1 +1,0 @@
-select json_object('id', u.id, 'posts', (select coalesce(json_arrayagg(json_object('id', p.id)), json_array()) from posts p where p.user_id = u.id), 'n', (select count(*) from posts p where p.user_id = u.id), 'first', (select p.title from posts p where p.user_id = u.id order by p.id limit 1)) as o from users u

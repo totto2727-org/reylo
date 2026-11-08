@@ -552,7 +552,7 @@ function writeEntry(root: string, file: string, entry: Entry): void {
  */
 // The Postgres query names every operator, function, type and table as pg_catalog's, and converts a
 // value to text only by a built-in cast (a name, a "char", a boolean) or by its type's output
-// function (`textin(oidout(…))`), as the engine's catalog queries do (engine/postgres/src/postgres.rs):
+// function (`textin(oidout(…))`), as the upstream engine's catalog queries do (engine/postgres/src/postgres.rs):
 // under a search path that puts a user's schema before pg_catalog, a user's `||` that answers NULL
 // would leave every row NULL, and the fingerprint would never move. Each row is the text the plain
 // `||` of each field makes. The server's own `pg_get_viewdef` and `pg_get_ruledef` read a rule

@@ -1,7 +1,7 @@
 // The type check's DuckDB. DuckDB runs inside the app, so the engine's needs (a statement's
 // describe, a catalog query) are answered by the project's own DuckDB, `@duckdb/node-api` loaded
 // from the project, as its prepared statement reports a statement's types: the engine
-// carries no DuckDB (engine/native/src/duckdb.rs). The database file is opened read-only for each
+// carries no DuckDB (upstream engine/native/src/duckdb.rs). The database file is opened read-only for each
 // analysis and closed after it: DuckDB lets no other process open a file one process holds for
 // writing, nor open it for writing while another process holds it at all, so a type check that kept
 // it open would stop the app from starting. Where the app holds it, the type check reads a copy.
@@ -77,7 +77,7 @@ function nodeApi(root: string): NodeApi {
   return api;
 }
 
-/** The type as the engine reads it (engine/duckdb/src/api.rs). */
+/** The type as the upstream engine reads it (engine/duckdb/src/api.rs). */
 function logical(api: NodeApi, t: NodeType): DuckdbType {
   const out: DuckdbType = { id: api.DuckDBTypeId[t.typeId] ?? String(t.typeId), text: t.toString() };
   if (t.alias) out.alias = t.alias;

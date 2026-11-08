@@ -103,7 +103,7 @@ export function renderType(t: EngineType, inJson = false, dialect: Dialect = "po
 
 /**
  * The TypeScript type of a JSON value the engine's canonical JSON Schema describes: the values a
- * CHECK's schema admits (engine/core/src/schema_type.rs), where a schema that says nothing more is any
+ * CHECK's schema admits (upstream engine/core/src/schema_type.rs), where a schema that says nothing more is any
  * JSON value, `Json`. An object that may hold keys besides the ones it names says so with an index
  * signature, `Json | undefined` beside named keys, since TypeScript requires every named key's type,
  * `undefined` included for an optional one, to fit the signature.
@@ -221,7 +221,7 @@ export function declaredType(t: EngineType, declared: unknown): string | undefin
  * it came out (the round-trip rule), and what else every driver binds
  * the same way. Every Postgres and MySQL driver binds a number, a BigInt or a digit string for a
  * 64-bit integer, so `limit :n` takes a number. On MySQL the engine types a parameter by the
- * column it is written to or compared with (engine/mysql `column_types`), since the prepare
+ * column it is written to or compared with (upstream engine/mysql `column_types`), since the prepare
  * describes every integer context as a BIGINT and every BIT one alike: a BIGINT column's is
  * `int8`, a TINYINT(1)'s or a BIT(1)'s `bool|int4`, which takes the truth value the row returns;
  * a SQLite BOOLEAN column's is NUMERIC, which takes it too, and `src/execute.ts` binds it as 1 or 0. A `timestamptz` is

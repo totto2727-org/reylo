@@ -1,1 +1,0 @@
-select coalesce(a = b, false) as co, ifnull(a < b, a > b) as ifn, if(done, a = b, null) as iff, case when maybe then a = 1 when done then false end as cs, nullif(a = b, true) as ni, (select f.a = f.b from flags f order by f.id limit 1) as sub, exists (select 1 from flags f where f.a > flags.a) as ex from flags

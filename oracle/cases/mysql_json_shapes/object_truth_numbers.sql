@@ -1,1 +1,0 @@
-select json_object('if', if(id > 0, true, false), 'case', case when id > 0 then true else false end, 'coalesce', coalesce(id > 0, false), 'plus', (id > 0) + 0, 'flag', flag, 'cast', cast(id > 0 as signed), 'ifnull', ifnull(email is null, false), 'nullif', nullif(id > 0, false), 'least', least(id > 0, flag), 'nested', (id > 0), 'minus', -(id > 0)) as o from users

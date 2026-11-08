@@ -1,3 +1,0 @@
-column.sql: maybeOne (id: int4) -> { x: int4?, y: int4 }
-insert.sql: none (id: int4, x: int4, y: int4) -> {  }
-whole_row.sql: maybeOne (id: int4) -> { r: { id: int4, x: int4?, y: int4 } }

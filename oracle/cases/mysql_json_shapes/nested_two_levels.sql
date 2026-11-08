@@ -1,1 +1,0 @@
-select json_object('id', u.id, 'posts', (select coalesce(json_arrayagg(json_object('id', p.id, 'author', (select json_object('name', a.name) from users a where a.id = p.user_id))), json_array()) from posts p where p.user_id = u.id)) as o from users u

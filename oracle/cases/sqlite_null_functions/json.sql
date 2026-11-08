@@ -1,1 +1,0 @@
-select json_type(json_quote(placed_at), '$.a') as t, json_remove(json_quote(placed_at), '$') as r, json_array_length(json_array(placed_at), '$.a') as l, json_set(json_quote(placed_at), '$', null) as s, json_type(json_quote(placed_at)) as q from o

@@ -1,1 +1,0 @@
-select json_object('lit', true, 'cmp', id > 0, 'eq', id = 1, 'in', id in (1, 2), 'not', not (id = 1), 'and', id > 0 and id < 5, 'or', id > 0 or flag, 'xor', id > 0 xor flag, 'isnull', email is null, 'notnull', email is not null, 'between', id between 1 and 2, 'like', name like 'a%', 'safe', email <=> name, 'istrue', flag is true, 'ne', id <> 1) as o from users

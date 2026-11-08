@@ -8,7 +8,7 @@ Consumer setup belongs in [README.md](README.md).
 
 Build and publish only `@totto2727/reylo` and `@totto2727/reylo-sqlite`.
 Do not restore Postgres, MySQL, or DuckDB npm packages, external-server requirements, or framework example projects.
-Shared TypeScript dialect branches and the upstream Rust workspace remain when keeping them reduces upstream merge conflicts.
+Shared TypeScript dialect branches remain when keeping them reduces upstream merge conflicts.
 Their presence does not extend this fork's supported package matrix.
 Preserve the SQLite inference engine and runtime API unless a change requires otherwise.
 Record fork-specific behavior and operational impact in [docs/upstream-differences.md](docs/upstream-differences.md), including the exact upstream base hash whenever upstream is synced.
@@ -27,9 +27,7 @@ Record fork-specific behavior and operational impact in [docs/upstream-differenc
 | `src/` | Runtime, content mapper, loaders, SQLite/HCL analysis, CLI, and shared upstream dialect code |
 | `src/hclsyntax/` | Private native HCL parser port with MPL-2.0 notices |
 | `packages/sqlite/` | SQLite/HCL tooling entry and upstream native optional dependencies |
-| `engine/` | Upstream Rust workspace, shared core and database implementations |
 | `spec/type-descriptor.ts` | Settled, living upstream descriptor contract. Agree format changes with a maintainer before editing |
-| `oracle/` | Rust soundness oracle and upstream regression cases |
 | `tests/` | Loader, runtime, SQLite and HCL regression tests |
 | `examples/` | Minimal SQLite and HCL consumers linked to built distributions |
 | `lab/drivers/` | SQLite integration driver dependencies used by root tests |
@@ -75,24 +73,24 @@ Build at the root before installing an example, and rebuild after changing `src/
 Do not replace those links with `file:` dependencies, which can leave stale installed builds under nub 0.9.6.
 Follow each example's README for its checks.
 
-## Engine changes
+## Upstream native engines
 
 Analysis uses the published upstream `@reylosql/engine-*` packages at exactly `0.7.0`.
 Normal install, build, and tests need no Rust compiler, WASI SDK, jco, or local engine build.
 Keep optional dependencies enabled and verify `nativeBinary()` resolves an upstream installed package when checking this path.
 `REYLO_ENGINE_PATH` is an explicit override, not the default acceptance path.
 The host checks the engine's reported version, and this fork still rejects non-SQLite analysis.
-Read [engine/README.md](engine/README.md) before changing reference Rust sources.
-Those sources do not change the installed upstream binary.
+Do not restore local Rust engine sources, the soundness oracle, Cargo configuration, or platform-package builds.
+Investigate inference issues in the [upstream source at the recorded release](https://github.com/colinhacks/reylo/tree/7a3928a8ff4dfb387b34ed584ab1319aa72f3f3b/engine).
 Any inference change must be delivered through a compatible upstream engine release before it affects users.
-Use the retained Rust workspace and SQLite oracle only for source-level investigation, not as a substitute for tests against the published engine.
-Do not rebuild or publish platform packages from this fork.
+The resolver never selects a checkout's `target/` binaries automatically.
+Test against the installed upstream engine, not a locally rebuilt substitute.
 
 ## Version policy
 
 Follow the upstream published release version by default, without independent fork version bumps.
 Keep the root package, SQLite/HCL tooling package, and exact tooling peer dependency equal.
-Keep `src/engine-version.ts`, the retained Cargo workspace, and upstream native optional dependencies at the compatible published native release.
+Keep `src/engine-version.ts` and upstream native optional dependencies at the compatible published native release.
 The approved fork-only patch release is `0.7.1`, using the unchanged upstream native release `0.7.0`.
 When syncing upstream, update these versions together with the lockfile and exact comparison revision in `docs/upstream-differences.md`.
 Use a published release with available native packages, not an unreleased `main` version.

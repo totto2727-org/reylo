@@ -1,4 +1,0 @@
-sum_all.sql: one () -> { cents: integer? }
-sum_grouped.sql: many () -> { customer: integer, cents: integer?, weight: real? }
-sum_one.sql: one (customer: integer) -> { cents: integer? }
-total.sql: one () -> { cents: real, top: integer? }

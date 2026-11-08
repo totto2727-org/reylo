@@ -22,4 +22,5 @@ HCL parsing remains local TypeScript code, and its static schema is analyzed by 
 Supported binary targets follow upstream v0.7.0: macOS and Windows on x64 or arm64, and Linux on x64 or arm64 with glibc or musl.
 An unsupported platform or missing optional package produces an error with installation guidance.
 `REYLO_ENGINE_PATH` can select a compatible `reylo 0.7.0` executable explicitly.
+Local `target/` builds are not selected automatically, and this fork does not retain native engine sources or build tools.
 Other dialects inside the upstream binary do not expand this fork's SQLite/HCL support matrix.

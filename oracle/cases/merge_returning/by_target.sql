@@ -1,1 +1,0 @@
-merge into users u using other s on u.id = s.id when matched then update set nick = s.label when not matched then insert (id, name) values (s.id, s.name) returning merge_action() as action, s.name as source_name, u.name as cur, s.label || u.name as both

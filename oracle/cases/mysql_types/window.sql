@@ -1,1 +1,0 @@
-select row_number() over (order by id) as rn, rank() over (order by whole) as rk, sum(whole) over () as total, lag(whole) over (order by id) as previous, first_value(v) over (order by id) as fv, ntile(2) over (order by id) as nt, percent_rank() over (order by id) as pr, count(*) over () as n from everything where whole between 0 and 2

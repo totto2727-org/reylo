@@ -1,7 +1,7 @@
 // The analysis engine: the `reylo` executable (src/native.ts), which holds every database's engine
 // and serves one database's as `reylo engine <database>`: one JSON request per line on its standard
 // input, one answer per line on its standard output, each carrying its request's `id` back
-// (engine/native/src/lib.rs). The engine connects to the database itself. Each connection is a
+// (upstream engine/native/src/lib.rs). The engine connects to the database itself. Each connection is a
 // child process of its own, which answers its requests in turn, so that a server slow to answer
 // holds up no other connection; the requests that need no database go to one child per database
 // (the ping, the lexer, and DuckDB's analysis, whose needs this process answers), and those that
@@ -80,7 +80,7 @@ export function engine(dialect: Dialect): Promise<Engine> {
       };
       if (ping.status !== "ok") throw refuse(`the engine ${binary} does not answer: ${answer.message ?? answer.status}`);
       if (ping.version !== ENGINE_VERSION) {
-        throw refuse(`reylo ${REYLO_VERSION} runs with its engine at ${ENGINE_VERSION}, and ${binary} is ${ping.version}: install reylo again, point REYLO_ENGINE_PATH at the engine of reylo ${ENGINE_VERSION}, or in a checkout of reylo's repository build it with cargo build --release -p reylo`);
+        throw refuse(`reylo ${REYLO_VERSION} runs with its engine at ${ENGINE_VERSION}, and ${binary} is ${ping.version}: install reylo again with optional dependencies enabled, or point REYLO_ENGINE_PATH at the engine of reylo ${ENGINE_VERSION}`);
       }
       if (ping.database !== dialect) throw refuse(`${binary} serves ${ping.database ?? "no one database"}'s engine when asked for ${dialect}'s`);
       return new Engine(binary, dialect, ping.fingerprint, core);

@@ -1,1 +1,0 @@
-key_volatile.sql: many () -> { id: int4 }

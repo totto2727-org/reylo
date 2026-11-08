@@ -1,1 +1,0 @@
-select w from words

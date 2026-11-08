@@ -1,1 +1,0 @@
-select round(:q) as p, floor(:r) as q, :s + 0 as r, :t * 1 as s, :u % 2 as t, :v - :w as u, -(:x) as v, sqrt(:y) as w, :z / 1 as x, :aa div 1 as y, bit_count(:ab) as z, :ac | 1 as za, ~:ad as zb, :ae << 1 as zc

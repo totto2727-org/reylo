@@ -1,1 +1,0 @@
-select json_extract(doc, '$.a') as a, doc->'$.a' as b, doc->>'$.a' as c, json_merge_patch(json_object('id', id), '{"x": 1}') as merged, json_set(json_object('id', id), '$.id', null) as changed, json_remove(json_object('id', id), '$.id') as removed, json_keys(json_object('id', id)) as k, json_quote(name) as q, json_unquote(json_quote(name)) as u from users

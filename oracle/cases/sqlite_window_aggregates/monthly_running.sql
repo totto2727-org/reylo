@@ -1,1 +1,0 @@
-select strftime('%Y-%m', published_at) as month, max(count(*)) over (order by strftime('%Y-%m', published_at)) as busiest, sum(count(*)) over (order by strftime('%Y-%m', published_at)) as running from posts group by strftime('%Y-%m', published_at)

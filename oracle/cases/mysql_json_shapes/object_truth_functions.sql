@@ -1,1 +1,0 @@
-select json_object('isnull', isnull(email), 'regexp_like', regexp_like(name, 'a'), 'strcmp', strcmp(name, 'a'), 'json_valid', json_valid(name), 'json_contains', json_contains(doc, '1'), 'length', length(name), 'bit_count', bit_count(id)) as o from users

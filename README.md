@@ -90,6 +90,7 @@ The package manager installs the binary for the host platform through optional d
 Do not omit optional dependencies when installing analysis tooling.
 Analysis starts the engine as a child process, including when its schema comes from HCL.
 The fork no longer ships a WebAssembly component or needs Rust to build its npm distributions.
+Native engine sources, build configuration, and source-level oracle cases are maintained only [upstream](https://github.com/colinhacks/reylo/tree/7a3928a8ff4dfb387b34ed584ab1319aa72f3f3b), not in this fork.
 See the [tooling package](packages/sqlite/README.md) for supported platforms and missing-binary guidance.
 
 ## Maintenance

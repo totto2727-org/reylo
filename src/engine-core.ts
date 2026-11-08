@@ -1,8 +1,6 @@
 // The engine's half that needs no host: a request to the engine, the lexer, and the replay loop
 // that hands each round's needs to an `EngineIo` until the analysis is done, for a host that answers
-// them over a connection of its own. It imports nothing from Node, so a browser runs it beside a
-// WebAssembly build of the engine's core, as the docs site's playground does; src/engine.ts runs it
-// over the native engine.
+// them over a connection of its own. src/engine.ts runs it over the published native engine.
 import { Unreachable } from "./connection.ts";
 import type { EngineType } from "./engine-type.ts";
 
@@ -27,11 +25,11 @@ export type Analysis = {
   unresolved: string[];
   /** Each structured parameter in a MySQL insert, with the lists of `rewritten.sql` (UTF-8 byte offsets) the run time writes again for a call that leaves keys out; a Postgres or SQLite insert copies its defaults into the statement instead. */
   structured?: { name: string; lists: { start: number; end: number; entries: string[] }[] }[];
-  /** The catalog facts the analysis relied on, and the query that reads them (engine/core/src/fresh.rs). */
+  /** The catalog facts the analysis relied on, and the query that reads them (upstream engine/core/src/fresh.rs). */
   fresh?: { query: string; rows: string[][]; inserts: string[]; defaults?: string[][] };
   /**
    * By each error's code, the names each of its fields may hold, where the statement runs only its
-   * database's own code (engine/core/src/errors.rs): `.try()`'s error, narrowed. Absent where
+   * database's own code (upstream engine/core/src/errors.rs): `.try()`'s error, narrowed. Absent where
    * the statement may run a user's code, which may raise any error.
    */
   errors?: Record<string, Record<string, string[]>>;
@@ -52,7 +50,7 @@ export type Need =
 export type Described = { params: { oid: number }[]; columns: { name: string; oid: number; table: number; attnum: number }[] };
 /** MySQL's prepare metadata: the protocol type code, the flags (bit 1 is NOT NULL), the charset (63 is binary), the display length and the table the column is one of (empty for an expression). */
 export type MysqlDescribed = { kind: "mysql"; columns: { name: string; type: number; flags: number; charset: number; length: number; org_table: string; org_name: string }[]; params: { type: number; flags: number; charset: number }[] };
-/** A DuckDB logical type as the engine reads it (engine/duckdb/src/api.rs): its id, its text, and what the id says more of. */
+/** A DuckDB logical type as the upstream engine reads it (engine/duckdb/src/api.rs): its id, its text, and what the id says more of. */
 export type DuckdbType = { id: string; text: string; alias?: string; width?: number; scale?: number; child?: DuckdbType; size?: number; fields?: { name: string; type: DuckdbType }[]; key?: DuckdbType; value?: DuckdbType; values?: string[] };
 /** What DuckDB's prepared statement reports: its statement type, each parameter's type (null where DuckDB cannot tell it), each result column's name and type. */
 export type DuckdbDescribed = { kind: "duckdb"; statement: string; params: { name: string; type: DuckdbType | null }[]; columns: { name: string; type: DuckdbType }[] };
@@ -81,29 +79,13 @@ export type Response =
   | { status: "configError"; error: { message: string; start: number; end: number } }
   | { status: "error"; message: string };
 
-/** An engine's request function: one JSON request in, its answer out (a WebAssembly build's `call` export, or the native engine's one-shot form). */
+/** An engine's request function: one JSON request in, its answer out. */
 export type EngineCall = (request: string) => string;
-
-
-/** A compiled core module of a WebAssembly build of the engine, opaque here: the WebAssembly namespace is not typed through the DOM lib. */
-export type CoreModule = unknown;
-
-/** The exports of a WebAssembly build of the engine (engine/wasip2/src/lib.rs), which the docs site's playground runs. */
-export interface ComponentExports {
-  /** The core's answer to a request that needs no database: `ping`, `lex`, `config`, and `analyze` with the host's answers. */
-  call(request: string): string;
-  /** The answer to a request on a connection the engine opens itself: `open`, `run`, `query`, `describe`, `forget`, `close`. */
-  serve(request: string): string;
-}
-
-/** The transpiled component's `instantiate`, as `jco transpile --instantiation sync` writes it. */
-export type Instantiate = (getCoreModule: (name: string) => CoreModule, imports: object) => ComponentExports;
 
 /**
  * An engine's core: its requests that need no database, and the analysis of a statement whose
- * needs a host answers itself (`analyze` with an `EngineIo`), as a host that holds its own
- * connection does (the docs site's playground, on PGlite). A Node host lets the engine connect
- * itself instead (src/engine.ts).
+ * needs a host answers itself (`analyze` with an `EngineIo`), as the HCL catalog does.
+ * A database-backed Node host lets the engine connect itself instead (src/engine.ts).
  */
 export class EngineCore {
   #call: EngineCall;

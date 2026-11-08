@@ -1,1 +1,0 @@
-select n = 1 as eq, n <> 1 as ne, n is null as missing, n is not 1 as other, n in (1, 2) as inl, n between 1 and 2 as btw, title like 'a%' as lk, title glob 'a*' as gl, not n as notn, n and done as andn, n or done as orn, exists (select 1 from todos t where t.n > todos.n) as ex, true as t, false as f from todos

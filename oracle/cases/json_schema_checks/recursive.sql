@@ -1,1 +1,0 @@
-select body from notes
