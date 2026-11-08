@@ -21,6 +21,7 @@
   },
   "exports": {
     ".": "./src/index.ts",
+    "./effect": "./src/effect.ts",
     "./register": "./src/register.ts",
     "./vite": "./src/vite.ts",
     "./esbuild": "./src/esbuild.ts",
@@ -57,13 +58,16 @@
   "devDependencies": {
     "@totto2727/reylo-sqlite": "link:packages/sqlite",
     "@types/node": "^26.6.1",
+    "effect": "^4.0.6",
     "esbuild": "^0.28.2",
     "typescript": "^7.1.0-dev.20260918.1"
   },
   "peerDependencies": {
+    "effect": "^4.0.6",
     "@totto2727/reylo-sqlite": "0.7.0"
   },
   "peerDependenciesMeta": {
+    "effect": { "optional": true },
     "@totto2727/reylo-sqlite": { "optional": true }
   }
 }

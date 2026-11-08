@@ -10,7 +10,9 @@ const manifest = JSON.parse(readFileSync(new URL("../package.json", import.meta.
 
 test("the fork exposes only its runtime and exact-version SQLite tooling under its own scope", () => {
   assert.equal(manifest.name, "@totto2727/reylo");
-  assert.deepEqual(manifest.peerDependencies, { "@totto2727/reylo-sqlite": manifest.version });
+  assert.deepEqual(manifest.peerDependencies, { "@totto2727/reylo-sqlite": manifest.version, effect: "^4.0.6" });
+  assert.equal(manifest.peerDependenciesMeta.effect.optional, true);
+  assert.equal(manifest.exports["./effect"], "./src/effect.ts");
   for (const dialect of ["sqlite"] as const) {
     const name = `@totto2727/reylo-${dialect}`;
     const engine = JSON.parse(readFileSync(require.resolve(`${name}/package.json`), "utf8"));

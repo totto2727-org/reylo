@@ -25,6 +25,8 @@ for (const file of readdirSync(reylo, { recursive: true, encoding: "utf8" }).fil
   writeFileSync(path, transformSync(readFileSync(path, "utf8"), { loader: "js", legalComments: "inline" }).code);
 }
 copyFileSync(join(root, "README.md"), join(reylo, "README.md"));
+mkdirSync(join(reylo, "docs"), { recursive: true });
+copyFileSync(join(root, "docs/effect.md"), join(reylo, "docs/effect.md"));
 
 const pkg = JSON.parse(readFileSync(join(root, "package.json"), "utf8"));
 // The binary prints and answers with the Cargo workspace's version, which is reylo's: the two move together.

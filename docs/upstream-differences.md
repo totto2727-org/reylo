@@ -28,6 +28,16 @@ These retained branches do not constitute supported npm engines or require exter
 The SQLite inference rules and runtime query execution API remain upstream behavior.
 The HCL adapter and package/distribution scope are source customizations, not deployment-only configuration.
 
+## Effect execution boundary
+
+The optional `@totto2727/reylo/effect` subpath provides typed single-query Effects with a Layer-injected `QueryExecutor`.
+Its execution contract has no dependency on a concrete SQL client or infrastructure framework.
+Parameter encoding, SQLite object-row normalization, and cardinality reuse the existing query runtime.
+Client acquisition, native batching, and transaction semantics remain application responsibilities.
+Effect is an optional peer and is imported only from the opt-in subpath, so existing runtime consumers do not load it.
+The affected areas are the runtime query metadata, the new Effect entry point, package exports, and regression tests.
+There are no schema-analysis or upstream native-engine changes.
+
 ## Upstream native engine reuse
 
 The fork uses upstream v0.7.0's native host and platform resolver in `src/engine.ts` and `src/native.ts`.

@@ -72,6 +72,13 @@ Enable the loader with `node --import @totto2727/reylo/register main.ts`, or use
 Run the type check with `nubx tsc --noEmit --runExternalCode`.
 See the [examples](examples/README.md) for complete SQLite and HCL projects, and the [usage skill](skills/using-reylo/SKILL.md) for configuration and native-driver guidance.
 
+### Effect execution
+
+Use the optional `@totto2727/reylo/effect` entry point to run a typed query with a Layer-provided `QueryExecutor`.
+The application adapts its existing Effect-native client; Reylo owns parameter encoding, row decoding, and cardinality.
+Client-specific transactions and batches remain in the application.
+See [Effect query execution](docs/effect.md) for the service contract and dependency composition.
+
 ## Version 0.7 compatibility
 
 Unconstrained JSON values use the exported `Json` union rather than `unknown`.
