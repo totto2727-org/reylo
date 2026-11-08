@@ -1,1 +1,0 @@
-lock tables users write

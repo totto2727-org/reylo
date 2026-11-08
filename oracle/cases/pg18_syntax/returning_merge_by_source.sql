@@ -1,1 +1,0 @@
-merge into users u using other s on u.id = s.id when matched then update set name = s.name when not matched by source then delete returning merge_action() as action, s.name as source_name, s.id as source_id, u.name as cur, old.name as old_name, new.name as new_name

@@ -11,8 +11,10 @@ coverage/
 .claude/
 .frizz/
 
-# Cargo workspace build output (engine/, framework/engine/ and pg-extension/)
-target/
+# Local artifacts left by older native-engine checkouts
+/target/
+/engine/
+/oracle/
 
 # Lab emit output
 lab/**/dist/
@@ -28,18 +30,5 @@ lab/sqlite/lab.db*
 
 # Example projects: mapper cache and local env
 examples/**/.reylo/
-
-# The Postgres extension's build outputs: the shim, its objects, and pg_regress's own files.
-pg-extension/*.so
-pg-extension/*.dylib
-pg-extension/src/*.o
-pg-extension/src/*.bc
-pg-extension/test/results/
-pg-extension/test/regression.diffs
-pg-extension/test/regression.out
-pg-extension/test/log/
-
-# Python bytecode
-__pycache__/
 /tmp
 /.direnv

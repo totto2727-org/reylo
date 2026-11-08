@@ -4,7 +4,7 @@
 // and a URL that names a Unix socket (Postgres's `host=/dir`, or `PGHOST=/dir` where the URL names
 // no host, and mysql2's `socketPath`) is opened through a bridge, a TCP port on the loopback
 // interface that this thread pipes to the socket, since the engine connects over TCP alone
-// (engine/native). The server sees a connection on its socket, which peer authentication
+// (upstream engine/native). The server sees a connection on its socket, which peer authentication
 // (Postgres's `peer`, MySQL's `auth_socket`) trusts as this process's user, so the bridge admits the
 // engine's own connections alone: each carries the bridge's token, which only the engine is given
 // and the server never sees, and any other is closed before the server reads a byte of it.
@@ -23,7 +23,7 @@ export type HostUrl = { url: string; bridge?: string; close(): void; failure?():
 /** The Postgres URL parameters that name a file. */
 const FILES = ["sslrootcert", "sslcert", "sslkey"];
 
-/** The connection attribute a MySQL login through the bridge carries its token in (engine/native/src/mysql.rs). */
+/** The connection attribute a MySQL login through the bridge carries its token in (upstream engine/native/src/mysql.rs). */
 const MYSQL_ATTRIBUTE = "reylo_bridge";
 
 /** How long a connection to the bridge may take to show its token. */

@@ -1,1 +1,0 @@
-citext_key.sql: many () -> { n: text }

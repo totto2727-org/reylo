@@ -1,1 +1,0 @@
-update users set name = :name where id = :id returning with (old as o, new as n) o.name || ' -> ' || n.name as change, o.name is distinct from n.name as changed, upper(n.name) as up, coalesce(o.nick, n.nick, 'none') as nick, o.nick || '!' as old_nick

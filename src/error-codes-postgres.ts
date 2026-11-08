@@ -1,4 +1,4 @@
-// Written by scripts/error-codes.ts from Postgres's src/backend/utils/errcodes.txt at REL_18_0; run it again rather than editing this file.
+// Upstream-generated table from Postgres's src/backend/utils/errcodes.txt at REL_18_0. Sync with upstream Reylo rather than regenerating locally.
 
 /** Every SQLSTATE Postgres raises as an error, with its condition name. */
 export const POSTGRES_CODES = {

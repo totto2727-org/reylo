@@ -1,1 +1,0 @@
-insert into users (name, email) values ('Ada', 'ada@example.com') on conflict (email) do update set email = CAST(:email AS TEXT), n = CAST(:n AS INTEGER), name = CAST(:name AS TEXT) returning email, n

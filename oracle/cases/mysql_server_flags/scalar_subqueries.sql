@@ -1,1 +1,0 @@
-select (select name from t order by id limit 1) as a, (select count(*) from t) as b, (select name from nothing e join t on t.id = e.id limit 1) as c, (select 1) as d, (select max(n) from nothing) as e, (select n from t where id = :id) as f

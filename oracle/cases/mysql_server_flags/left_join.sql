@@ -1,1 +1,0 @@
-select t.id, t.name, o.id as other_id, o.label, o.maybe_label, coalesce(o.label, 'none') as shown, o.id is null as missing, o.id + 1 as next, concat(o.label, '!') as loud, length(o.label) as len, ifnull(o.id, 0) as zero from t left join other o on o.t_id = t.id

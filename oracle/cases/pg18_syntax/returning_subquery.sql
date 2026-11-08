@@ -1,1 +1,0 @@
-update users set name = :name where id = :id returning with (old as o) (select count(*) from other x where x.name = o.name) as same, (select old.name from other as old where old.id = users.id) as inner_old, exists (select 1 from other x where x.id = o.id) as known

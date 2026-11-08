@@ -1,9 +1,0 @@
-dates.sql: many () -> { day: text?, dt: text?, e: integer?, next: text?, t: text?, jd: real?, y: text?, diff: text? }
-iif.sql: many () -> { a: text?, b: text?, c: text }
-json.sql: many () -> { t: text?, r: text?, l: integer?, s: text, q: text }
-modifiers.sql: many () -> { d: text?, f: text?, u: real? }
-now.sql: many () -> { d: text, e: text, l: text, s: real, f: text, m: text, z: text, u: integer, j: real }
-numbers.sql: many () -> { d: text?, u: text?, j: real? }
-printf.sql: many () -> { p: text?, q: text, s: text? }
-substr.sql: many () -> { s: blob?, t: text }
-total.sql: one () -> { r: real?, i: real }

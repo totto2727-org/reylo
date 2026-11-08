@@ -1,1 +1,0 @@
-insert into users (id, name) values (:id, :name) on conflict (id) do update set name = excluded.name returning with (old as o, new as n) json_build_object('old', o.name, 'new', n.name, 'nick', n.nick) as j

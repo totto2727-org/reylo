@@ -3,7 +3,7 @@
 // statement relied on, the columns it names with their types, whether each is not null and whether
 // it has a default, for an insert's table the columns that need a value, and on Postgres and SQLite
 // the text of each default a structured insert copied into its statement, beside the catalog query
-// that read them (engine/core/src/fresh.rs). Before a query runs, the run time runs that query
+// that read them (upstream engine/core/src/fresh.rs). Before a query runs, the run time runs that query
 // through the caller's own client and compares: any difference fails the call, naming the table
 // and the column, rather than letting the query run against a schema its types were not made for.
 //
@@ -52,7 +52,7 @@ const yes = (v: string) => v === "true" || v === "1";
 const describe = (r: readonly string[]) => `${r[2]}${yes(r[3]!) ? " not null" : ""}${yes(r[4]!) ? " with a default" : ""}`;
 const table = (name: string) => name.replace(/^"|"$/g, "").replace(/"\."/g, ".");
 
-/** The catalog query's columns, as engine/core/src/fresh.rs names them; the sixth on Postgres and SQLite. */
+/** The catalog query's columns, as upstream engine/core/src/fresh.rs names them; the sixth on Postgres and SQLite. */
 const COLUMNS = ["fresh_table", "fresh_column", "fresh_type", "fresh_not_null", "fresh_default", "fresh_expr"] as const;
 
 /**
@@ -106,7 +106,7 @@ export function differences(fresh: Fresh, rows: readonly unknown[], dialect?: "p
  * (`'member'`, `(lower (hex (randomblob (4))))`, `- 7`, `CURRENT_TIMESTAMP`), which evaluates the
  * same (wiki/structured-params/default-extraction.md). Outside its strings the text loses its
  * spaces and its ASCII case and the parentheses around it all, and a lone identifier is the string
- * SQLite stores for it, as the build copies it (engine/core/src/structured.rs).
+ * SQLite stores for it, as the upstream engine copies it (engine/core/src/structured.rs).
  */
 export function sqliteDefault(text: string): string {
   const t = text.trim();

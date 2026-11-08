@@ -1,1 +1,0 @@
-select n / 2 as a, n / n as b, n % 2 as c, n % n as d, n div 2 as e, n div n as f, mod(n, 0) as g, price / 2 as h, ratio / 2 as i, 1 / 0 as j, n / 0.0 as k, pow(n, 2) as l, sqrt(n) as m, ln(n) as o, log(n) as p, exp(n) as q, acos(n) as r from t where n between -1 and 2

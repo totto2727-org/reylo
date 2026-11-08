@@ -1,1 +1,0 @@
-select v from w

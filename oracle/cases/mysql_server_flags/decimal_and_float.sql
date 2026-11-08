@@ -1,1 +1,0 @@
-select price + 1 as a, price * 2 as b, round(price) as c, round(price, 1) as d, floor(price) as e, ceil(price) as f, truncate(price, 1) as g, ratio + 1 as h, ratio * ratio as i, round(ratio) as j, floor(ratio) as k, -price as l, abs(price) as m, price + ratio as o, greatest(price, 1) as p, least(n, 1) as q, format(price, 1) as r from t

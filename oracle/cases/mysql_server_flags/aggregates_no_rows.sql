@@ -1,1 +1,0 @@
-select count(*) as a, sum(n) as b, max(n) as c, bit_or(n) as d, bit_and(n) as e, bit_xor(n) as f, coalesce(max(n), 0) as g, count(n) + sum(n) as h, std(n) as i, group_concat(n) as j, json_arrayagg(n) as k, avg(n) as l, min(id) as m, any_value(n) as o, max(n) is null as p from nothing

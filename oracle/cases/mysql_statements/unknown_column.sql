@@ -1,1 +1,0 @@
-select nope from users

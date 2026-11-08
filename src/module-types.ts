@@ -24,7 +24,7 @@ export type ModuleTypes = {
 
 /**
  * The type of the error `.try()` gives for a statement: where it runs only its database's own
- * code, narrowed to the names each code's fields may hold (engine/core/src/errors.rs), a SQLite
+ * code, narrowed to the names each code's fields may hold (upstream engine/core/src/errors.rs), a SQLite
  * unique key's columns written as SQLite's message lists them, `a, b`; the dialect's whole error
  * type otherwise.
  */

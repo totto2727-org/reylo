@@ -1,1 +1,0 @@
-merge into users u using (select :id::int as id, :name::text as name) s on u.id = s.id when matched then update set name = s.name when not matched then insert (id, name) values (s.id, s.name) returning with (old as o, new as n) merge_action() as action, o.name as old_name, n.name as new_name, u.name as cur, o.name is null as inserted

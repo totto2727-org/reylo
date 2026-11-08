@@ -1,1 +1,0 @@
-select whole + 1 as plus, whole * 2 as times, whole / 2 as divided, whole div 2 as quotient, whole % 2 as remainder, -whole as negated, price * 2 as doubled, f + 1 as f1, whole + 1.5 as n15, whole + 1e0 as d1, tiny + small as narrow, utiny - 1 as below from everything where whole between 0 and 2 and utiny > 0

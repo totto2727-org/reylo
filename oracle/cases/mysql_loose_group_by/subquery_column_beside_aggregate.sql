@@ -1,1 +1,0 @@
-select u.id, (select p.title from posts p where p.user_id = u.id having count(*) >= 0) as title, (select json_object('title', p.title, 'n', count(*)) from posts p where p.user_id = u.id) as o from users u

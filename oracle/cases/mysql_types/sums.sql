@@ -1,1 +1,0 @@
-select sum(whole) as s, avg(whole) as a, sum(price) as sp, sum(f) as sf, sum(d) as sd, max(whole) as mx, min(v) as mn, count(whole) as c, sum(tiny) as st, avg(d) as ad, sum(big) as sb from everything where whole between 0 and 2

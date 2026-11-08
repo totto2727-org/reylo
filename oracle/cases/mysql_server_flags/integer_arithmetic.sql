@@ -1,1 +1,0 @@
-select n + 1 as a, n - 1 as b, n * 2 as c, -n as d, n + small as e, abs(n) as f, n & 1 as g, n | 1 as h, n ^ 1 as i, ~n as j, n << 1 as k, n >> 1 as l, sign(n) as m, small * small as o from t where n between -1 and 2

@@ -1,1 +1,0 @@
-select name like :p as l, name glob 'R*' as g, doc ->> '$.b' as j, doc -> '$.a' as k, name || '!' as c, current_timestamp as t, iif(score > 0, 1, 0) as i, coalesce(email, name) as e, typeof(score) as ty, cast(score as integer) as n from users where id in (:a, :b) and name not like 'x%' escape '!' and score between 0 and 1

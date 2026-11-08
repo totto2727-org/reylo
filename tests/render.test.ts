@@ -141,7 +141,7 @@ test("SQLite: an INTEGER is a number, exact or an error; a NUMERIC whichever the
 // the engine reported them on 2026-10-20 against Postgres 18.6, MySQL 8.4.11 and SQLite for the
 // driver matrix's `typed` fixture (`select c from typed` and `select id from typed where c = :v`).
 // MySQL describes every integer context as a BIGINT and a BIT one as BIT, so the engine types a
-// parameter by the column it is compared with (engine/mysql `column_types`), and keeps the
+// parameter by the column it is compared with (upstream engine/mysql `column_types`), and keeps the
 // prepare's (`int4`, `bool|bytea`) for an expression; SQLite types a parameter by the column's
 // affinity, a BOOLEAN column's being NUMERIC.
 const array = (of: EngineType): EngineType => ({ kind: "array", of });

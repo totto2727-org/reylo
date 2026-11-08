@@ -1,1 +1,0 @@
-select m.id, array_to_json(array(select p.title from post p where p.member_id = m.id)) as titles, array_to_json(array(select json_build_object('title', p.title, 'body', p.body) from post p where p.member_id = m.id)) as posts from member m

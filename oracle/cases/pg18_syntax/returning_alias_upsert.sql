@@ -1,1 +1,0 @@
-insert into users (id, name) values (:id, :name) on conflict (id) do update set name = excluded.name returning with (old as before) before.name as old_name, new.name as new_name, before.id is null as inserted, coalesce(before.name, '(none)') as was

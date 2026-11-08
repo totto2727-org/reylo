@@ -409,7 +409,7 @@ function byType(v: unknown, name: string): unknown {
 // milliseconds and an interval into seconds. A tag made by the app's own `createSqlTag` with
 // `typeParsers` (Slonik 49.12.0 and later) overrides them for its queries alone, so Reylo's passes
 // every type that pg or Slonik converts through as the server's text, and decodes the rows itself.
-// Each parameter appears once in a statement (engine/core/src/lex.rs), so the statement is the
+// Each parameter appears once in a statement (upstream engine/core/src/lex.rs), so the statement is the
 // tag's template as it stands: its text between the placeholders, and the values in their order.
 
 type SlonikTypeParser = { name: string; parse(value: string): unknown };

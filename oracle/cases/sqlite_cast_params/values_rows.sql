@@ -1,1 +1,0 @@
-insert into users (name, email, score, n) values (CAST(:name AS TEXT), CAST(:email AS TEXT), CAST(:score AS REAL), CAST(:n AS INTEGER)), (CAST(:name2 AS TEXT), CAST(:email2 AS TEXT), CAST(:score2 AS NUMERIC), CAST(:n2 AS INTEGER)) returning id, email, n

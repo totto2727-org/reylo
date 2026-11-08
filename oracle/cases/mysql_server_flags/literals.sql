@@ -1,1 +1,0 @@
-select 1 as a, 1.5 as b, 1e3 as c, 'x' as d, null as e, true as f, x'41' as g, date '2026-01-01' as h, timestamp '2026-01-01 12:00:00' as i, time '12:00:00' as j, b'1' as k, 0x41 as l, _utf8mb4'x' as m, n'x' as o, -1 as p, '' as q

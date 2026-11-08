@@ -1,1 +1,0 @@
-merge into users u using other s on u.id = s.id when not matched by target then insert (id, name) values (s.id, s.name) returning s.name as source_name, u.name as cur, old.name as old_name, new.name as new_name

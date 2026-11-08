@@ -1,4 +1,4 @@
-// Written by scripts/error-codes.ts from MySQL's share/messages_to_clients.txt at mysql-8.4.11; run it again rather than editing this file.
+// Upstream-generated table from MySQL's share/messages_to_clients.txt at mysql-8.4.11. Sync with upstream Reylo rather than regenerating locally.
 
 /** Every error number MySQL sends a client and its name, as runs of consecutive numbers: `[first, names]`. */
 export const MYSQL_CODES = [

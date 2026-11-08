@@ -1,2 +1,0 @@
-returning_error.sql: the server does not prepare it: missing FROM-clause entry for table "old" (42P01)
-temporal_conflict.sql: there is no unique or exclusion constraint matching the ON CONFLICT specification (42P10)

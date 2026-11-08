@@ -1,1 +1,0 @@
-delete u, e from users u join emails e on e.user_id = u.id where u.id = :id

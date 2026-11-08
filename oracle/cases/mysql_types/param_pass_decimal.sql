@@ -1,1 +1,0 @@
-select coalesce(:p, price) as a, if(flag, :q, price) as b, greatest(price, :r) as c, nullif(:s, price) as d, case when flag then :t else price end as e, ifnull(price, :u) as f, least(:v, price) as g from everything

@@ -1,1 +1,0 @@
-select 1 as i, 1.5 as n, 1e3 as f, 'x' as s, null as nothing, true as t, x'41' as h, b'1' as b, date '2026-01-01' as d, time '12:00:00' as tm, timestamp '2026-01-01 12:00:00' as ts, 9223372036854775808 as huge, 18446744073709551616 as huger

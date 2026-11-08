@@ -19,7 +19,7 @@ Both fork packages follow the upstream published release version by default.
 Do not assign independent fork patch versions or suffixes automatically.
 Keep both fork package versions and the exact tooling peer dependency equal.
 The approved fork-only patch release is `0.7.1`, using upstream native release `0.7.0` without rebuilding it.
-Keep `src/engine-version.ts`, the retained Cargo workspace version, and all upstream native optional dependencies equal to that native release.
+Keep `src/engine-version.ts` and all upstream native optional dependencies equal to that native release.
 The host still requires an exact native version match, independently of the fork package version.
 Update them together with the lockfile when adopting an upstream release whose native packages are published.
 An unreleased upstream `main` commit is not a reason to select a version whose native packages are unavailable.

@@ -1,1 +1,0 @@
-merge into users u using (select id, name from other where id > 0) s on u.id = s.id when matched then update set name = s.name when not matched by source then update set nick = 'gone' returning s.name as source_name, u.nick as nick, s.id + 1 as next

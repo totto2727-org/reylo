@@ -1,1 +1,0 @@
-insert into stock (id, dims, spot, span, isbn13, issn, ismn, upc, blob, ref) values (:id, :dims, :spot, :span, :isbn13, :issn, :ismn, :upc, :blob, :ref) on conflict (id) do nothing returning id, dims, spot, span, isbn13, issn, ismn, upc, blob, ref

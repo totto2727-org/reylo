@@ -1,1 +1,0 @@
-select n, count(*) as a, sum(small) as b, max(name) as c, min(maybe_n) as d, group_concat(name order by id) as e, any_value(name) as f, bit_or(small) as g, avg(small) as h, count(maybe_n) as i, max(day) as j, json_arrayagg(small) as k from t where n between -1 and 2 group by n

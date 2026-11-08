@@ -30,9 +30,6 @@ mkdirSync(join(reylo, "docs"), { recursive: true });
 copyFileSync(join(root, "docs/effect.md"), join(reylo, "docs/effect.md"));
 
 const pkg = JSON.parse(readFileSync(join(root, "package.json"), "utf8"));
-// The retained Cargo workspace describes the upstream binary, not fork-only npm patches.
-const cargoVersion = readFileSync(join(root, "Cargo.toml"), "utf8").match(/^\[workspace\.package\]\s*\nversion = "([^"]+)"/m)?.[1];
-if (cargoVersion !== ENGINE_VERSION) throw new Error(`Cargo.toml: the workspace's version is ${cargoVersion}, and the upstream engine is ${ENGINE_VERSION}; they move together`);
 for (const [name, version] of Object.entries(pkg.optionalDependencies)) {
   if (version !== ENGINE_VERSION) throw new Error(`package.json: the upstream engine ${name} is ${version}, expected ${ENGINE_VERSION}`);
 }

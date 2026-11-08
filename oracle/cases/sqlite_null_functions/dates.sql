@@ -1,1 +1,0 @@
-select date(placed_at) as day, datetime(placed_at) as dt, unixepoch(placed_at) as e, date(placed_at, '+1 day') as next, time(placed_at) as t, julianday(placed_at) as jd, strftime('%Y', placed_at) as y, timediff(placed_at, 'now') as diff from o

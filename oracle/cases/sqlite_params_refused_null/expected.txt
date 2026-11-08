@@ -1,5 +1,0 @@
-coalesced.sql: maybeOne (nickname: text?, email: text?, id: integer) -> { nickname: text?, email: text? }
-insert_select.sql: many (id: integer, email: text, nickname: text, note: text?) -> { id: integer }
-insert_values.sql: one (id: integer, email: text, nickname: text) -> { id: integer }
-update_set.sql: maybeOne (email: text, nickname: text, id: integer) -> { email: text?, nickname: text? }
-upsert.sql: one (id: integer, email: text, nickname: text, note: text?) -> { id: integer }

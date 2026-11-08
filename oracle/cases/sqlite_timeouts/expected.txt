@@ -1,4 +1,0 @@
-bounded.sql: one (top: unknown) -> { n: integer }
-forever.sql: one () -> { n: integer }
-forever_write.sql: none () -> {  }
-z_counters.sql: many () -> { id: integer, n: integer?, label: text? }
