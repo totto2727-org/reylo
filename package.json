@@ -44,8 +44,17 @@
     "typecheck": "tsc --noEmit --runExternalCode",
     "test": "node --test 'tests/**/*.test.ts'"
   },
+  "optionalDependencies": {
+    "@reylosql/engine-darwin-arm64": "0.7.0",
+    "@reylosql/engine-darwin-x64": "0.7.0",
+    "@reylosql/engine-linux-x64": "0.7.0",
+    "@reylosql/engine-linux-x64-musl": "0.7.0",
+    "@reylosql/engine-linux-arm64": "0.7.0",
+    "@reylosql/engine-linux-arm64-musl": "0.7.0",
+    "@reylosql/engine-win32-x64": "0.7.0",
+    "@reylosql/engine-win32-arm64": "0.7.0"
+  },
   "devDependencies": {
-    "@bytecodealliance/preview2-shim": "0.30.0",
     "@totto2727/reylo-sqlite": "link:packages/sqlite",
     "@types/node": "^26.6.1",
     "esbuild": "^0.28.2",

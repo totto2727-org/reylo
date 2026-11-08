@@ -9,6 +9,19 @@ This guide is for maintainers staging the two SQLite/HCL distributions on npm.
 
 The runtime and SQLite engine must have the same version.
 Do not stage Postgres, MySQL, or DuckDB packages from this fork.
+The two distributions refer to published upstream `@reylosql/engine-*` packages at `0.7.0` through optional dependencies.
+Do not build, stage, or republish these platform packages from this fork.
+Check an installed distribution with optional dependencies enabled before release.
+
+## Version policy
+
+Both fork packages follow the upstream published release version by default.
+Do not assign independent fork patch versions or suffixes automatically.
+Keep both package versions, the exact tooling peer dependency, the retained Cargo workspace version, and all upstream native optional dependencies equal.
+Update them together with the lockfile when adopting an upstream release whose native packages are published.
+An unreleased upstream `main` commit is not a reason to select a version whose native packages are unavailable.
+npm versions are immutable, so do not try to overwrite an already-published fork version.
+Wait for the next upstream release or obtain approval for a version-policy exception when a fork-only fix needs a new publication.
 
 ## Setup
 
@@ -19,7 +32,7 @@ Do not stage Postgres, MySQL, or DuckDB packages from this fork.
 
 ## Release
 
-1. Pass the SQLite/HCL checks and set the same version in the root and SQLite engine manifests.
+1. Select the upstream published release version, align all versions under the policy above, and pass the SQLite/HCL checks.
 2. Build with `nub run build` and inspect `dist/reylo` and `dist/sqlite`.
 3. Merge the validated changes into `main` to start `.github/workflows/publish.yml`. No tag push is required.
 4. Inspect the staged versions on npm and approve the SQLite engine before the runtime.

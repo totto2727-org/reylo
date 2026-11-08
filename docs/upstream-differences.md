@@ -7,31 +7,41 @@ The fork merges this release rather than the later, unreleased `main` history.
 ## Fork package namespace
 
 The fork publishes only `@totto2727/reylo` and its exact-version SQLite engine `@totto2727/reylo-sqlite`.
-The manifests, generated Content Mapper declarations, runtime module imports, adapter paths, engine discovery, and consumer examples use these names so the fork does not depend on or publish upstream-owned npm packages.
+The manifests, generated Content Mapper declarations, runtime module imports, adapter paths, tooling discovery, and consumer examples use these names.
+The fork depends on upstream-owned native engine packages but does not republish them.
 The `reylo` CLI name and `.reylo.yaml` configuration remain unchanged.
 Install the runtime and SQLite engine at the same version.
+Both fork packages follow the upstream published release version by default, without independent fork patch bumps or suffixes.
+The tooling peer, retained Cargo workspace, and native optional dependencies stay at that version too.
+Already-published npm versions remain immutable; a fork-only release outside this policy requires explicit approval.
 
 ## SQLite-only distribution scope
 
 The maintained consumer surface is runtime execution with SQLite drivers and analysis from SQLite files or static Atlas HCL.
 Postgres, MySQL, and DuckDB npm packages and their consumer projects are absent from the distribution.
-The root dependency set and publication workflow contain only the runtime and SQLite engine.
+The publication workflow stages only the runtime and SQLite/HCL tooling.
+Their optional dependencies refer to upstream native platform engines, not database-specific npm engines.
 Examples retain small SQLite consumers and a local HCL analysis example instead of framework deployments.
 The test fixtures retain only SQLite driver dependencies and the Jest/Vitest integration lab.
 Shared multi-dialect TypeScript branches, decoder code, and the upstream Rust workspace remain where removal would increase future merge conflicts.
 These retained branches do not constitute supported npm engines or require external database servers for maintained checks.
-The SQLite component, inference rules, and runtime query execution API remain upstream behavior.
+The SQLite inference rules and runtime query execution API remain upstream behavior.
 The HCL adapter and package/distribution scope are source customizations, not deployment-only configuration.
 
-## Retained WebAssembly distribution
+## Upstream native engine reuse
 
-Upstream v0.7.0 replaces database-specific WebAssembly npm packages with native engine binaries and platform-specific packages.
-This fork retains `packages/sqlite`, `src/engine-package.ts`, the component worker and host, and the WebAssembly build path in `engine/build.sh` because its maintained distribution is exactly the two scoped, platform-independent packages above.
-The SQLite component must be regenerated from the merged Rust sources when their fingerprint changes.
-The root manifests, distribution build, TypeScript build entry points, and minimal SQLite/HCL workflows therefore retain the fork's package discovery and build contract instead of adopting upstream native package publication or the removed documentation-site build.
-Shared native Rust sources remain for upstream mergeability and the soundness oracle, but native platform npm packages are not a supported install path.
-The release's JSON value type and ISO 8601 extended-year representation changes remain part of the supported TypeScript API.
-The type descriptor specification remains at [`spec/type-descriptor.ts`](../spec/type-descriptor.ts).
+The fork uses upstream v0.7.0's native host and platform resolver in `src/engine.ts` and `src/native.ts`.
+Both manifests pin all eight `@reylosql/engine-*` optional dependencies to `0.7.0`, and the package manager selects the host platform.
+The fork does not build, publish, or rename these upstream binaries.
+The build-time host rejects a binary whose reported version does not match the fork's `0.7.0` protocol version.
+The retained host changes restrict analysis to SQLite, select SQLite for core configuration parsing, and read the bundled tooling package's own version before a parent manifest.
+Engine function signatures, asynchronous lexer calls, and the cached engine fingerprint follow upstream without compatibility arguments or an extra synchronous ping.
+The runtime and tooling retain their separate scoped package boundary, with the HCL parser bundled into `dist/sqlite/tooling.js`.
+Committed SQLite WASM artifacts, the component worker and host, and the WASI shim dependency are removed.
+The retained Rust workspace is reference and oracle source, not the engine installed by consumers.
+A fork change to Rust inference does not change the upstream binary and requires a separately coordinated compatible engine release before consumers can use it.
+The release's JSON value type, ISO 8601 extended-year representation, and [`descriptor specification`](../spec/type-descriptor.ts) remain upstream behavior.
+The existing main-push publication workflow and template-derived settings are unchanged.
 
 ## Local Atlas HCL schema analysis
 
@@ -40,7 +50,8 @@ The fork parses HCL directly in JavaScript and supplies DDL catalog rows directl
 The HCL path performs no host SQL execution.
 The engine's existing embedded SQLite parser and internal schema replay remain unchanged.
 The retained source changes are in project source resolution and analysis, the private native-syntax parser, and the static Atlas SQLite adapter in `src/hcl-sqlite.ts`.
-No Atlas executable, Go runtime, subprocess, remote service, or migration execution is required for HCL analysis.
+No Atlas executable, Go runtime, remote service, or migration execution is required for HCL analysis.
+HCL parsing runs in TypeScript, and the schema replay runs in the upstream native engine child process.
 The HCL file remains an analysis input, not a migration or a runtime connection.
 This is a build-time source customization, not a deployment customization or a new SQL execution driver.
 The upstream runtime query API, binding, decoding and engine inference rules are unchanged.

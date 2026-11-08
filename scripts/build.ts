@@ -1,24 +1,12 @@
-// Builds every publishable package into dist/, one directory each, published with
-// `npm publish dist/<name>`:
-// - dist/reylo: the run time and the entry points a project names (tsconfig.build.json), compiled to
-//   JavaScript with their declarations, the README,
-//   and a package.json whose exports and content mapper name the compiled files. Node strips no types under node_modules, so an installed copy
-//   that ships TypeScript fails to load in the mapper, the bundler adapters and at run time. It
-//   carries no engine and no build step: each database's is a package of its own, an optional peer
-//   at reylo's exact version, which the entry points find from the project (src/engine-package.ts).
-// - dist/sqlite: `@totto2727/reylo-sqlite`, at reylo's version, with its
-//   engine component in `engine/` (built by engine/build.sh and committed), its package.json and
-//   README, reylo's build-time half (src/tooling.ts) bundled into `tooling.js`, the worker the
-//   engine opens its connections in (src/engine-worker.ts) bundled into `engine-worker.js`, and the
-//   I/O worker of jco's preview2-shim, which both bundle, beside them. Nothing in it is
-//   platform-specific, and it depends on nothing.
-// The repository's own package.json files keep pointing at the sources, so the tests and the labs
-// run them without a build; every one of them is private, so that none can be published by
-// mistake.
+// Builds the two scoped packages into dist/ without building an engine binary.
+// dist/reylo holds the runtime and entry points, which discover the SQLite tooling package.
+// dist/sqlite bundles the build-time TypeScript and HCL parser. Its optional dependencies
+// install the upstream native engine for the consumer's platform at the pinned upstream version.
+// Repository manifests remain private and point to sources. Published manifests point to JS.
 import { execFileSync } from "node:child_process";
 import { createRequire } from "node:module";
 import { copyFileSync, cpSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { join } from "node:path";
 import { build as bundle, transformSync } from "esbuild";
 
 const root = join(import.meta.dirname, "..");
@@ -39,6 +27,12 @@ for (const file of readdirSync(reylo, { recursive: true, encoding: "utf8" }).fil
 copyFileSync(join(root, "README.md"), join(reylo, "README.md"));
 
 const pkg = JSON.parse(readFileSync(join(root, "package.json"), "utf8"));
+// The binary prints and answers with the Cargo workspace's version, which is reylo's: the two move together.
+const cargoVersion = readFileSync(join(root, "Cargo.toml"), "utf8").match(/^\[workspace\.package\]\s*\nversion = "([^"]+)"/m)?.[1];
+if (cargoVersion !== pkg.version) throw new Error(`Cargo.toml: the workspace's version is ${cargoVersion}, and reylo is ${pkg.version}; they move together`);
+for (const [name, version] of Object.entries(pkg.optionalDependencies)) {
+  if (version !== pkg.version) throw new Error(`package.json: the upstream engine ${name} is ${version}, and reylo is ${pkg.version}; they move together`);
+}
 const { private: _private, scripts: _scripts, devDependencies: _dev, bin, exports, typescript, ...rest } = pkg;
 // The engines are peers at reylo's own version: reylo refuses another (src/engine.ts).
 for (const db of DATABASES) {
@@ -70,10 +64,6 @@ console.log(`dist/reylo: ${files.length} files, package ${built.name}@${built.ve
 // Each engine package's JavaScript is bundled into a few files with everything it reads, which also
 // leaves out the comments.
 const bundled = { bundle: true, platform: "node", format: "esm", target: "node24", legalComments: "inline", logLevel: "warning", metafile: true } as const;
-// jco's preview2-shim, which tooling.js and engine-worker.js bundle, starts its own I/O worker from
-// this file beside the module that bundles it, and loads its native addon (jco-node-fs) only for a
-// call the engine never makes, through a `require` of its own that the bundle leaves out.
-const shimWorker = join(dirname(createRequire(join(root, "package.json")).resolve("@bytecodealliance/preview2-shim/instantiation")), "..", "io", "worker-thread.bundle.js");
 
 for (const db of DATABASES) {
   const from = join(root, "packages", db);
@@ -85,10 +75,8 @@ for (const db of DATABASES) {
   // The tooling bundle includes the MPL-covered native HCL parser port alongside MIT code.
   writeFileSync(join(to, "package.json"), JSON.stringify({ ...engine, license: "MIT AND MPL-2.0", files: [...engine.files, "licenses"], exports: exported }, null, 2) + "\n");
   cpSync(join(root, "licenses"), join(to, "licenses"), { recursive: true });
-  cpSync(join(from, "engine"), join(to, "engine"), { recursive: true });
+  if (JSON.stringify(engine.optionalDependencies) !== JSON.stringify(pkg.optionalDependencies)) throw new Error(`packages/${db}: upstream native engine versions must match the root manifest`);
   copyFileSync(join(from, "README.md"), join(to, "README.md"));
-  // Before anything loads the bundles: loading the shim starts its I/O worker from this file.
-  copyFileSync(shimWorker, join(to, "worker-thread.bundle.js"));
   const half = await bundle({ ...bundled, entryPoints: [join(root, "src/tooling.ts")], outfile: join(to, "tooling.js") });
   // reylo's entry points load it with a `require` (src/engine-package.ts), which refuses an ES
   // module with a top-level await.
@@ -97,7 +85,6 @@ for (const db of DATABASES) {
   // driver, and nothing native, is bundled.
   const native = Object.keys(half.metafile.inputs).filter((input) => /node_modules\/(postgres|mysql2|@duckdb|@bytecodealliance\/jco-node-fs)\//.test(input));
   if (native.length) throw new Error(`dist/${db}/tooling.js bundles a driver or a native addon: ${native.join(", ")}`);
-  await bundle({ ...bundled, entryPoints: [join(root, "src/engine-worker.ts")], outfile: join(to, "engine-worker.js") });
   // A child process src/sqlite-drivers.ts starts beside the module that starts it.
   await bundle({ ...bundled, entryPoints: [join(root, "src/d1-proxy.ts")], outfile: join(to, "d1-proxy.js") });
   const shipped = readdirSync(to);

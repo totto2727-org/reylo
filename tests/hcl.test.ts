@@ -50,7 +50,7 @@ test("HCL sources accept only one local .hcl file", () => {
 
 test("HCL supplies only static schema rows and embedded function defaults to the engine", async () => {
   const root = project();
-  const catalog = hclCatalog(join(root, "schema.hcl"), await engine("sqlite", root));
+  const catalog = hclCatalog(join(root, "schema.hcl"), await engine("sqlite"));
   try {
     const ddl = "select sql from sqlite_schema where sql is not null and type in ('table', 'view', 'index', 'trigger') order by rowid";
     assert.deepEqual(await catalog.query(ddl, []), [['CREATE TABLE "users" ("id" integer NOT NULL, "name" text NOT NULL, PRIMARY KEY ("id"))']]);
@@ -67,7 +67,7 @@ test("HCL supplies only static schema rows and embedded function defaults to the
 
 test("invalid static declarations fail before the engine receives a catalog", async () => {
   const root = project();
-  const wasm = await engine("sqlite", root);
+  const wasm = await engine("sqlite");
   try {
     writeFileSync(join(root, "schema.hcl"), schema().replace("type = text", "type = unknown_type"));
     assert.throws(() => hclCatalog(join(root, "schema.hcl"), wasm), /Cannot evaluate HCL schema/);

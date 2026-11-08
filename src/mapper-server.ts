@@ -64,8 +64,8 @@ export function mapperHandlers(): MapperHandlers {
     async openProject(params) {
       const p = params as { projectHandle: string; options?: Record<string, unknown>; configFileName: string };
       const projectDir = dirname(p.configFileName);
-      // Every setting lives in the project file, which PorgREST and Reylo Framework read too.
-      const resolved = resolveProject(await anyEngine(projectDir), projectDir);
+      // Every setting lives in the project file, which other hosts read too.
+      const resolved = resolveProject(await anyEngine(), projectDir);
       const projectFile = resolved.file ? relative(projectDir, resolved.file).split(sep).join("/") || resolved.file : PROJECT_FILE;
       const optionDiagnostics = Object.keys(p.options ?? {}).map((key) => ({ path: [key], messageText: `reylo reads its settings from ${projectFile}, not from the content mapper's options; move "${key}" there.`, code: 104 }));
       projects.set(p.projectHandle, { strictParams: resolved.strictParams, projectFile, session: Session.open(projectDir) });
@@ -107,7 +107,7 @@ export function mapperHandlers(): MapperHandlers {
       // at its place; until then nothing is proved, so the row count is `many`.
       let lexed: Lexed | undefined;
       try {
-        lexed = session.lex(sql);
+        lexed = await session.lex(sql);
       } catch {}
       // `compiled` is the engine's rewritten text, the query's `sql`, which an analysis that failed
       // has not given: then `sql` is any string. The comment at the top of the file and the statement

@@ -50,12 +50,12 @@ const BUILD_IDLE = 250;
 const sessions = new Map<string, Session>();
 
 /**
- * The project a directory belongs to, its file read with whichever database's engine is installed,
- * and the engine of its own database, or why that cannot be loaded.
+ * The project a directory belongs to, its file read by the engine's core, and the engine of its own
+ * database, or why that cannot be run.
  */
 async function openProject(dir: string, env: Record<string, string | undefined>): Promise<{ project: ResolvedProject; engine: Engine | MissingEngine }> {
-  const project = resolveProject(await anyEngine(dir), dir, env);
-  const own = await engine(project.dialect, project.root).catch((e: unknown) => (e instanceof MissingEngine ? e : new MissingEngine((e as Error).message)));
+  const project = resolveProject(await anyEngine(), dir, env);
+  const own = await engine(project.dialect).catch((e: unknown) => (e instanceof MissingEngine ? e : new MissingEngine((e as Error).message)));
   return { project, engine: own };
 }
 
@@ -91,8 +91,7 @@ export class Session {
     this.#engine = engine;
     this.project = project;
     this.#url = project.url;
-    const ping = engine instanceof MissingEngine ? undefined : engine.call({ op: "ping" });
-    this.#engineFingerprint = ping?.status === "ok" ? ping.fingerprint : "unknown";
+    this.#engineFingerprint = engine instanceof MissingEngine ? "unknown" : engine.fingerprint;
   }
 
   /**
@@ -133,9 +132,9 @@ export class Session {
     return [...sessions.values()];
   }
 
-  lex(sql: string): Lexed {
+  async lex(sql: string): Promise<Lexed> {
     if (this.#engine instanceof MissingEngine) throw this.#engine;
-    return this.#engine.lex(sql, this.project.dialect);
+    return this.#engine.lexAsync(sql, this.project.dialect);
   }
 
   /**
