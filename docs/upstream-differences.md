@@ -138,6 +138,18 @@ Raw TypeScript source links can load natively after Node resolves symlinks outsi
 Built links expose the official JavaScript and declarations instead, preserving application type checks without rewriting upstream implementation or weakening compiler settings.
 No duplicate compiler, custom execution driver or toolchain migration is required.
 
+## Dependency lifecycle policy
+
+The root, SQLite driver fixture, Jest fixture, and consumer examples each have a `pnpm-workspace.yaml` restricted to their own package.
+These files preserve independent installs rather than combining the projects into one workspace.
+Both Nub 0.9.6 and current pnpm read their explicit dependency lifecycle decisions, unlike legacy `package.json#pnpm` settings that pnpm 12 ignores.
+The root approves esbuild's platform-binary setup, the driver fixture approves esbuild, sqlite3, and workerd setup, and the Jest fixture approves the Parcel watcher setup.
+The Jest fixture denies unrs-resolver's fallback downloader because its native binding is already installed through optional dependencies.
+Keep optional dependencies enabled; this decision does not disable the resolver itself.
+All install roots enable `strictDepBuilds` so a newly introduced, unreviewed lifecycle script fails installation instead of being silently skipped.
+The YAML setting covers pnpm, while Nub 0.9.6 reads the equivalent root `.npmrc` setting inherited by the nested projects.
+These are development-install settings, not runtime source or upstream engine changes, and the existing release-age policy is unchanged.
+
 ## Fork npm publication
 
 `.github/workflows/publish.yml` runs on pushes to `main`, without a tag or release trigger.

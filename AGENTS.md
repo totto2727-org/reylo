@@ -41,6 +41,10 @@ Prefer nub 0.9.6 on Node 24 or later.
 For local development, obtain Nub through the default shell with `nix develop`.
 Keep the `ci` shell empty because CI already installs Nub through its setup action, and select that shell in the shared publisher.
 Keep lockfiles current without bypassing the release-age policy.
+Dependency lifecycle decisions belong in each project's `pnpm-workspace.yaml`, which both Nub and current pnpm read.
+The root, integration fixtures, and examples remain independent install roots through `packages: [.]`.
+Review new dependency scripts and record explicit `allowBuilds` decisions instead of approving all scripts or storing legacy `package.json#pnpm` settings.
+Keep `strictDepBuilds: true` in those files for pnpm and `strictDepBuilds=true` in the root `.npmrc` for Nub 0.9.6, so both reject unreviewed scripts during installation.
 From the repository root:
 
 ```sh

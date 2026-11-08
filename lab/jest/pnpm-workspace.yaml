@@ -1,0 +1,9 @@
+packages:
+  - .
+
+strictDepBuilds: true
+
+allowBuilds:
+  '@parcel/watcher': true
+  # Platform bindings are installed as optional dependencies, without fallback downloads.
+  unrs-resolver: false

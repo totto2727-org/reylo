@@ -1,0 +1,9 @@
+packages:
+  - .
+
+strictDepBuilds: true
+
+allowBuilds:
+  esbuild: true
+  sqlite3: true
+  workerd: true
