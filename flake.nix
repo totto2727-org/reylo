@@ -1,12 +1,37 @@
 {
-  description = "Environment for the shared npm publishing action";
+  description = "Reylo development environment";
 
-  inputs.nixpkgs.url = "https://flakehub.com/f/NixOS/nixpkgs/0.1";
+  inputs = {
+    nixpkgs.url = "https://flakehub.com/f/NixOS/nixpkgs/0.1";
+    nub.url = "github:nubjs/nub/v0.9.6";
+  };
 
   outputs =
-    { nixpkgs, ... }:
+    { nixpkgs, nub, ... }:
+    let
+      supportedSystems = [
+        "aarch64-darwin"
+        "aarch64-linux"
+        "x86_64-linux"
+      ];
+      forEachSystem = nixpkgs.lib.genAttrs supportedSystems;
+    in
     {
-      # The shared publisher evaluates this shell. JavaScript tools remain managed by Vite+ and Nub.
-      devShells.x86_64-linux.default = nixpkgs.legacyPackages.x86_64-linux.mkShell { };
+      devShells = forEachSystem (
+        system:
+        let
+          pkgs = import nixpkgs {
+            inherit system;
+          };
+        in
+        {
+          ci = pkgs.mkShell { };
+          default = pkgs.mkShell {
+            packages = [
+              nub.packages.${system}.default
+            ];
+          };
+        }
+      );
     };
 }

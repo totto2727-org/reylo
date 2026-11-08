@@ -41,7 +41,9 @@ The workflow uses shared `setup-nix`, `setup-typescript`, and `publish-npm` acti
 Keep the library template's workflow structure, checkout settings, permissions, and shared action order unless this fork requires a change.
 The fork retains Nub for its upstream build and stages its two built package directories instead of the template's single root package.
 Publication runs on pushes to `main`, not tags or releases.
-The empty Nix shell satisfies the shared publisher's `nix print-dev-env` contract and manages no JavaScript runtime or package manager.
+The empty `ci` Nix shell satisfies the shared publisher's `nix print-dev-env` contract and manages no JavaScript runtime or package manager.
+The setup, build, and publisher steps explicitly select `ci` so CI keeps its existing Nub setup action.
+The default shell obtains Nub 0.9.6 from its official flake for local development.
 The lockfile uses the library template's pinned Nixpkgs input.
 The SQLite tooling bundle includes the HCL parser's license notices.
 

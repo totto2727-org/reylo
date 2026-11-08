@@ -14,9 +14,45 @@
         "url": "https://flakehub.com/f/NixOS/nixpkgs/0.1"
       }
     },
+    "nixpkgs_2": {
+      "locked": {
+        "lastModified": 1781607440,
+        "narHash": "sha256-rxO+uc/KFbSJp+pgyXRuAX6QlG9hJdnt0BXpEQRXY+U=",
+        "owner": "NixOS",
+        "repo": "nixpkgs",
+        "rev": "3e41b24abd260e8f71dbe2f5737d24122f972158",
+        "type": "github"
+      },
+      "original": {
+        "owner": "NixOS",
+        "ref": "nixpkgs-unstable",
+        "repo": "nixpkgs",
+        "type": "github"
+      }
+    },
+    "nub": {
+      "inputs": {
+        "nixpkgs": "nixpkgs_2"
+      },
+      "locked": {
+        "lastModified": 1790809683,
+        "narHash": "sha256-I+2bKFZvpZw7YR6xAi0htWIQL5AbWsK06RYKRzPjOnM=",
+        "owner": "nubjs",
+        "repo": "nub",
+        "rev": "b6e8eac833b4f77cc0a5296c7b192d686def44de",
+        "type": "github"
+      },
+      "original": {
+        "owner": "nubjs",
+        "ref": "v0.9.6",
+        "repo": "nub",
+        "type": "github"
+      }
+    },
     "root": {
       "inputs": {
-        "nixpkgs": "nixpkgs"
+        "nixpkgs": "nixpkgs",
+        "nub": "nub"
       }
     }
   },

@@ -33,6 +33,8 @@ Record fork-specific behavior and operational impact in [docs/upstream-differenc
 ## JavaScript checks
 
 Prefer nub 0.9.6 on Node 24 or later.
+For local development, obtain Nub through the default shell with `nix develop`.
+Keep the `ci` shell empty because CI already installs Nub through its setup action, and select that shell in the shared publisher.
 Keep lockfiles current without bypassing the release-age policy.
 From the repository root:
 
