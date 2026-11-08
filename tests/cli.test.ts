@@ -46,7 +46,7 @@ test("reylo generate analyzes every .sql file of the project, and prints each fi
 
   const first = reylo(root, "generate");
   assert.equal(first.status, 1, first.err);
-  // Loading the engine prints no ExperimentalWarning for node:wasi (src/engine.ts).
+  // Starting the native engine must not print diagnostics during a successful command.
   assert.equal(first.err, "");
   assert.equal(first.out, [
     `sqlite at ${join(root, "app.db")} (DATABASE_URL in the environment)`,
@@ -170,7 +170,7 @@ test("reylo generate says once that the type check does not read url, and names 
   assert.doesNotMatch(both.out, /does not read url/);
 });
 
-test("a program run under the @totto2727/reylo/register preload prints nothing on stderr: node:wasi's ExperimentalWarning is swallowed", () => {
+test("a program run under the @totto2727/reylo/register preload prints nothing on stderr", () => {
   const root = realpathSync(mkdtempSync(join(tmpdir(), "reylo-register-")));
   writeFileSync(join(root, "package.json"), `{ "type": "module" }`);
   // The module a `.sql` file becomes imports reylo, as a lab reaches it: through a link to this repository.

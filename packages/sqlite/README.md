@@ -1,10 +1,24 @@
 # @totto2727/reylo-sqlite
 
-Reylo's analysis engine for SQLite, which [reylo](https://www.npmjs.com/package/@totto2727/reylo) loads to type the `.sql` files of a project whose database is SQLite. It holds the engine, built to one WebAssembly component that reads the database file itself, and the build steps that run it, with the WebAssembly host they run it on: nothing in it is native to a platform, and it installs no dependency. The run time and the entry points a project names are reylo's, which runs the type check, the bundler plugins and the CLI from this package.
+SQLite and static Atlas HCL build-time tooling for [`@totto2727/reylo`](https://www.npmjs.com/package/@totto2727/reylo).
+The runtime entry points load the content mapper, bundler steps, and CLI from this package.
 
 ```sh
 npm install @totto2727/reylo
 npm install -D @totto2727/reylo-sqlite
 ```
 
-Install it at the version of reylo: reylo refuses an engine of another version. A project with more than one database installs the engine of each.
+Install the two fork packages at the same version.
+This package pins upstream `@reylosql/engine-*` optional dependencies to `0.7.0`.
+The package manager selects the binary for the host OS, CPU, and Linux libc.
+Do not omit optional dependencies when installing analysis tooling.
+No Rust compiler, local binary build, WebAssembly component, or WASI shim is needed for normal use.
+
+The engine runs in a child process during analysis.
+The application still executes queries through its own SQLite driver.
+HCL parsing remains local TypeScript code, and its static schema is analyzed by the native engine without opening an application database or running migrations.
+
+Supported binary targets follow upstream v0.7.0: macOS and Windows on x64 or arm64, and Linux on x64 or arm64 with glibc or musl.
+An unsupported platform or missing optional package produces an error with installation guidance.
+`REYLO_ENGINE_PATH` can select a compatible `reylo 0.7.0` executable explicitly.
+Other dialects inside the upstream binary do not expand this fork's SQLite/HCL support matrix.

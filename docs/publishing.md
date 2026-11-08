@@ -9,6 +9,9 @@ This guide is for maintainers staging the two SQLite/HCL distributions on npm.
 
 The runtime and SQLite engine must have the same version.
 Do not stage Postgres, MySQL, or DuckDB packages from this fork.
+The two distributions refer to published upstream `@reylosql/engine-*` packages at `0.7.0` through optional dependencies.
+Do not build, stage, or republish these platform packages from this fork.
+Check an installed distribution with optional dependencies enabled before release.
 
 ## Setup
 

@@ -5,7 +5,6 @@ import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { connect, createServer, type AddressInfo, type Server } from "node:net";
-import { guestPath } from "../src/component.ts";
 import { engine, reason, Unreachable } from "../src/engine.ts";
 import { hostUrl } from "../src/host-url.ts";
 import { mysqlStandIn } from "./mysql-stand-in.ts";
@@ -35,24 +34,20 @@ test("reason reads a refused connection, an AggregateError with no message of it
   assert.equal(reason(Object.assign(new Error(""), { code: "ETIMEDOUT" })), "ETIMEDOUT");
 });
 
-test("the files a Postgres URL names are resolved from the working directory and mapped to the engine's paths", async () => {
+test("the files a Postgres URL names are resolved from the working directory for the native engine", async () => {
   const { url } = await hostUrl("postgres://u@h/d?sslmode=verify-ca&sslrootcert=certs/root.pem&sslcert=%2Fabs%2Fc.pem&sslkey=k.pem&application_name=a+b");
   const params = new URLSearchParams(url.slice(url.indexOf("?") + 1));
-  assert.equal(params.get("sslrootcert"), guestPath(resolve("certs/root.pem")));
-  assert.equal(params.get("sslcert"), guestPath(resolve("/abs/c.pem")));
-  assert.equal(params.get("sslkey"), guestPath(resolve("k.pem")));
+  assert.equal(params.get("sslrootcert"), resolve("certs/root.pem"));
+  assert.equal(params.get("sslcert"), resolve("/abs/c.pem"));
+  assert.equal(params.get("sslkey"), resolve("k.pem"));
   // Every other parameter is passed on as written.
   assert.match(url, /&application_name=a\+b$/);
   assert.equal((await hostUrl("postgres://u@h/d?sslrootcert=system")).url, "postgres://u@h/d?sslrootcert=system");
   assert.equal((await hostUrl("mysql://root@h/d?ssl=true")).url, "mysql://root@h/d?ssl=true");
-  assert.equal(guestPath("C:\\app\\dev.db", "win32"), "/C:/app/dev.db");
-  assert.equal(guestPath("\\\\host\\share\\dev.db", "win32"), "/host/share/dev.db");
-  assert.equal(guestPath("/app/dev.db", "linux"), "/app/dev.db");
 });
 
-test("the engine runs under Node's watch mode, whose report its workers do not inherit", () => {
-  // `node --watch` runs its process with WATCH_REPORT_DEPENDENCIES set; a worker that inherits it
-  // reports each module it loads to its parent as a message.
+test("the native engine works when Node's watch dependency reporting is enabled", () => {
+  // Watch mode sets this variable. A native engine must not report modules to the parent.
   const script = `const { engine } = await import(${JSON.stringify(new URL("../src/engine.ts", import.meta.url).href)});
 const c = await (await engine("sqlite", ${JSON.stringify(ROOT)})).open(":memory:");
 console.log((await c.analyze("select 1 as x")).columns[0].name);

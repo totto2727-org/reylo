@@ -13,7 +13,9 @@ The engine is the SQL analysis: parsing, placeholders, types, nullability, neste
 | `reylo-engine-native` | `native/` | The engine as a program: requests and answers as JSON lines, the pure ones (`ping`, `lex`, `config`, `analyze`) answered by core, and the connection's (`open`, `run`, `query`, `describe`, `forget`, `close`) over the facade's clients, with TLS as libpq reads `sslmode` (`tls`). One module per database, each behind its feature |
 | `reylo-engine-wasip2` | `wasip2/` | The program built to a `wasm32-wasip2` component, one per database, exporting `call` (the pure requests) and `serve` (the connection's). A Cargo workspace of its own, since it builds tokio-postgres with a patch (`tokio-postgres-0.7.18.patch`) and tokio with `--cfg tokio_unstable` for WASI's sockets |
 
-The `.sql` loader hosts it: `packages/<database>/engine/`, the component as jco transpiles it (`engine.js` and its core modules) in the database's npm package `@reylosql/<database>`, which [src/engine.ts](../src/engine.ts) finds from the project and runs on jco's preview2-shim, the connection's requests in a worker ([src/engine-worker.ts](../src/engine-worker.ts)).
+The fork's `.sql` loader runs the published upstream `@reylosql/engine-*` native executable selected by [src/native.ts](../src/native.ts), with JSON-line requests managed by [src/engine.ts](../src/engine.ts).
+The Rust tree is retained as reference source and for development tests, not as the source of a fork-published binary.
+See [the maintained divergence record](../docs/upstream-differences.md) for the exact upstream revision and supported SQLite/HCL scope.
 
 ## Building
 
@@ -21,4 +23,6 @@ The `.sql` loader hosts it: `packages/<database>/engine/`, the component as jco 
 - `cargo test -p reylo-engine-core -p reylo-engine-postgres -p reylo-engine-sqlite -p reylo-engine-mysql -p reylo-engine -p reylo-engine-native -p reylo-oracle` runs the engine's native tests (the oracle's dependency gives `reylo-engine` its three client features).
 - `engine/build.sh` builds every database's component into `packages/<database>/engine/` (`engine/build.sh postgres` builds one). It needs wasi-sdk 34, a toolchain with the `wasm32-wasip2` target (rustup's has it; Homebrew's `rustc` does not) and a local `@bytecodealliance/jco@1.39.0` installation, which is not part of this fork's normal dependencies.
 
-The components are committed so a checkout works without a Rust toolchain. Rebuild them with every change to the engine's sources: each crate's `build.rs` hashes its own sources, a database's fingerprint combines core's hash with its own, and the component's `host` hash covers the program around it (`native/`, `facade/`, `wasip2/`).
+Normal installation and packaging use the exact-version published native optional dependency and require no Rust or WASI toolchain.
+The commands above describe the retained source-development tooling only.
+Do not run the component build as part of the fork's package release or commit generated WASM artifacts.

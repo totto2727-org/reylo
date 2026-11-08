@@ -1,76 +1,119 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { cpSync, mkdirSync, mkdtempSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { fileURLToPath, pathToFileURL } from "node:url";
-import { anyEngine, engine, enginePath, MissingEngine } from "../src/engine.ts";
+import { anyEngine, engine, MissingEngine, Unreachable } from "../src/engine.ts";
+import { nativeBinary, PLATFORM_PACKAGES, platformPackage } from "../src/native.ts";
 import { resolveProject } from "../src/project.ts";
 
-// An empty fallback install makes each project's own package determine engine resolution.
-const SQLITE = fileURLToPath(new URL("../packages/sqlite", import.meta.url));
-const nowhere = pathToFileURL(join(mkdtempSync(join(tmpdir(), "reylo-no-engines-")), "reylo.js")).href;
 const VERSION: string = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")).version;
+const noShell = process.platform === "win32" && "stand-in executables require a POSIX shell";
 
-function project(version?: string): string {
-  const root = mkdtempSync(join(tmpdir(), "reylo-engines-"));
-  writeFileSync(join(root, "package.json"), "{}");
-  mkdirSync(join(root, "node_modules/@totto2727"), { recursive: true });
-  if (version) {
-    const at = join(root, "node_modules/@totto2727/reylo-sqlite");
-    if (version === VERSION) symlinkSync(SQLITE, at);
-    else {
-      cpSync(SQLITE, at, { recursive: true });
-      writeFileSync(join(at, "package.json"), JSON.stringify({ name: "@totto2727/reylo-sqlite", version, type: "module", exports: { "./engine/*": "./engine/*", "./package.json": "./package.json" } }));
-    }
+/** Isolate the executable override and remove the stand-in after its child has stopped. */
+async function withEngine<T>(body: string, run: (path: string) => Promise<T>): Promise<T> {
+  const root = mkdtempSync(join(tmpdir(), "reylo-native-test-"));
+  const path = join(root, "reylo");
+  writeFileSync(path, `#!/bin/sh\n${body}\n`);
+  chmodSync(path, 0o755);
+  const before = process.env.REYLO_ENGINE_PATH;
+  process.env.REYLO_ENGINE_PATH = path;
+  try {
+    return await run(path);
+  } finally {
+    if (before === undefined) delete process.env.REYLO_ENGINE_PATH;
+    else process.env.REYLO_ENGINE_PATH = before;
+    rmSync(root, { recursive: true, force: true });
   }
-  return root;
 }
 
-test("a project with no SQLite engine is told which package to install", async () => {
-  const root = project();
-  assert.equal(enginePath("sqlite", root, nowhere), undefined);
-  await assert.rejects(engine("sqlite", root, nowhere), { name: "MissingEngine", message: "sqlite statements need @totto2727/reylo-sqlite: npm install -D @totto2727/reylo-sqlite" });
-  writeFileSync(join(root, ".reylo.yaml"), "direct_url: file:./app.db\n");
-  const reader = await anyEngine(root, nowhere);
-  assert.ok(reader instanceof MissingEngine);
-  assert.equal(resolveProject(reader, root, {}).error, ".reylo.yaml: reylo reads the project file with the SQLite engine, and none is installed: npm install -D @totto2727/reylo-sqlite");
-});
+/** Answer the first request, which always has id 1, then exit. */
+function ping(version = VERSION, database = "sqlite"): string {
+  return `read -r line\nprintf '%s\\n' '${JSON.stringify({ status: "ok", version, database, fingerprint: "0123456789abcdef", id: 1 })}'`;
+}
 
-test("unsupported dialects are refused without suggesting packages this fork does not publish", async () => {
-  const root = project(VERSION);
-  for (const dialect of ["postgres", "mysql", "duckdb"] as const) {
-    assert.equal(enginePath(dialect, root, nowhere), undefined);
-    await assert.rejects(engine(dialect, root, nowhere), { name: "MissingEngine", message: `This fork supports SQLite analysis only, not ${dialect} statements` });
+test("native packages cover supported platforms at the runtime's exact version", () => {
+  const manifest = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
+  assert.equal(Object.keys(PLATFORM_PACKAGES).length, 8);
+  for (const [key, pkg] of Object.entries(PLATFORM_PACKAGES)) {
+    assert.equal(pkg, `@reylosql/engine-${key}`);
+    assert.equal(manifest.optionalDependencies[pkg], VERSION);
   }
+  const { key, pkg } = platformPackage();
+  assert.equal(pkg, PLATFORM_PACKAGES[key]);
+  assert.match(key, /^(darwin|linux|win32)-(arm64|x64)(-musl)?$/);
 });
 
-test("SQLite's engine reads the project file before opening its database", async () => {
-  const root = project(VERSION);
-  writeFileSync(join(root, ".reylo.yaml"), "direct_url: file:./app.db\n");
-  const reader = await anyEngine(root, nowhere);
-  assert.ok(!(reader instanceof MissingEngine));
-  assert.equal(reader.call({ op: "ping" }).status, "ok");
-  const resolved = resolveProject(reader, root, {});
-  assert.deepEqual([resolved.dialect, resolved.error], ["sqlite", undefined]);
-});
-
-test("an engine of another version is refused with the matching version to install", async () => {
-  const root = project("9.9.9");
-  await assert.rejects(engine("sqlite", root, nowhere), (e: Error) => {
-    assert.ok(e instanceof MissingEngine);
-    assert.ok(e.message.startsWith(`reylo ${VERSION} runs with @totto2727/reylo-sqlite ${VERSION}, and the one installed is 9.9.9 (`), e.message);
-    assert.ok(e.message.endsWith(`): npm install -D @totto2727/reylo-sqlite@${VERSION}`), e.message);
-    return true;
+test("REYLO_ENGINE_PATH takes precedence and a missing override is actionable", { skip: noShell }, async () => {
+  await withEngine(ping(), async (path) => {
+    assert.equal(nativeBinary(), path);
+    rmSync(path);
+    assert.throws(() => nativeBinary(), { message: `REYLO_ENGINE_PATH names ${path}, which does not exist: point it at a reylo executable, or unset it to use the one reylo installs` });
+    await assert.rejects(engine("sqlite"), (e: Error) => e instanceof MissingEngine && e.message.startsWith("REYLO_ENGINE_PATH names"));
+    const reader = await anyEngine();
+    assert.ok(reader instanceof MissingEngine);
+    const root = join(path, "..");
+    writeFileSync(join(root, ".reylo.yaml"), "direct_url: file:./app.db\n");
+    assert.match(resolveProject(reader, root, {}).error!, /^\.reylo\.yaml: REYLO_ENGINE_PATH names /);
   });
 });
 
-test("the project's SQLite engine comes before the fallback install and refuses other dialects", async () => {
-  const root = project(VERSION);
-  assert.equal(enginePath("sqlite", root, nowhere), join(SQLITE, "engine"));
-  const e = await engine("sqlite", root, nowhere);
-  const ping = e.call({ op: "ping" }) as { database?: string; fingerprint: string };
-  assert.equal(ping.database, "sqlite");
-  assert.match(ping.fingerprint, /^[0-9a-f]{16}$/);
-  assert.deepEqual(e.call({ op: "analyze", sql: "select 1", dialect: "postgres", answers: {} }), { status: "error", message: "this engine reads sqlite statements, not postgres ones" });
+test("unsupported dialects never start the native executable", async () => {
+  for (const dialect of ["postgres", "mysql", "duckdb"] as const) {
+    await assert.rejects(engine(dialect, import.meta.dirname), {
+      name: "MissingEngine",
+      message: `This fork supports SQLite analysis only, not ${dialect} statements`,
+    });
+  }
+});
+
+test("a mismatched native version is refused and a failed load can be retried", { skip: noShell }, async () => {
+  await withEngine(ping("9.9.9"), async (path) => {
+    for (let attempt = 0; attempt < 2; attempt++) {
+      await assert.rejects(engine("sqlite"), (e: Error) => {
+        assert.ok(e instanceof MissingEngine);
+        assert.equal(e.message, `reylo ${VERSION} runs with its engine at ${VERSION}, and ${path} is 9.9.9: install reylo again, point REYLO_ENGINE_PATH at the engine of reylo ${VERSION}, or in a checkout of reylo's repository build it with cargo build --release -p reylo`);
+        return true;
+      });
+    }
+    writeFileSync(path, `#!/bin/sh\n${ping(VERSION, "postgres")}\n`);
+    await assert.rejects(engine("sqlite"), { message: `${path} serves postgres's engine when asked for sqlite's` });
+  });
+});
+
+test("an executable that exits or never answers is refused", { skip: noShell }, async () => {
+  await withEngine("echo 'no such thing' >&2\nexit 3", (path) =>
+    assert.rejects(engine("sqlite"), { message: `the engine ${path} does not answer: the engine ${path} stopped (3): no such thing` }),
+  );
+  await withEngine("exec sleep 60", (path) =>
+    assert.rejects(engine("sqlite"), { message: `the engine ${path} does not answer: it did not answer a ping in 10 s` }),
+  );
+});
+
+test("the installed SQLite engine reads project configuration and is reused", async (t) => {
+  const e = await engine("sqlite", import.meta.dirname);
+  assert.equal(await engine("sqlite"), e);
+  assert.equal(await anyEngine(import.meta.dirname), e);
+  const root = mkdtempSync(join(tmpdir(), "reylo-native-project-"));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  writeFileSync(join(root, ".reylo.yaml"), "direct_url: file:./app.db\n");
+  const resolved = resolveProject(e, root, {});
+  assert.deepEqual([resolved.dialect, resolved.error], ["sqlite", undefined]);
+});
+
+test("a closed SQLite connection is refused and a new connection works", async () => {
+  const e = await engine("sqlite");
+  const c = await e.open(":memory:");
+  try {
+    assert.deepEqual((await c.analyze("select 1 as x")).columns.map((col) => col.name), ["x"]);
+  } finally {
+    await c.close();
+  }
+  await assert.rejects(c.analyze("select 1"), (err: Error) => err instanceof Unreachable && err.message === "the connection is closed");
+  const again = await e.open(":memory:");
+  try {
+    assert.deepEqual(await again.query("select ? as y", [2]), [[2]]);
+  } finally {
+    await again.close();
+  }
 });
