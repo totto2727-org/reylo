@@ -41,3 +41,5 @@ pg-extension/test/log/
 
 # Python bytecode
 __pycache__/
+/tmp
+/.direnv
