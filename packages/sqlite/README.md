@@ -10,6 +10,7 @@ npm install -D @totto2727/reylo-sqlite
 
 Install the two fork packages at the same version.
 This package pins upstream `@reylosql/engine-*` optional dependencies to `0.7.0`.
+Fork package release `0.7.1` retains that upstream native release.
 The package manager selects the binary for the host OS, CPU, and Linux libc.
 Do not omit optional dependencies when installing analysis tooling.
 No Rust compiler, local binary build, WebAssembly component, or WASI shim is needed for normal use.

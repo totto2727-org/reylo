@@ -19,7 +19,9 @@ If its platform package is missing, follow the error's installation guidance or 
 ## Setup
 
 Use Node 24 or later and TypeScript 7.1 with content mapper support.
-Install the runtime and engine at the same version:
+Install the two fork packages, runtime and SQLite/HCL tooling, at the same version:
+
+Fork package release `0.7.1` uses the unchanged upstream native engine `0.7.0`.
 
 ```sh
 nub add @totto2727/reylo
@@ -91,7 +93,19 @@ Use `.runSync()` with synchronous SQLite drivers and `.run()` with asynchronous 
 A primary or unique-key lookup normally returns a row or `null`, and a multi-row query returns an array.
 Treat SQLite `check` constraints as constraints, not a promise of TypeScript literal unions.
 
-## Native SQLite and D1 batches
+## Effect-native execution
+
+Use `@totto2727/reylo/effect` when the application executes queries through Effect services.
+Its preparation, execution, and decoding errors are `Data.TaggedError` values with a required original `cause`, suitable for direct `yield*` and `Effect.catchTag`.
+Capture `QueryExecutor` once with `yield* makeQueryRunner` during service construction, then use the returned generic run function without providing dependencies per operation.
+Keep the captured client's resource scope alive for the service's lifetime.
+Provide `QueryExecutor` through a Layer that uses the application's existing client service.
+Call `run(query, input)` for single-query execution instead of repeating parameter encoding, row decoding, or cardinality checks in each application store.
+Keep native batch and transaction Effects in the application.
+The optional entry point requires Effect 4; ordinary runtime users do not need to install it.
+See [Effect query execution](../../docs/effect.md) for the full contract.
+
+## Native driver execution
 
 Use the existing Standard Query interface when the native driver must own a transaction or batch:
 
@@ -105,8 +119,8 @@ The interface's `.encode()` validates input and returns ordered bound values.
 Native execution owns transaction boundaries, rollback, and driver-specific limits.
 Raw results are not decoded or checked for cardinality unless the caller passes raw array rows to the interface's `.decode()`.
 Standard Query does not check live-schema freshness.
-For D1, use its native `.prepare()`, `.bind()`, and `.batch()` methods and validate behavior in the application's own environment.
-Do not invent a `.compile()` API, custom SQL compiler, or new execution driver.
+Keep client-specific execution in the application's adapter and verify transaction behavior in its own environment.
+Do not invent a custom SQL compiler or extract an underlying binding from an existing Effect-native client.
 
 ## Verify changes
 

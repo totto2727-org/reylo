@@ -10,10 +10,12 @@ The fork publishes only `@totto2727/reylo` and its exact-version SQLite engine `
 The manifests, generated Content Mapper declarations, runtime module imports, adapter paths, tooling discovery, and consumer examples use these names.
 The fork depends on upstream-owned native engine packages but does not republish them.
 The `reylo` CLI name and `.reylo.yaml` configuration remain unchanged.
-Install the runtime and SQLite engine at the same version.
+Install the two fork packages, runtime and SQLite/HCL tooling, at the same version.
 Both fork packages follow the upstream published release version by default, without independent fork patch bumps or suffixes.
-The tooling peer, retained Cargo workspace, and native optional dependencies stay at that version too.
+The tooling peer stays at the fork package version.
 Already-published npm versions remain immutable; a fork-only release outside this policy requires explicit approval.
+The approved fork-only patch is `0.7.1` for both scoped packages and their exact tooling peer.
+The native optional dependencies and retained Cargo workspace stay at upstream `0.7.0`.
 
 ## SQLite-only distribution scope
 
@@ -28,12 +30,27 @@ These retained branches do not constitute supported npm engines or require exter
 The SQLite inference rules and runtime query execution API remain upstream behavior.
 The HCL adapter and package/distribution scope are source customizations, not deployment-only configuration.
 
+## Effect execution boundary
+
+The optional `@totto2727/reylo/effect` subpath provides typed single-query Effects with a Layer-injected `QueryExecutor`.
+`makeQueryRunner` captures that executor during service construction and returns a generic run function with no executor environment requirement per operation, independent of later context changes.
+The existing context-dependent `run` delegates to the same preparation, execution, and decoding implementation.
+Its execution contract has no dependency on a concrete SQL client or infrastructure framework.
+Parameter encoding, SQLite object-row normalization, and cardinality reuse the existing query runtime.
+Preparation, execution, and decoding failures use Effect's `Data.TaggedError` with a required original cause, supporting direct yielding and tag-based recovery without hand-written error tags.
+Client acquisition, native batching, and transaction semantics remain application responsibilities.
+Effect is an optional peer and is imported only from the opt-in subpath, so existing runtime consumers do not load it.
+The affected areas are the runtime query metadata, the new Effect entry point, package exports, and regression tests.
+There are no schema-analysis or upstream native-engine changes.
+
 ## Upstream native engine reuse
 
 The fork uses upstream v0.7.0's native host and platform resolver in `src/engine.ts` and `src/native.ts`.
 Both manifests pin all eight `@reylosql/engine-*` optional dependencies to `0.7.0`, and the package manager selects the host platform.
 The fork does not build, publish, or rename these upstream binaries.
-The build-time host rejects a binary whose reported version does not match the fork's `0.7.0` protocol version.
+The build-time host rejects a binary whose reported version does not exactly match the upstream native release `0.7.0` recorded in `src/engine-version.ts`, independently of the fork npm version.
+The package manifests, `src/engine.ts`, `src/engine-version.ts`, and `scripts/build.ts` separate these two version domains so fork-only npm patches do not request an unpublished native release.
+Build checks preserve both the exact upstream native version and the exact fork runtime/tooling peer version.
 The retained host changes restrict analysis to SQLite, select SQLite for core configuration parsing, and read the bundled tooling package's own version before a parent manifest.
 Engine function signatures, asynchronous lexer calls, and the cached engine fingerprint follow upstream without compatibility arguments or an extra synchronous ping.
 The runtime and tooling retain their separate scoped package boundary, with the HCL parser bundled into `dist/sqlite/tooling.js`.

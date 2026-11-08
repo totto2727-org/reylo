@@ -8,6 +8,7 @@ import { createRequire } from "node:module";
 import { copyFileSync, cpSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { build as bundle, transformSync } from "esbuild";
+import { ENGINE_VERSION } from "../src/engine-version.ts";
 
 const root = join(import.meta.dirname, "..");
 const dist = join(root, "dist");
@@ -25,16 +26,18 @@ for (const file of readdirSync(reylo, { recursive: true, encoding: "utf8" }).fil
   writeFileSync(path, transformSync(readFileSync(path, "utf8"), { loader: "js", legalComments: "inline" }).code);
 }
 copyFileSync(join(root, "README.md"), join(reylo, "README.md"));
+mkdirSync(join(reylo, "docs"), { recursive: true });
+copyFileSync(join(root, "docs/effect.md"), join(reylo, "docs/effect.md"));
 
 const pkg = JSON.parse(readFileSync(join(root, "package.json"), "utf8"));
-// The binary prints and answers with the Cargo workspace's version, which is reylo's: the two move together.
+// The retained Cargo workspace describes the upstream binary, not fork-only npm patches.
 const cargoVersion = readFileSync(join(root, "Cargo.toml"), "utf8").match(/^\[workspace\.package\]\s*\nversion = "([^"]+)"/m)?.[1];
-if (cargoVersion !== pkg.version) throw new Error(`Cargo.toml: the workspace's version is ${cargoVersion}, and reylo is ${pkg.version}; they move together`);
+if (cargoVersion !== ENGINE_VERSION) throw new Error(`Cargo.toml: the workspace's version is ${cargoVersion}, and the upstream engine is ${ENGINE_VERSION}; they move together`);
 for (const [name, version] of Object.entries(pkg.optionalDependencies)) {
-  if (version !== pkg.version) throw new Error(`package.json: the upstream engine ${name} is ${version}, and reylo is ${pkg.version}; they move together`);
+  if (version !== ENGINE_VERSION) throw new Error(`package.json: the upstream engine ${name} is ${version}, expected ${ENGINE_VERSION}`);
 }
 const { private: _private, scripts: _scripts, devDependencies: _dev, bin, exports, typescript, ...rest } = pkg;
-// The engines are peers at reylo's own version: reylo refuses another (src/engine.ts).
+// SQLite tooling is a peer at reylo's own fork version (src/engine-package.ts).
 for (const db of DATABASES) {
   const name = `@totto2727/reylo-${db}`;
   if (rest.peerDependencies?.[name] !== pkg.version) throw new Error(`package.json: the peer ${name} is ${rest.peerDependencies?.[name]}, and reylo is ${pkg.version}; they move together`);

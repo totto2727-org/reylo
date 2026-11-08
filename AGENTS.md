@@ -13,6 +13,13 @@ Their presence does not extend this fork's supported package matrix.
 Preserve the SQLite inference engine and runtime API unless a change requires otherwise.
 Record fork-specific behavior and operational impact in [docs/upstream-differences.md](docs/upstream-differences.md), including the exact upstream base hash whenever upstream is synced.
 
+| Effect contract | Enforcement |
+| --- | --- |
+| Single-query Effects use a Layer-provided executor; native batches stay with the application. | `QueryExecutor` exposes only `dialect` and `execute`; `tests/effect.test.ts` exercises real SQLite through independent Layers. |
+| Effect integration remains optional for ordinary runtime users. | `tests/effect-optional.test.ts` executes SQLite with Effect imports forbidden. |
+| Query errors require their original cause in both constructor and instance types. | Constructor and structural type assertions in `tests/effect.test.ts`, checked by `nub run typecheck`. |
+| Effect query errors use `Data.TaggedError`, not manually tagged native errors. | Direct yielding and `Effect.catchTag` recovery tests in `tests/effect.test.ts`. |
+
 ## Repository map
 
 | Path | Responsibility |
@@ -84,7 +91,9 @@ Do not rebuild or publish platform packages from this fork.
 ## Version policy
 
 Follow the upstream published release version by default, without independent fork version bumps.
-Keep the root package, SQLite/HCL tooling package, exact tooling peer dependency, retained Cargo workspace, and upstream native optional dependencies at that same release version.
+Keep the root package, SQLite/HCL tooling package, and exact tooling peer dependency equal.
+Keep `src/engine-version.ts`, the retained Cargo workspace, and upstream native optional dependencies at the compatible published native release.
+The approved fork-only patch release is `0.7.1`, using the unchanged upstream native release `0.7.0`.
 When syncing upstream, update these versions together with the lockfile and exact comparison revision in `docs/upstream-differences.md`.
 Use a published release with available native packages, not an unreleased `main` version.
 Do not overwrite an existing npm version or add a fork suffix automatically.

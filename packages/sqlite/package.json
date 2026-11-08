@@ -1,6 +1,6 @@
 {
   "name": "@totto2727/reylo-sqlite",
-  "version": "0.7.0",
+  "version": "0.7.1",
   "private": true,
   "publishConfig": { "access": "public", "registry": "https://registry.npmjs.org/" },
   "description": "Reylo's SQLite and HCL build-time tooling, using the upstream native analysis engine. Install beside the runtime at the same fork version.",

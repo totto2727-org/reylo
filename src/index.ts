@@ -8,6 +8,8 @@ import type { Checks } from "./checks.ts";
 import type { Fresh } from "./fresh.ts";
 import { DecodeError, ParameterError, type Columns } from "./values.ts";
 import { readQueryError, readQueryErrorSync, type QueryError } from "./query-error.ts";
+import { normalize } from "./decode-sqlite.ts";
+import { registerObjectDecoder } from "./query-metadata.ts";
 import { listening, type QueryTrace } from "./trace.ts";
 
 export type { ClientFor, Dialect, Inputs, MysqlClient, PostgresClient, SqliteClient, SyncClientFor } from "./execute.ts";
@@ -276,5 +278,19 @@ export function defineQuery<Params, Row, C extends Cardinality, D extends Dialec
         return (rows[0] ?? null) as Materialize<Row, C>;
     }
   }
+  registerObjectDecoder(query, (rows) => {
+    if (module.dialect !== "sqlite") throw new TypeError("Object-row execution supports only SQLite queries.");
+    const columns = module.columns;
+    if (columns === undefined) throw new TypeError("A query defined by hand without its columns cannot map rows to its output.");
+    const keyed = rows.map((row) => {
+      if (row === null || typeof row !== "object" || Array.isArray(row)) throw new DecodeError("Expected an object row from the query executor.");
+      for (const [name] of columns) {
+        if (!Object.hasOwn(row, name)) throw new DecodeError(`The query executor's row is missing column "${name}".`);
+      }
+      return { ...row };
+    });
+    // normalize validates the SQLite storage classes, as the existing runtime path does.
+    return materialize(normalize(keyed, columns) as Row[]);
+  });
   return query;
 }

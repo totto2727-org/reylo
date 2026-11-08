@@ -20,13 +20,14 @@ import { hostUrl, type HostUrl } from "./host-url.ts";
 import { NotMysql, Unreachable } from "./connection.ts";
 import { EngineCore, type Analysis, type Described, type Dialect, type Lexed, type Response } from "./engine-core.ts";
 import { nativeBinary } from "./native.ts";
+import { ENGINE_VERSION } from "./engine-version.ts";
 
 export type { EngineType } from "./engine-type.ts";
 export { reason, Unreachable } from "./connection.ts";
 export type { Analysis, Answer, DbError, Described, Diagnostic, Dialect, DuckdbDescribed, DuckdbType, EngineIo, Lexed, MysqlDescribed, Need, Response } from "./engine-core.ts";
 export { AnswerCache, EngineCore } from "./engine-core.ts";
 
-/** The version of reylo, which the engine it runs must have: that of the package this module ships in. */
+/** The fork package version, shared by the runtime and SQLite tooling packages. */
 export const REYLO_VERSION: string = (() => {
   for (const at of ["./package.json", "../package.json"]) {
     try {
@@ -36,7 +37,7 @@ export const REYLO_VERSION: string = (() => {
   throw new Error("reylo cannot find the package.json of its own package");
 })();
 
-/** An engine reylo cannot run: none installed, or one of another version than reylo's. Reported as the project's error. */
+/** An engine reylo cannot run: none installed, or a different upstream native release. Reported as the project's error. */
 export class MissingEngine extends Error {
   constructor(message: string) {
     super(message);
@@ -51,7 +52,7 @@ const PING_TIMEOUT = 10_000;
 
 /**
  * The engine of one database, loaded once per process and binary. It rejects with a MissingEngine
- * where there is no binary, where it is another version than reylo, and where it does not answer
+ * where there is no binary, where it is another upstream native release, and where it does not answer
  * as one database's engine.
  */
 export function engine(dialect: Dialect): Promise<Engine> {
@@ -78,8 +79,8 @@ export function engine(dialect: Dialect): Promise<Engine> {
         return new MissingEngine(message);
       };
       if (ping.status !== "ok") throw refuse(`the engine ${binary} does not answer: ${answer.message ?? answer.status}`);
-      if (ping.version !== REYLO_VERSION) {
-        throw refuse(`reylo ${REYLO_VERSION} runs with its engine at ${REYLO_VERSION}, and ${binary} is ${ping.version}: install reylo again, point REYLO_ENGINE_PATH at the engine of reylo ${REYLO_VERSION}, or in a checkout of reylo's repository build it with cargo build --release -p reylo`);
+      if (ping.version !== ENGINE_VERSION) {
+        throw refuse(`reylo ${REYLO_VERSION} runs with its engine at ${ENGINE_VERSION}, and ${binary} is ${ping.version}: install reylo again, point REYLO_ENGINE_PATH at the engine of reylo ${ENGINE_VERSION}, or in a checkout of reylo's repository build it with cargo build --release -p reylo`);
       }
       if (ping.database !== dialect) throw refuse(`${binary} serves ${ping.database ?? "no one database"}'s engine when asked for ${dialect}'s`);
       return new Engine(binary, dialect, ping.fingerprint, core);
