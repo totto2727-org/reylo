@@ -75,9 +75,24 @@ export function run<Input, Output, D extends StandardQueryV1.Dialect>(
   query: StandardQueryV1<Input, Output, D>,
   ...input: ParamsArg<NoInfer<Input>>
 ): Effect.Effect<Output, QueryPreparationError | QueryExecutionError | QueryDecodeError, QueryExecutor> {
+  return Effect.flatMap(QueryExecutor, (executor) => runWithExecutor(executor, query, ...input));
+}
+
+/** Captures the executor once when constructing an application service. */
+export const makeQueryRunner = Effect.map(QueryExecutor, (executor) => {
+  return <Input, Output, D extends StandardQueryV1.Dialect>(
+    query: StandardQueryV1<Input, Output, D>,
+    ...input: ParamsArg<NoInfer<Input>>
+  ): Effect.Effect<Output, QueryPreparationError | QueryExecutionError | QueryDecodeError> => runWithExecutor(executor, query, ...input);
+});
+
+function runWithExecutor<Input, Output, D extends StandardQueryV1.Dialect>(
+  executor: Context.Service.Shape<typeof QueryExecutor>,
+  query: StandardQueryV1<Input, Output, D>,
+  ...input: ParamsArg<NoInfer<Input>>
+): Effect.Effect<Output, QueryPreparationError | QueryExecutionError | QueryDecodeError> {
   return Effect.gen(function*() {
     const statement = yield* prepare(query, ...input);
-    const executor = yield* QueryExecutor;
     if (executor.dialect !== statement.dialect) {
       return yield* Effect.fail(new QueryPreparationError({ cause: new TypeError(`Expected a ${statement.dialect} executor, got ${executor.dialect}.`) }));
     }

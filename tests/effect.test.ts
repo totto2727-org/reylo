@@ -3,7 +3,7 @@ import { DatabaseSync, type SQLInputValue } from "node:sqlite";
 import { test, type TestContext } from "node:test";
 import { Cause, Effect, Exit, Layer } from "effect";
 import { defineQuery } from "@totto2727/reylo";
-import { prepare, QueryDecodeError, QueryExecutionError, QueryExecutor, QueryPreparationError, run, type BoundQuery } from "@totto2727/reylo/effect";
+import { makeQueryRunner, prepare, QueryDecodeError, QueryExecutionError, QueryExecutor, QueryPreparationError, run, type BoundQuery } from "@totto2727/reylo/effect";
 import { DecodeError, ParameterError } from "../src/values.ts";
 
 function binding(value: unknown): SQLInputValue {
@@ -81,8 +81,25 @@ test("Effect decodes object rows and runs one query through independent layers",
   assert.deepEqual(Effect.runSync(Effect.provide(effect, second.layer)), { id: 7, active: true, big: 9007199254740993n, doc: { name: "second" } });
 });
 
+test("captured runner uses its construction executor with absent or conflicting context", (t) => {
+  const first = database(t);
+  const second = database(t);
+  seed(first.db, "first");
+  seed(second.db, "second");
+  const captured = Effect.runSync(Effect.provide(makeQueryRunner, first.layer));
+  const effect = captured(lookup, { id: 7, active: true });
+  const expected = { id: 7, active: true, big: 9007199254740993n, doc: { name: "first" } };
+  assert.deepEqual(Effect.runSync(effect), expected);
+  assert.deepEqual(Effect.runSync(Effect.provide(effect, second.layer)), expected);
+  first.db.exec("update item set doc = '{bad json'");
+  const decoded = failure(effect);
+  assert.ok(decoded instanceof QueryDecodeError);
+  assert.ok(decoded.cause instanceof SyntaxError);
+});
+
 test("Effect retains all query cardinalities and row-count failures", (t) => {
   const { db, layer } = database(t);
+  const run = Effect.runSync(Effect.provide(makeQueryRunner, layer));
   db.exec("create table numbers(n integer); insert into numbers values(1), (2)");
   const many = defineQuery<{}, { n: number }, "many", "sqlite">({ dialect: "sqlite", sql: "select n from numbers", params: [], columns: [["n", "int"]], cardinality: "many" });
   const one = defineQuery<{}, { n: number }, "one", "sqlite">({ dialect: "sqlite", sql: "select n from numbers", params: [], columns: [["n", "int"]], cardinality: "one" });
@@ -104,6 +121,7 @@ test("Effect retains all query cardinalities and row-count failures", (t) => {
 
 test("Effect classifies encoding, decoding, and database failures with original causes", (t) => {
   const { db, layer } = database(t);
+  const run = Effect.runSync(Effect.provide(makeQueryRunner, layer));
   seed(db, "first");
   const input = { id: 7, active: true };
   Object.defineProperty(input, "id", { value: undefined });
@@ -142,6 +160,25 @@ test("Effect preserves execution failures, defects, and interruptions without re
   assert.equal(Cause.squash(defectExit.cause), cause);
 });
 
+test("captured runner preserves execution causes and validates dialect before execution", () => {
+  const cause = new Error("original captured driver failure");
+  const original = new QueryExecutionError({ cause });
+  let calls = 0;
+  const executor = { dialect: "sqlite" as const, execute: () => { calls++; return Effect.fail(original); } };
+  const captured = Effect.runSync(Effect.provide(makeQueryRunner, Layer.succeed(QueryExecutor, executor)));
+  assert.equal(failure(captured(lookup, { id: 7, active: true })), original);
+  assert.equal(original.cause, cause);
+  const foreign = defineQuery<{}, { n: number }, "one", "postgres">({ dialect: "postgres", sql: "select 1 as n", params: [], columns: [["n", "int"]], cardinality: "one" });
+  const foreignError = failure(captured(foreign));
+  assert.ok(foreignError instanceof QueryPreparationError);
+  assert.ok(foreignError.cause instanceof TypeError);
+  Object.defineProperty(executor, "dialect", { value: "other" });
+  const mismatch = failure(captured(lookup, { id: 7, active: true }));
+  assert.ok(mismatch instanceof QueryPreparationError);
+  assert.ok(mismatch.cause instanceof TypeError);
+  assert.equal(calls, 1);
+});
+
 test("Effect refuses non-SQLite queries and mismatched executors before execution", () => {
   let calls = 0;
   const executor = {
@@ -168,6 +205,15 @@ test("Effect rejects array rows and missing query metadata without changing runt
 
 // Compiled by the repository typecheck, not executed. Inputs must not widen the query's inference.
 function typeContract() {
+  // @ts-expect-error factory requires an executor at construction
+  Effect.runSync(makeQueryRunner);
+  const captured = Effect.runSync(Effect.provide(makeQueryRunner, Layer.succeed(QueryExecutor, { dialect: "sqlite", execute: () => Effect.succeed([]) })));
+  const capturedOne: Effect.Effect<{ id: number; active: boolean; big: bigint; doc: { name: string } }, QueryPreparationError | QueryExecutionError | QueryDecodeError> = captured(lookup, { id: 7, active: true });
+  Effect.runSync(capturedOne);
+  // @ts-expect-error captured runner retains required inputs
+  captured(lookup);
+  // @ts-expect-error captured runner must not widen input inference
+  captured(lookup, { id: "7", active: true });
   const one: Effect.Effect<{ id: number; active: boolean; big: bigint; doc: { name: string } }, QueryPreparationError | QueryExecutionError | QueryDecodeError, QueryExecutor> = run(lookup, { id: 7, active: true });
   const bound: Effect.Effect<BoundQuery<{ id: number; active: boolean; big: bigint; doc: { name: string } }>, QueryPreparationError> = prepare(lookup, { id: 7, active: true });
   const manyQuery = defineQuery<{}, { n: number }, "many", "sqlite">({ dialect: "sqlite", sql: "select 1 as n", params: [], columns: [["n", "int"]], cardinality: "many" });
@@ -176,6 +222,13 @@ function typeContract() {
   const many: Effect.Effect<{ n: number }[], unknown, QueryExecutor> = run(manyQuery);
   const maybe: Effect.Effect<{ n: number } | null, unknown, QueryExecutor> = run(maybeQuery);
   const none: Effect.Effect<void, unknown, QueryExecutor> = run(noneQuery);
+  const capturedMany: Effect.Effect<{ n: number }[], unknown> = captured(manyQuery);
+  const capturedMaybe: Effect.Effect<{ n: number } | null, unknown> = captured(maybeQuery);
+  const capturedNone: Effect.Effect<void, unknown> = captured(noneQuery);
+  // @ts-expect-error captured many results are not a single row
+  const wrongCapturedMany: Effect.Effect<{ n: number }, unknown> = captured(manyQuery);
+  // @ts-expect-error captured maybeOne retains null
+  const wrongCapturedMaybe: Effect.Effect<{ n: number }, unknown> = captured(maybeQuery);
   // @ts-expect-error many results are not a single row
   const wrongMany: Effect.Effect<{ n: number }, unknown, QueryExecutor> = run(manyQuery);
   // @ts-expect-error maybeOne retains null

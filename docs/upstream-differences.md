@@ -31,6 +31,8 @@ The HCL adapter and package/distribution scope are source customizations, not de
 ## Effect execution boundary
 
 The optional `@totto2727/reylo/effect` subpath provides typed single-query Effects with a Layer-injected `QueryExecutor`.
+`makeQueryRunner` captures that executor during service construction and returns a generic run function with no executor environment requirement per operation, independent of later context changes.
+The existing context-dependent `run` delegates to the same preparation, execution, and decoding implementation.
 Its execution contract has no dependency on a concrete SQL client or infrastructure framework.
 Parameter encoding, SQLite object-row normalization, and cardinality reuse the existing query runtime.
 Client acquisition, native batching, and transaction semantics remain application responsibilities.

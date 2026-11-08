@@ -94,6 +94,8 @@ Treat SQLite `check` constraints as constraints, not a promise of TypeScript lit
 ## Effect-native execution
 
 Use `@totto2727/reylo/effect` when the application executes queries through Effect services.
+Capture `QueryExecutor` once with `yield* makeQueryRunner` during service construction, then use the returned generic run function without providing dependencies per operation.
+Keep the captured client's resource scope alive for the service's lifetime.
 Provide `QueryExecutor` through a Layer that uses the application's existing client service.
 Call `run(query, input)` for single-query execution instead of repeating parameter encoding, row decoding, or cardinality checks in each application store.
 Keep native batch and transaction Effects in the application.

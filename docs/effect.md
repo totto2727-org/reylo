@@ -10,11 +10,20 @@ import { Effect } from "effect";
 import getUser from "./get_user.sql";
 import { ProjectQueryLayer } from "./database.ts";
 
-const user = QueryEffect.run(getUser, { id: 1 });
-const program = user.pipe(Effect.provide(ProjectQueryLayer));
+const makeUserService = Effect.gen(function*() {
+  const run = yield* QueryEffect.makeQueryRunner;
+  return { getUser: (id: number) => run(getUser, { id }) };
+});
+const service = makeUserService.pipe(Effect.provide(ProjectQueryLayer));
+const program = Effect.flatMap(service, (users) => users.getUser(1));
 ```
 
-`run` retains the query's inferred parameters and cardinality.
+`makeQueryRunner` is an Effect that requires `QueryExecutor` and captures it once during service construction.
+It returns a generic typed run function whose query Effects require no `QueryExecutor`, even when evaluated with an absent or conflicting executor context.
+Provide the application's dependencies to the service Layer or construction Effect, not to each operation.
+Keep the executor's resources alive for the service's lifetime; capture does not extend a scoped client's lifetime.
+The existing `QueryEffect.run` remains available for programs that intentionally obtain `QueryExecutor` from the current context on each evaluation.
+Both run functions share the same execution and decoding implementation and retain the query's inferred parameters and cardinality.
 It validates and orders bound values before execution, decodes returned values with Reylo's SQLite decoder, and rejects a result with the wrong cardinality.
 Encoding and decoding run inside the Effect, not when the program is constructed.
 A query with required parameters cannot be called without them.
