@@ -27,7 +27,7 @@ export type Tooling = {
   runCli(args: string[]): Promise<number>;
 };
 
-const PACKAGES = ["@totto2727/reylo-postgres", "@totto2727/reylo-mysql", "@totto2727/reylo-sqlite"];
+const PACKAGES = ["@totto2727/reylo-sqlite"];
 const VERSION: string = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")).version;
 
 let loaded: Promise<Tooling> | undefined;
@@ -76,7 +76,7 @@ async function load(from: string): Promise<Tooling> {
     }
   }
   if (other) throw new Error(`reylo ${VERSION} runs with ${other.name} ${VERSION}, and the one installed is ${other.version ?? "of no version"} (${other.dir}): npm install -D ${other.name}@${VERSION}`);
-  throw new Error(`reylo's build steps run in a database's engine, and none is installed: npm install -D @totto2727/reylo-postgres, @totto2727/reylo-mysql or @totto2727/reylo-sqlite, the one for your database`);
+  throw new Error(`reylo's SQLite/HCL build steps are not installed: npm install -D @totto2727/reylo-sqlite`);
 }
 
 function versionAt(manifest: string): string | undefined {

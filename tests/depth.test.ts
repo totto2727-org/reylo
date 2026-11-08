@@ -61,7 +61,7 @@ test("a SQLite statement nested to the engine's bound is typed, and one level pa
   db.exec("create table users (id integer primary key, name text not null, nick text)");
   db.close();
   // The session analyzes with the process's one instance of the SQLite engine, which this wraps.
-  hosted(await engine("sqlite", root));
+  hosted(await engine("sqlite"));
   const session = await Session.open(root, { DATABASE_URL: "file:./app.db" });
   try {
     for (const [shape, n] of SQLITE_BOUNDS) {

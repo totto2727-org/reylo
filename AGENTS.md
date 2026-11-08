@@ -19,8 +19,9 @@ Record fork-specific behavior and operational impact in [docs/upstream-differenc
 | --- | --- |
 | `src/` | Runtime, content mapper, loaders, SQLite/HCL analysis, CLI, and shared upstream dialect code |
 | `src/hclsyntax/` | Private native HCL parser port with MPL-2.0 notices |
-| `packages/sqlite/` | SQLite engine package and committed WebAssembly component |
+| `packages/sqlite/` | SQLite/HCL tooling entry and upstream native optional dependencies |
 | `engine/` | Upstream Rust workspace, shared core and database implementations |
+| `spec/type-descriptor.ts` | Settled, living upstream descriptor contract. Agree format changes with a maintainer before editing |
 | `oracle/` | Rust soundness oracle and upstream regression cases |
 | `tests/` | Loader, runtime, SQLite and HCL regression tests |
 | `examples/` | Minimal SQLite and HCL consumers linked to built distributions |
@@ -67,23 +68,25 @@ Follow each example's README for its checks.
 
 ## Engine changes
 
-Read [engine/README.md](engine/README.md) before changing inference.
-Prepare the retained workspace before Cargo resolves its dependencies:
+Analysis uses the published upstream `@reylosql/engine-*` packages at exactly `0.7.0`.
+Normal install, build, and tests need no Rust compiler, WASI SDK, jco, or local engine build.
+Keep optional dependencies enabled and verify `nativeBinary()` resolves an upstream installed package when checking this path.
+`REYLO_ENGINE_PATH` is an explicit override, not the default acceptance path.
+The host checks the engine's reported version, and this fork still rejects non-SQLite analysis.
+Read [engine/README.md](engine/README.md) before changing reference Rust sources.
+Those sources do not change the installed upstream binary.
+Any inference change must be delivered through a compatible upstream engine release before it affects users.
+Use the retained Rust workspace and SQLite oracle only for source-level investigation, not as a substitute for tests against the published engine.
+Do not rebuild or publish platform packages from this fork.
 
-```sh
-engine/build.sh --prepare
-cargo test -p reylo-engine-core -p reylo-engine-sqlite
-engine/build.sh sqlite
-```
+## Version policy
 
-Preparation may fetch pinned upstream dependencies for the retained workspace.
-The component build needs rustup's `wasm32-wasip2` target, wasi-sdk 34 through `WASI_SDK_PATH` or `engine/.wasi-sdk/`, and a local `@bytecodealliance/jco@1.39.0` installation.
-The normal install and package build do not include jco because the SQLite component is committed.
-On macOS, export `SDKROOT="$(xcrun --show-sdk-path)"`, then separately export `BINDGEN_EXTRA_CLANG_ARGS="-isysroot $SDKROOT"`.
-An engine change includes the rebuilt `packages/sqlite/engine/` component.
-Changes to core or host code also require that rebuild because the loader checks source fingerprints.
-Use an oracle case for SQLite inference changes, and review every changed expected type and cardinality.
-Do not rebuild or republish removed npm engines.
+Follow the upstream published release version by default, without independent fork version bumps.
+Keep the root package, SQLite/HCL tooling package, exact tooling peer dependency, retained Cargo workspace, and upstream native optional dependencies at that same release version.
+When syncing upstream, update these versions together with the lockfile and exact comparison revision in `docs/upstream-differences.md`.
+Use a published release with available native packages, not an unreleased `main` version.
+Do not overwrite an existing npm version or add a fork suffix automatically.
+If a fork-only fix needs publication before the next upstream release, obtain approval for a version-policy exception first.
 
 ## Documentation and changes
 

@@ -9,6 +9,12 @@ Use this skill when adding typed SQL imports to an application that consumes `@t
 This fork maintains only the runtime and `@totto2727/reylo-sqlite`.
 Do not install Postgres, MySQL, or DuckDB engine packages.
 Upstream documentation at <https://reylo.dev> describes a broader product, not this fork's package scope.
+In version 0.7, unconstrained JSON values have type `Json`, and the former generic `Json<T>` helper is named `AsJson<T>`.
+Date and timestamp years outside 0000 through 9999 use ISO 8601 extended form.
+Keep the two scoped fork packages and allow their pinned upstream native optional dependencies.
+Do not use `--omit=optional` when installing analysis tooling.
+The native engine runs as a child process, including for HCL schema analysis.
+If its platform package is missing, follow the error's installation guidance or explicitly set `REYLO_ENGINE_PATH` to a compatible `reylo 0.7.0` binary.
 
 ## Setup
 

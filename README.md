@@ -1,7 +1,7 @@
 # Reylo: SQLite and HCL
 
 This fork of [Reylo](https://github.com/colinhacks/reylo) imports `.sql` files as typed TypeScript queries.
-It maintains only the runtime `@totto2727/reylo` and the SQLite engine `@totto2727/reylo-sqlite`.
+It maintains only the runtime `@totto2727/reylo` and the SQLite/HCL tooling `@totto2727/reylo-sqlite`.
 Analysis reads a local SQLite database or a static Atlas HCL schema.
 The application supplies its own SQLite driver for execution.
 
@@ -71,6 +71,18 @@ db.close();
 Enable the loader with `node --import @totto2727/reylo/register main.ts`, or use the preload configuration in the [nub example](examples/nub/README.md).
 Run the type check with `nubx tsc --noEmit --runExternalCode`.
 See the [examples](examples/README.md) for complete SQLite and HCL projects, and the [usage skill](skills/using-reylo/SKILL.md) for configuration and native-driver guidance.
+
+## Version 0.7 compatibility
+
+Unconstrained JSON values use the exported `Json` union rather than `unknown`.
+The previous generic `Json<T>` row-to-JSON utility is now named `AsJson<T>`.
+Date and timestamp values outside years 0000 through 9999 use ISO 8601 extended years.
+The fork keeps the two scoped packages above and reuses upstream `@reylosql/engine-*` native binaries, pinned to `0.7.0`.
+The package manager installs the binary for the host platform through optional dependencies.
+Do not omit optional dependencies when installing analysis tooling.
+Analysis starts the engine as a child process, including when its schema comes from HCL.
+The fork no longer ships a WebAssembly component or needs Rust to build its npm distributions.
+See the [tooling package](packages/sqlite/README.md) for supported platforms and missing-binary guidance.
 
 ## Maintenance
 
