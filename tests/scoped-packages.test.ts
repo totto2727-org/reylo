@@ -23,7 +23,7 @@ test("the fork exposes only its runtime and exact-version SQLite tooling under i
 
 for (const dialect of ["postgres", "mysql", "duckdb"] as const) {
   test(`the fork refuses ${dialect} analysis without discovering an engine package`, async () => {
-    await assert.rejects(engine(dialect, import.meta.dirname), {
+    await assert.rejects(engine(dialect), {
       name: "MissingEngine",
       message: `This fork supports SQLite analysis only, not ${dialect} statements`,
     });

@@ -8,7 +8,6 @@ import { connect, createServer, type AddressInfo, type Server } from "node:net";
 import { engine, reason, Unreachable } from "../src/engine.ts";
 import { hostUrl } from "../src/host-url.ts";
 import { mysqlStandIn } from "./mysql-stand-in.ts";
-import { ROOT } from "./helpers.ts";
 
 // Node listens on no Unix socket on Windows, where a path names a named pipe.
 const noUnixSockets = process.platform === "win32" && "Node opens no Unix socket on Windows";
@@ -49,7 +48,7 @@ test("the files a Postgres URL names are resolved from the working directory for
 test("the native engine works when Node's watch dependency reporting is enabled", () => {
   // Watch mode sets this variable. A native engine must not report modules to the parent.
   const script = `const { engine } = await import(${JSON.stringify(new URL("../src/engine.ts", import.meta.url).href)});
-const c = await (await engine("sqlite", ${JSON.stringify(ROOT)})).open(":memory:");
+const c = await (await engine("sqlite")).open(":memory:");
 console.log((await c.analyze("select 1 as x")).columns[0].name);
 await c.close();`;
   const run = spawnSync(process.execPath, ["--input-type=module", "-e", script], { env: { ...process.env, WATCH_REPORT_DEPENDENCIES: "1" }, encoding: "utf8", timeout: 30_000 });

@@ -11,6 +11,9 @@ The manifests, generated Content Mapper declarations, runtime module imports, ad
 The fork depends on upstream-owned native engine packages but does not republish them.
 The `reylo` CLI name and `.reylo.yaml` configuration remain unchanged.
 Install the runtime and SQLite engine at the same version.
+Both fork packages follow the upstream published release version by default, without independent fork patch bumps or suffixes.
+The tooling peer, retained Cargo workspace, and native optional dependencies stay at that version too.
+Already-published npm versions remain immutable; a fork-only release outside this policy requires explicit approval.
 
 ## SQLite-only distribution scope
 
@@ -31,7 +34,8 @@ The fork uses upstream v0.7.0's native host and platform resolver in `src/engine
 Both manifests pin all eight `@reylosql/engine-*` optional dependencies to `0.7.0`, and the package manager selects the host platform.
 The fork does not build, publish, or rename these upstream binaries.
 The build-time host rejects a binary whose reported version does not match the fork's `0.7.0` protocol version.
-The small retained host changes restrict analysis to SQLite, select SQLite for core configuration parsing, and preserve the existing TypeScript/HCL callers.
+The retained host changes restrict analysis to SQLite, select SQLite for core configuration parsing, and read the bundled tooling package's own version before a parent manifest.
+Engine function signatures, asynchronous lexer calls, and the cached engine fingerprint follow upstream without compatibility arguments or an extra synchronous ping.
 The runtime and tooling retain their separate scoped package boundary, with the HCL parser bundled into `dist/sqlite/tooling.js`.
 Committed SQLite WASM artifacts, the component worker and host, and the WASI shim dependency are removed.
 The retained Rust workspace is reference and oracle source, not the engine installed by consumers.

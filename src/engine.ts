@@ -54,7 +54,7 @@ const PING_TIMEOUT = 10_000;
  * where there is no binary, where it is another version than reylo, and where it does not answer
  * as one database's engine.
  */
-export function engine(dialect: Dialect, _projectDir?: string, _from?: string): Promise<Engine> {
+export function engine(dialect: Dialect): Promise<Engine> {
   if (dialect !== "sqlite") return Promise.reject(new MissingEngine(`This fork supports SQLite analysis only, not ${dialect} statements`));
   let binary: string;
   try {
@@ -95,7 +95,7 @@ export function engine(dialect: Dialect, _projectDir?: string, _from?: string): 
  * An engine to read the project file with, before the URL in it names the database: the core,
  * which parses the file, is every database's. A MissingEngine where there is none to run.
  */
-export async function anyEngine(_projectDir?: string, _from?: string): Promise<Engine | MissingEngine> {
+export async function anyEngine(): Promise<Engine | MissingEngine> {
   return engine("sqlite").catch((e: unknown) => (e instanceof MissingEngine ? e : new MissingEngine((e as Error).message)));
 }
 

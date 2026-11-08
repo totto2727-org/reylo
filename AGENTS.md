@@ -79,6 +79,15 @@ Any inference change must be delivered through a compatible upstream engine rele
 Use the retained Rust workspace and SQLite oracle only for source-level investigation, not as a substitute for tests against the published engine.
 Do not rebuild or publish platform packages from this fork.
 
+## Version policy
+
+Follow the upstream published release version by default, without independent fork version bumps.
+Keep the root package, SQLite/HCL tooling package, exact tooling peer dependency, retained Cargo workspace, and upstream native optional dependencies at that same release version.
+When syncing upstream, update these versions together with the lockfile and exact comparison revision in `docs/upstream-differences.md`.
+Use a published release with available native packages, not an unreleased `main` version.
+Do not overwrite an existing npm version or add a fork suffix automatically.
+If a fork-only fix needs publication before the next upstream release, obtain approval for a version-policy exception first.
+
 ## Documentation and changes
 
 Update the consumer skill and relevant examples with user-visible changes.

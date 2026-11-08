@@ -2,7 +2,6 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { lexPlaceholders } from "../src/lex.ts";
 import { defineQuery } from "../src/index.ts";
-import { fileURLToPath } from "node:url";
 import { engine as load, type Dialect } from "../src/engine.ts";
 
 const names = (sql: string, dialect: "postgres" | "mysql" | "sqlite" = "postgres") => lexPlaceholders(sql, dialect).params;
@@ -55,7 +54,7 @@ test("MySQL text is read as a session in the default sql_mode reads it", () => {
 
 test("the runtime's lexer agrees with the engine's", async () => {
   // Every database's engine lexes every dialect: the lexer is the core's.
-  const engine = await load("sqlite", fileURLToPath(new URL("..", import.meta.url)));
+  const engine = await load("sqlite");
   const statements: [string, Dialect][] = [
     ["select 'it\\'s :not', 'a\\\\', :x, \"say \\\":no\", `n:m`, 'a\\nb' from t where id = :id # :c\n and :d --:e\n -- :f\n /* :g */ :h", "mysql"],
     ["select ?, '?', \"\\\"?\", ? -- ?\n # ?\n", "mysql"],

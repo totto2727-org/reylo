@@ -60,7 +60,7 @@ test("REYLO_ENGINE_PATH takes precedence and a missing override is actionable", 
 
 test("unsupported dialects never start the native executable", async () => {
   for (const dialect of ["postgres", "mysql", "duckdb"] as const) {
-    await assert.rejects(engine(dialect, import.meta.dirname), {
+    await assert.rejects(engine(dialect), {
       name: "MissingEngine",
       message: `This fork supports SQLite analysis only, not ${dialect} statements`,
     });
@@ -91,9 +91,9 @@ test("an executable that exits or never answers is refused", { skip: noShell }, 
 });
 
 test("the installed SQLite engine reads project configuration and is reused", async (t) => {
-  const e = await engine("sqlite", import.meta.dirname);
+  const e = await engine("sqlite");
   assert.equal(await engine("sqlite"), e);
-  assert.equal(await anyEngine(import.meta.dirname), e);
+  assert.equal(await anyEngine(), e);
   const root = mkdtempSync(join(tmpdir(), "reylo-native-project-"));
   t.after(() => rmSync(root, { recursive: true, force: true }));
   writeFileSync(join(root, ".reylo.yaml"), "direct_url: file:./app.db\n");

@@ -27,6 +27,12 @@ for (const file of readdirSync(reylo, { recursive: true, encoding: "utf8" }).fil
 copyFileSync(join(root, "README.md"), join(reylo, "README.md"));
 
 const pkg = JSON.parse(readFileSync(join(root, "package.json"), "utf8"));
+// The binary prints and answers with the Cargo workspace's version, which is reylo's: the two move together.
+const cargoVersion = readFileSync(join(root, "Cargo.toml"), "utf8").match(/^\[workspace\.package\]\s*\nversion = "([^"]+)"/m)?.[1];
+if (cargoVersion !== pkg.version) throw new Error(`Cargo.toml: the workspace's version is ${cargoVersion}, and reylo is ${pkg.version}; they move together`);
+for (const [name, version] of Object.entries(pkg.optionalDependencies)) {
+  if (version !== pkg.version) throw new Error(`package.json: the upstream engine ${name} is ${version}, and reylo is ${pkg.version}; they move together`);
+}
 const { private: _private, scripts: _scripts, devDependencies: _dev, bin, exports, typescript, ...rest } = pkg;
 // The engines are peers at reylo's own version: reylo refuses another (src/engine.ts).
 for (const db of DATABASES) {
