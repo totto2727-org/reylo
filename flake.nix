@@ -28,6 +28,7 @@
           ci = pkgs.mkShell { };
           default = pkgs.mkShell {
             packages = [
+              # TODO: Use Nub's official overlay when upstream provides one.
               nub.packages.${system}.default
             ];
           };
