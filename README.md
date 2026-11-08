@@ -91,6 +91,18 @@ The [upstream differences](docs/upstream-differences.md) record the exact upstre
 The [publishing guide](docs/publishing.md) describes the two-package release.
 Upstream's [documentation](https://reylo.dev) describes a broader product and is not this fork's support matrix.
 
+### Local development with Nix
+
+Enter the default development shell to obtain Nub 0.9.6 from the [official Nub flake](https://github.com/nubjs/nub/tree/v0.9.6):
+
+```sh
+nix develop
+nub --version
+```
+
+Nub manages the Node runtime required by the project; the shell does not install a separate Node package.
+CI uses the empty `ci` shell and continues to install Nub through its existing setup action.
+
 ## License
 
 Reylo retains its [MIT license](LICENSE).

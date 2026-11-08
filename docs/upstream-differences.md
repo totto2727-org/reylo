@@ -126,8 +126,12 @@ Nub builds the two maintained distributions, and the shared publisher stages the
 Nub setup, the upstream build command instead of `vp pack`, and the two package directories are required differences because upstream already builds separate runtime and engine distributions.
 On Node 24, Nub also supplies the Temporal API used by retained shared value tests; direct `node --test` is not equivalent to `nub run test`.
 CI retains the upstream Node test runner, the Linux and Windows matrix, and Atlas for the optional HCL parity regression instead of the template's Vite+ checks.
-The minimal `flake.nix` supplies only the empty Linux shell required by the shared publisher, using the library template's locked Nixpkgs input.
-It installs no JavaScript runtime, package manager, or build tool through Nix.
+The `flake.nix` follows the library template's `supportedSystems`, `forEachSystem`, and `default`/`ci` shell structure, using its locked Nixpkgs input.
+The default shell obtains Nub from the official [`nubjs/nub` flake at `v0.9.6`](https://github.com/nubjs/nub/tree/v0.9.6), pinned by `flake.lock`, so local contributors need no global Nub installation.
+The Nub input retains its own upstream Nixpkgs pin rather than changing its build toolchain to the template's pin.
+The `ci` shell is empty because CI already installs Nub through its existing setup action.
+The publishing workflow explicitly selects `ci` in setup, build, and publisher steps to avoid building a second copy of Nub.
+No separate Node package is installed because Nub manages its runtime.
 The package manifests declare public npm publication without changing source-package privacy.
 The fork's publication entry point is `publish.yml`, restricted to the two maintained packages.
 Publication requires the npm scope owner's trusted-publisher configuration and separate npm approval of staged versions.
