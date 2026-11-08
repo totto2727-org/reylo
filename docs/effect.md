@@ -38,6 +38,10 @@ Reylo does not create a connection, extract an underlying driver, convert a Prom
 Client failures retain their original cause.
 Fiber interruption remains interruption.
 
+`QueryPreparationError`, `QueryExecutionError`, and `QueryDecodeError` use `Data.TaggedError` and support direct `yield*` and `Effect.catchTag` recovery.
+Their required `cause: unknown` retains the original encoder, client, or decoder failure, not an Effect `Cause` container.
+Effect represents typed failures, defects, and interruptions in `Cause` when observing an `Exit`; the query errors do not wrap or remap defects and interruptions.
+
 The executor identifies its SQL dialect.
 A query for another dialect fails before the client executes it.
 The maintained object-row decoding path supports SQLite.

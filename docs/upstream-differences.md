@@ -35,6 +35,7 @@ The optional `@totto2727/reylo/effect` subpath provides typed single-query Effec
 The existing context-dependent `run` delegates to the same preparation, execution, and decoding implementation.
 Its execution contract has no dependency on a concrete SQL client or infrastructure framework.
 Parameter encoding, SQLite object-row normalization, and cardinality reuse the existing query runtime.
+Preparation, execution, and decoding failures use Effect's `Data.TaggedError` with a required original cause, supporting direct yielding and tag-based recovery without hand-written error tags.
 Client acquisition, native batching, and transaction semantics remain application responsibilities.
 Effect is an optional peer and is imported only from the opt-in subpath, so existing runtime consumers do not load it.
 The affected areas are the runtime query metadata, the new Effect entry point, package exports, and regression tests.

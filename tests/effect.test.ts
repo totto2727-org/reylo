@@ -56,6 +56,25 @@ function failure<A, E>(effect: Effect.Effect<A, E>): E {
   return error.success;
 }
 
+for (const [ErrorType, message] of [
+  [QueryPreparationError, "Failed to prepare the query"],
+  [QueryExecutionError, "Failed to execute the query"],
+  [QueryDecodeError, "Failed to decode the query result"],
+] as const) {
+  test(`${ErrorType.name} supports direct Effect failure and tagged recovery`, () => {
+    const cause = new Error("original query failure");
+    const error = new ErrorType({ cause });
+    const program = Effect.gen(function*() {
+      return yield* error;
+    });
+    assert.equal(failure(program), error);
+    assert.equal(error.cause, cause);
+    assert.equal(error.message, message);
+    assert.ok(error instanceof Error);
+    assert.equal(Effect.runSync(program.pipe(Effect.catchTag(error._tag, (failure) => Effect.succeed(failure.cause)))), cause);
+  });
+}
+
 test("Effect prepares lazily, reorders and encodes inputs without executing", (t) => {
   const { db } = database(t);
   seed(db, "first");
@@ -243,6 +262,10 @@ function typeContract() {
   Effect.runSync(one);
   // @ts-expect-error execution errors require their original cause
   new QueryExecutionError({});
+  // @ts-expect-error preparation errors require their original cause
+  new QueryPreparationError({});
+  // @ts-expect-error decoding errors require their original cause
+  new QueryDecodeError({});
   const requiredCauses: ReadonlyArray<{ readonly cause: unknown }> = [
     new QueryPreparationError({ cause: null }),
     new QueryExecutionError({ cause: null }),

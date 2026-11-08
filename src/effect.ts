@@ -1,4 +1,4 @@
-import { Context, Effect } from "effect";
+import { Context, Data, Effect } from "effect";
 import type { ParamsArg, StandardQueryV1 } from "./index.ts";
 import { objectDecoder } from "./query-metadata.ts";
 
@@ -16,31 +16,22 @@ export interface BoundQuery<Output> extends SqlStatement {
   readonly [decodeRows]: (rows: readonly unknown[]) => Output;
 }
 
-export class QueryPreparationError extends Error {
-  readonly _tag = "QueryPreparationError";
-  override readonly cause: unknown;
-  constructor(options: { readonly cause: unknown }) {
-    super("Failed to prepare the query", options);
-    this.cause = options.cause;
-  }
+export class QueryPreparationError extends Data.TaggedError("QueryPreparationError")<{
+  readonly cause: unknown;
+}> {
+  override readonly message = "Failed to prepare the query";
 }
 
-export class QueryExecutionError extends Error {
-  readonly _tag = "QueryExecutionError";
-  override readonly cause: unknown;
-  constructor(options: { readonly cause: unknown }) {
-    super("Failed to execute the query", options);
-    this.cause = options.cause;
-  }
+export class QueryExecutionError extends Data.TaggedError("QueryExecutionError")<{
+  readonly cause: unknown;
+}> {
+  override readonly message = "Failed to execute the query";
 }
 
-export class QueryDecodeError extends Error {
-  readonly _tag = "QueryDecodeError";
-  override readonly cause: unknown;
-  constructor(options: { readonly cause: unknown }) {
-    super("Failed to decode the query result", options);
-    this.cause = options.cause;
-  }
+export class QueryDecodeError extends Data.TaggedError("QueryDecodeError")<{
+  readonly cause: unknown;
+}> {
+  override readonly message = "Failed to decode the query result";
 }
 
 /** Applications provide a layer whose executor returns object rows in SQLite storage forms. */

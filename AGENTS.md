@@ -18,6 +18,7 @@ Record fork-specific behavior and operational impact in [docs/upstream-differenc
 | Single-query Effects use a Layer-provided executor; native batches stay with the application. | `QueryExecutor` exposes only `dialect` and `execute`; `tests/effect.test.ts` exercises real SQLite through independent Layers. |
 | Effect integration remains optional for ordinary runtime users. | `tests/effect-optional.test.ts` executes SQLite with Effect imports forbidden. |
 | Query errors require their original cause in both constructor and instance types. | Constructor and structural type assertions in `tests/effect.test.ts`, checked by `nub run typecheck`. |
+| Effect query errors use `Data.TaggedError`, not manually tagged native errors. | Direct yielding and `Effect.catchTag` recovery tests in `tests/effect.test.ts`. |
 
 ## Repository map
 
