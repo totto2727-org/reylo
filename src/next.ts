@@ -40,11 +40,11 @@ export function withReylo<Config extends NextConfig>(config: Config = {} as Conf
       ...turbopack,
       // Each .sql file becomes a module that runs its statement, on the server only: a client
       // component that imports one fails the build. A rule of the project's own for *.sql wins.
-      rules: { "*.sql": { condition: { not: "browser" }, loaders: ["reylo/turbopack"], as: "*.js" }, ...turbopack?.rules },
+      rules: { "*.sql": { condition: { not: "browser" }, loaders: ["@totto2727/reylo/turbopack"], as: "*.js" }, ...turbopack?.rules },
     },
     webpack(webpackConfig: any, context: any) {
       const out = webpack ? webpack(webpackConfig, context) : webpackConfig;
-      if (context.isServer) out.module.rules.push({ test: /\.sql$/, use: "reylo/webpack" });
+      if (context.isServer) out.module.rules.push({ test: /\.sql$/, use: "@totto2727/reylo/webpack" });
       return out;
     },
     ...(check && {

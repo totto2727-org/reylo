@@ -19,6 +19,6 @@ The `.sql` loader hosts it: `packages/<database>/engine/`, the component as jco 
 
 - `engine/build.sh --prepare` prepares the patched `pg_query` copy (`postgres/.patched/`), the SQLite amalgamation (`sqlite/.sqlite/`) and the patched tokio-postgres (`wasip2/.patched/`). Every cargo command in the workspace needs it first.
 - `cargo test -p reylo-engine-core -p reylo-engine-postgres -p reylo-engine-sqlite -p reylo-engine-mysql -p reylo-engine -p reylo-engine-native -p reylo-oracle` runs the engine's native tests (the oracle's dependency gives `reylo-engine` its three client features).
-- `engine/build.sh` builds every database's component into `packages/<database>/engine/` (`engine/build.sh postgres` builds one). It needs wasi-sdk 34, a toolchain with the `wasm32-wasip2` target (rustup's has it; Homebrew's `rustc` does not) and jco from the root's install (`nub install`).
+- `engine/build.sh` builds every database's component into `packages/<database>/engine/` (`engine/build.sh postgres` builds one). It needs wasi-sdk 34, a toolchain with the `wasm32-wasip2` target (rustup's has it; Homebrew's `rustc` does not) and a local `@bytecodealliance/jco@1.39.0` installation, which is not part of this fork's normal dependencies.
 
 The components are committed so a checkout works without a Rust toolchain. Rebuild them with every change to the engine's sources: each crate's `build.rs` hashes its own sources, a database's fingerprint combines core's hash with its own, and the component's `host` hash covers the program around it (`native/`, `facade/`, `wasip2/`).

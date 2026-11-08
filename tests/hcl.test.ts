@@ -168,7 +168,7 @@ test("the mapper and runtime loader consume HCL directly without running migrati
     const built = await sqlModule(join(root, "get.sql"), SELECT);
     assert.ok(built.watched.includes(join(root, "schema.hcl")));
     const out = join(root, "get.mjs");
-    writeFileSync(out, built.code.replace('from "reylo"', `from ${JSON.stringify(INDEX)}`));
+    writeFileSync(out, built.code.replace('from "@totto2727/reylo"', `from ${JSON.stringify(INDEX)}`));
     const query = (await import(pathToFileURL(out).href)).default;
     // The application owns its schema and migrations. The loader did not create this table.
     assert.equal(db.prepare("select count(*) as n from sqlite_schema where name = 'users'").get()!.n, 0);

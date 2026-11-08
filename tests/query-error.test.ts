@@ -1,16 +1,13 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { createRequire } from "node:module";
 import { DatabaseSync } from "node:sqlite";
 import { join } from "node:path";
 import { defineQuery, type MysqlClient, type MysqlCode, type MysqlQueryError, type PostgresClient, type PostgresCondition, type PostgresQueryError, type Query, type SqliteCode, type SqliteQueryError } from "../src/index.ts";
 import { readQueryError, readQueryErrorSync } from "../src/query-error.ts";
-import { DRIVERS, MYSQL, pgLive, mysqlLive, postgresDatabase, driver } from "./helpers.ts";
 
 // `.try()` and the database's error it reads from each driver's own (src/query-error.ts). The
 // drivers' errors below are the ones each throws, measured on the real package (lab/driver-matrix
-// checks them through `.try()` on every driver). Postgres and MySQL run on throwaway servers
-// (REYLO_TEST_PG, REYLO_TEST_MYSQL), each test in a database of its own.
+// checks them through `.try()` on every driver).
 
 /** A driver's error: an Error with the driver's own fields. */
 const thrown = (message: string, fields: Record<string, unknown> = {}, Class: new (message: string) => Error = Error) => Object.assign(new Class(message), fields);
@@ -232,90 +229,7 @@ test("trySync returns the value or the database's error on a synchronous SQLite 
   }
 });
 
-test("Postgres: try reads each constraint, the syntax error's position and a function's own code, on pg and postgres.js", { skip: pgLive }, async () => {
-  const pg = driver("pg");
-  const own = await postgresDatabase("reylo_try");
-  const url = new URL(own.url);
-  const sql = own.sql;
-  const client = new pg.Client({ connectionString: url.href });
-  await client.connect();
-  try {
-    await sql.unsafe(`
-      create domain positive as int check (value > 0);
-      create table parents (id int primary key);
-      create table users (id int primary key, email text not null constraint users_email_key unique, age positive, parent int references parents (id), constraint adult check (age >= 18));
-      create function boom() returns int language plpgsql as $$ begin raise exception 'custom' using errcode = 'U0001'; end $$;
-      insert into users (id, email, age) values (1, 'a', 20);
-    `);
-    const write = (statement: string) => defineQuery({ dialect: "postgres", sql: statement, params: [] });
-    const cases: [string, Record<string, unknown>][] = [
-      ["insert into users (id, email, age) values (2, 'a', 20)", { code: "23505", condition: "unique_violation", schema: "public", table: "users", column: undefined, constraint: "users_email_key", detail: "Key (email)=(a) already exists." }],
-      ["insert into users (id, email, age) values (3, null, 20)", { code: "23502", condition: "not_null_violation", schema: "public", table: "users", column: "email", constraint: undefined }],
-      ["insert into users (id, email, age, parent) values (4, 'b', 20, 9)", { code: "23503", condition: "foreign_key_violation", table: "users", constraint: "users_parent_fkey" }],
-      ["insert into users (id, email, age) values (5, 'c', 17)", { code: "23514", condition: "check_violation", table: "users", constraint: "adult" }],
-      ["insert into users (id, email, age) values (6, 'd', -1)", { code: "23514", condition: "check_violation", dataType: "positive", constraint: "positive_check" }],
-      // `frm` reads as the column's alias, so the error is at `users`.
-      ["select 1 frm users", { code: "42601", condition: "syntax_error", position: 14 }],
-      ["select boom()", { code: "U0001", condition: undefined, where: "PL/pgSQL function boom() line 1 at RAISE" }],
-    ];
-    for (const [statement, expected] of cases) {
-      for (const [driver, db] of [["postgres.js", sql], ["pg", client]] as const) {
-        const result = await write(statement).try(db);
-        assert.ok(result.error, `${driver}: ${statement}`);
-        assert.equal(result.error.severity, "ERROR");
-        assert.deepEqual(Object.fromEntries(Object.keys(expected).map((k) => [k, (result.error as unknown as Record<string, unknown>)[k]])), expected, `${driver}: ${statement}`);
-      }
-    }
-  } finally {
-    await client.end();
-    await own.drop();
-  }
-});
 
-test("MySQL: try reads each constraint and a signal's own number, on mysql2 and mariadb", { skip: mysqlLive }, async () => {
-  const mysql = createRequire(join(DRIVERS, "mysql2", "package.json"))("mysql2/promise");
-  const mariadb = createRequire(join(DRIVERS, "mariadb", "package.json"))("mariadb");
-  const server = new URL(MYSQL!);
-  const options = { host: server.hostname, port: Number(server.port), user: decodeURIComponent(server.username) || "root", password: decodeURIComponent(server.password) };
-  const name = `reylo_try_${process.pid}`;
-  const admin = await mysql.createConnection(options);
-  await admin.query(`drop database if exists ${name}`);
-  await admin.query(`create database ${name}`);
-  const db = await mysql.createConnection({ ...options, database: name, multipleStatements: true });
-  const maria = await mariadb.createConnection({ ...options, database: name, allowPublicKeyRetrieval: true });
-  try {
-    await db.query(`
-      create table parents (id int primary key);
-      create table users (id int primary key, email varchar(10) not null unique, age int, parent int, constraint adult check (age >= 18), constraint users_parent foreign key (parent) references parents (id));
-      create procedure boom() signal sqlstate '45000' set mysql_errno = 5001, message_text = 'custom';
-      insert into users (id, email, age) values (1, 'a', 20);
-    `);
-    const write = (statement: string) => defineQuery({ dialect: "mysql", sql: statement, params: [] });
-    const cases: [string, Record<string, unknown>][] = [
-      ["insert into users (id, email, age) values (2, 'a', 20)", { code: "ER_DUP_ENTRY", errno: 1062, sqlState: "23000", key: "users.email" }],
-      ["insert into users (id, email, age) values (1, 'z', 20)", { code: "ER_DUP_ENTRY", key: "users.PRIMARY" }],
-      ["insert into users (id, email, age) values (3, null, 20)", { code: "ER_BAD_NULL_ERROR", column: "email" }],
-      ["insert into users (id, age) values (3, 20)", { code: "ER_NO_DEFAULT_FOR_FIELD", column: "email" }],
-      ["insert into users (id, email, age, parent) values (4, 'b', 20, 9)", { code: "ER_NO_REFERENCED_ROW_2", errno: 1452, table: "users", constraint: "users_parent" }],
-      ["insert into users (id, email, age) values (5, 'c', 17)", { code: "ER_CHECK_CONSTRAINT_VIOLATED", errno: 3819, constraint: "adult" }],
-      ["insert into users (id, email, age) values (6, 'abcdefghijklmnop', 20)", { code: "ER_DATA_TOO_LONG", column: "email" }],
-      ["selec 1", { code: "ER_PARSE_ERROR", errno: 1064, sqlState: "42000" }],
-      ["call boom()", { code: undefined, errno: 5001, sqlState: "45000", message: "custom" }],
-    ];
-    for (const [statement, expected] of cases) {
-      for (const [driver, client] of [["mysql2", db], ["mariadb", maria]] as const) {
-        const result = await write(statement).try(client);
-        assert.ok(result.error, `${driver}: ${statement}`);
-        assert.deepEqual(Object.fromEntries(Object.keys(expected).map((k) => [k, (result.error as unknown as Record<string, unknown>)[k]])), expected, `${driver}: ${statement}`);
-      }
-    }
-  } finally {
-    await maria.end();
-    await db.end();
-    await admin.query(`drop database if exists ${name}`);
-    await admin.end();
-  }
-});
 
 // The types alone: never run, checked by the type check.
 export async function types(pg: Query<{}, { id: number }, "one", "postgres">, my: Query<{}, never, "none", "mysql">, lite: Query<{}, never, "none", "sqlite">, pgDb: PostgresClient, myDb: MysqlClient, liteDb: DatabaseSync) {

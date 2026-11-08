@@ -170,12 +170,12 @@ test("reylo generate says once that the type check does not read url, and names 
   assert.doesNotMatch(both.out, /does not read url/);
 });
 
-test("a program run under the reylo/register preload prints nothing on stderr: node:wasi's ExperimentalWarning is swallowed", () => {
+test("a program run under the @totto2727/reylo/register preload prints nothing on stderr: node:wasi's ExperimentalWarning is swallowed", () => {
   const root = realpathSync(mkdtempSync(join(tmpdir(), "reylo-register-")));
   writeFileSync(join(root, "package.json"), `{ "type": "module" }`);
   // The module a `.sql` file becomes imports reylo, as a lab reaches it: through a link to this repository.
-  mkdirSync(join(root, "node_modules"));
-  symlinkSync(join(import.meta.dirname, ".."), join(root, "node_modules", "reylo"));
+  mkdirSync(join(root, "node_modules", "@totto2727"), { recursive: true });
+  symlinkSync(join(import.meta.dirname, ".."), join(root, "node_modules", "@totto2727/reylo"));
   const db = new DatabaseSync(join(root, "app.db"));
   db.exec("create table users (id integer primary key, name text not null); insert into users (name) values ('ada')");
   db.close();

@@ -1,7 +1,0 @@
-node_modules/
-.source/
-.react-router/
-build/
-*.tsbuildinfo
-.live/
-.share/

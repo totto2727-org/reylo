@@ -1,5 +1,5 @@
 // reylo's build-time half lives in the engine packages. Each one carries it as
-// `@reylosql/<database>/tooling` (src/tooling.ts), so that reylo itself holds the run time and the
+// `@totto2727/reylo-<database>/tooling` (src/tooling.ts), so that reylo itself holds the run time and the
 // entry points a project names: the build steps, the preload's worker, the content mapper and the
 // CLI. An entry point loads it the first time it runs, from the project's install first and then
 // from reylo's own, as the engine itself is found (src/engine.ts). Every engine package carries the
@@ -27,7 +27,7 @@ export type Tooling = {
   runCli(args: string[]): Promise<number>;
 };
 
-const PACKAGES = ["@reylosql/postgres", "@reylosql/mysql", "@reylosql/sqlite"];
+const PACKAGES = ["@totto2727/reylo-postgres", "@totto2727/reylo-mysql", "@totto2727/reylo-sqlite"];
 const VERSION: string = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")).version;
 
 let loaded: Promise<Tooling> | undefined;
@@ -76,7 +76,7 @@ async function load(from: string): Promise<Tooling> {
     }
   }
   if (other) throw new Error(`reylo ${VERSION} runs with ${other.name} ${VERSION}, and the one installed is ${other.version ?? "of no version"} (${other.dir}): npm install -D ${other.name}@${VERSION}`);
-  throw new Error(`reylo's build steps run in a database's engine, and none is installed: npm install -D @reylosql/postgres, @reylosql/mysql or @reylosql/sqlite, the one for your database`);
+  throw new Error(`reylo's build steps run in a database's engine, and none is installed: npm install -D @totto2727/reylo-postgres, @totto2727/reylo-mysql or @totto2727/reylo-sqlite, the one for your database`);
 }
 
 function versionAt(manifest: string): string | undefined {

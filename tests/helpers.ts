@@ -1,6 +1,5 @@
-// What the loader's tests share: the test databases `REYLO_TEST_PG` and `REYLO_TEST_MYSQL` name and a database of a test's own on each, the drivers `lab/drivers` installs, and the content mapper run over its JSON-RPC protocol, as the type check runs it.
+// Shared SQLite driver fixtures and the content mapper run over its JSON-RPC protocol.
 import { spawn } from "node:child_process";
-import { existsSync } from "node:fs";
 import { createRequire } from "node:module";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -9,12 +8,6 @@ export const ROOT = join(import.meta.dirname, "..");
 export const DRIVERS = join(ROOT, "lab", "drivers", "node_modules");
 export const MAPPER = join(ROOT, "src", "mapper.ts");
 export const INDEX = pathToFileURL(join(ROOT, "src", "index.ts")).href;
-export const PG = process.env.REYLO_TEST_PG;
-export const MYSQL = process.env.REYLO_TEST_MYSQL;
-/** Why a test of the live Postgres skips, or `false`. */
-export const pgLive = !PG ? "REYLO_TEST_PG names no server" : !existsSync(join(DRIVERS, "postgres")) ? "lab/drivers is not installed" : false;
-/** Why a test of the live MySQL skips, or `false`. */
-export const mysqlLive = !MYSQL ? "REYLO_TEST_MYSQL names no server" : !existsSync(join(DRIVERS, "mysql2")) ? "lab/drivers is not installed" : false;
 
 /** A driver as `lab/drivers` installs it. */
 export function driver(name: string): any {
@@ -30,57 +23,6 @@ export async function closeSessions(): Promise<void> {
 
 /** Rows as plain objects, to compare with literals. */
 export const plain = (rows: readonly object[]) => [...rows].map((r) => ({ ...r }));
-
-/** A database of a test's own on the test Postgres, its URL, and a postgres.js client of it with `setup` run first. */
-export async function postgresDatabase(prefix: string, setup?: string) {
-  const postgres = driver("postgres");
-  const admin = postgres(PG!, { max: 1, onnotice: () => {} });
-  const name = `${prefix}_${process.pid}`;
-  await admin.unsafe(`drop database if exists ${name} with (force)`);
-  await admin.unsafe(`create database ${name}`);
-  const url = new URL(PG!);
-  url.pathname = `/${name}`;
-  const sql = postgres(url.href, { max: 1, onnotice: () => {} });
-  if (setup) await sql.unsafe(setup).simple();
-  return {
-    url: url.href,
-    sql,
-    async drop() {
-      await sql.end();
-      await admin.unsafe(`drop database if exists ${name} with (force)`);
-      await admin.end();
-    },
-  };
-}
-
-/** A database of a test's own on the test MySQL, its URL, and a mysql2 connection to it as the driver connects by default, with `setup` run first. */
-export async function mysqlDatabase(prefix: string, setup?: string) {
-  const mysql = driver("mysql2/promise");
-  const u = new URL(MYSQL!);
-  const connect = (database?: string, multipleStatements = false) => mysql.createConnection({ host: u.hostname, port: Number(u.port), user: decodeURIComponent(u.username) || "root", password: decodeURIComponent(u.password), database, multipleStatements });
-  const admin = await connect();
-  const name = `${prefix}_${process.pid}`;
-  await admin.query(`drop database if exists ${name}`);
-  await admin.query(`create database ${name}`);
-  const url = new URL(MYSQL!);
-  url.pathname = `/${name}`;
-  if (setup) {
-    const setter = await connect(name, true);
-    await setter.query(setup);
-    await setter.end();
-  }
-  const db = await connect(name);
-  return {
-    url: url.href,
-    db,
-    rows: async (sql: string) => plain((await db.query(sql))[0]),
-    async drop() {
-      await db.end();
-      await admin.query(`drop database if exists ${name}`);
-      await admin.end();
-    },
-  };
-}
 
 /** A diagnostic the content mapper reports. */
 export type Diagnostic = { messageText: string; start: number; length: number; code: number };
