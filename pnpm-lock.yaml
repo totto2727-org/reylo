@@ -16,10 +16,10 @@ importers:
         version: link:packages/sqlite
       '@types/node':
         specifier: ^26.6.1
-        version: 26.6.1
+        version: 26.6.6
       effect:
         specifier: ^4.0.6
-        version: 4.1.2
+        version: 4.1.5
       esbuild:
         specifier: ^0.28.2
         version: 0.28.2
@@ -387,8 +387,8 @@ packages:
     resolution: {integrity: sha512-agfyNUvoCMFJJnxYTkdCsdrVVt6+qrGYFoOP7Tq9/C/HuLG8oiDor6XTE433bg+MCId5/9fuwBA4qHDyrNiBlQ==, tarball: https://registry.npmjs.org/@totto2727/oxlint/-/oxlint-0.2.0.tgz}
     engines: {node: '>=24'}
 
-  '@types/node@26.6.1':
-    resolution: {integrity: sha512-VqGJBMCtdhqkBUCcBLvywI0NJ+KLuVzgNnlBUNFOQjqVxzo2lxLUNg1DSey8+u2u6ktswSAxg+s68QLzWHNOuA==, tarball: https://registry.npmjs.org/@types/node/-/node-26.6.1.tgz}
+  '@types/node@26.6.6':
+    resolution: {integrity: sha512-MzQj+8Kx3XI40OmUAE6Qoh58ZMNstNNMwn2nfd3qWsfe7nDNSqJNzes4njhz6AHwrSHOffSLwXU6yb474Q4aog==, tarball: https://registry.npmjs.org/@types/node/-/node-26.6.6.tgz}
 
   '@typescript/typescript-darwin-arm64@7.1.0-dev.20260918.1':
     resolution: {integrity: sha512-i263kT2BBuTn7LC8hGNGmWXtFqON6F8H4GAXZg2b4VhotLazpJ7O7FRiv6VABk7xuNmNPtl0z3Iay4aytTq6lg==, tarball: https://registry.npmjs.org/@typescript/typescript-darwin-arm64/-/typescript-darwin-arm64-7.1.0-dev.20260918.1.tgz}
@@ -434,6 +434,9 @@ packages:
 
   effect@4.1.2:
     resolution: {integrity: sha512-d3Oah1WyKxFLFh19yWheS5IXIVaITzxZ71JkE1rkUozq/6EcJSU5nPk5bF2QrSygZ3SQoiNQB8TsxFriyMeMaQ==, tarball: https://registry.npmjs.org/effect/-/effect-4.1.2.tgz}
+
+  effect@4.1.5:
+    resolution: {integrity: sha512-xyR20KhQI0vg2gD8ILUSQRTTESEYJ0JKdP+QD8J37xbwPTqXRxFM/l0+vUVD9fuSvoYruoTqyt33C4FZv1s4TQ==, tarball: https://registry.npmjs.org/effect/-/effect-4.1.5.tgz}
 
   esbuild@0.28.2:
     resolution: {integrity: sha512-HKVLS8dvII+xoKW9kmqxbRKrnWEXfJJr/FZhhJmiqIB0e053QNYFqOBouTMO/k5sID4MvCiUCvv8b9M4h32wIA==, tarball: https://registry.npmjs.org/esbuild/-/esbuild-0.28.2.tgz}
@@ -644,7 +647,7 @@ snapshots:
       - oxlint-tsgolint
       - vite-plus
 
-  '@types/node@26.6.1':
+  '@types/node@26.6.6':
     dependencies:
       undici-types: 8.9.0
 
@@ -670,6 +673,8 @@ snapshots:
     optional: true
 
   effect@4.1.2: {}
+
+  effect@4.1.5: {}
 
   esbuild@0.28.2:
     optionalDependencies:
