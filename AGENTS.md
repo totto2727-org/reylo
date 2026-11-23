@@ -49,6 +49,7 @@ From the repository root:
 
 ```sh
 nub install
+nub run lint
 nub run typecheck
 nub run test
 nub run build

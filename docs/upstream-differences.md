@@ -150,6 +150,12 @@ All install roots enable `strictDepBuilds` so a newly introduced, unreviewed lif
 The YAML setting covers pnpm, while Nub 0.9.6 reads the equivalent root `.npmrc` setting inherited by the nested projects.
 These are development-install settings, not runtime source or upstream engine changes, and the existing release-age policy is unchanged.
 
+## Shared TypeScript lint
+
+Relative to the upstream release at `7a3928a8ff4dfb387b34ed584ab1319aa72f3f3b`, the fork adds `nub run lint` to local checks and CI.
+Oxlint loads `@totto2727/oxlint` to check explicit local import extensions, required causes where declared on errors, lint suppression reasons, ESLint disable comments, and JSX script tags in source, tests, examples, and tooling.
+These development-only checks do not change the runtime, published package contents, or native engine.
+
 ## Fork npm publication
 
 `.github/workflows/publish.yml` runs on pushes to `main`, without a tag or release trigger.

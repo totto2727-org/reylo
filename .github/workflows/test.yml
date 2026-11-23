@@ -31,6 +31,7 @@ jobs:
           node-version: '24'
       - uses: ariga/setup-atlas@v0
       - run: nub install --frozen-lockfile
+      - run: nub run lint
       - run: nub run typecheck
       - run: nub run test
       - run: nub run build
