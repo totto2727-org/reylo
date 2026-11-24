@@ -408,23 +408,45 @@ export const utf8 = function utf8(bytes: Uint8Array): string {
 };
 const {fromHex} = (Uint8Array as unknown as { fromHex?: (hex: string) => Uint8Array });
 
-/** Bytea's text: hex (`\x0102ff`, the server's default) or the escape format (`bytea_output = escape`). */
-export const bytea = function bytea(x: string): Uint8Array {
-  if (x.charCodeAt(0) === 92 && x.charCodeAt(1) === 120) {
-    const hex = x.slice(2);
+const BYTE_ESCAPE = "\\";
+const BYTE_HEX_PREFIX = "\\x";
+const HEX_DIGITS_PER_BYTE = 2;
+const HEX_RADIX = 16;
+const OCTAL_DIGITS_PER_BYTE = 3;
+const OCTAL_RADIX = 8;
+const BACKSLASH_BYTE = 0x5C;
+
+/**
+ * @param {string} text - The PostgreSQL bytea text in the default hex or escape format.
+ * @returns {Uint8Array} The bytes in their original order.
+ */
+export const bytea = function bytea(text: string): Uint8Array {
+  if (text.startsWith(BYTE_HEX_PREFIX)) {
+    const hex = text.slice(BYTE_HEX_PREFIX.length);
     if (NodeBuffer) {return NodeBuffer.from(hex, "hex");}
     if (fromHex) {return fromHex(hex);}
-    const out = new Uint8Array(hex.length / 2);
-    for (let i = 0; i < out.length; i++) {out[i] = Number.parseInt(hex.slice(2 * i, 2 * i + 2), 16);}
-    return out;
+    return Uint8Array.from({ length: hex.length / HEX_DIGITS_PER_BYTE }, (_unused, index) => {
+      const start = index * HEX_DIGITS_PER_BYTE;
+      return Number.parseInt(hex.slice(start, start + HEX_DIGITS_PER_BYTE), HEX_RADIX);
+    });
   }
-  const out: number[] = [];
-  for (let i = 0; i < x.length; i++) {
-    if (x[i] !== "\\") {out.push(x.charCodeAt(i));}
-    else if (x[i + 1] === "\\") {out.push(92), i++;}
-    else {out.push(Number.parseInt(x.slice(i + 1, i + 4), 8)), (i += 3);}
+  const bytes: number[] = [];
+  let offset = TEXT_START;
+  while (offset < text.length) {
+    const afterEscape = offset + BYTE_ESCAPE.length;
+    if (text[offset] !== BYTE_ESCAPE) {
+      // oxlint-disable-next-line unicorn/prefer-code-point -- Bytea's fallback consumes a UTF-16 code unit at a time, including escape text a driver passes through.
+      bytes.push(text.charCodeAt(offset));
+      offset = afterEscape;
+    } else if (text[afterEscape] === BYTE_ESCAPE) {
+      bytes.push(BACKSLASH_BYTE);
+      offset = afterEscape + BYTE_ESCAPE.length;
+    } else {
+      offset = afterEscape + OCTAL_DIGITS_PER_BYTE;
+      bytes.push(Number.parseInt(text.slice(afterEscape, offset), OCTAL_RADIX));
+    }
   }
-  return Uint8Array.from(out);
+  return Uint8Array.from(bytes);
 };
 
 interface TextCursor {
@@ -570,10 +592,12 @@ export const parseArray = (text: string, element: Decoder, delimiter = ","): unk
   return readArray({ offset, text }, { decode: element, delimiter });
 };
 
+const ARRAY_KIND_SUFFIX = "[]";
+
 /** The decoder of a Postgres value of `kind` from its text; `delim` is an array's (`;` for `box[]`). */
 export const textDecoder = function textDecoder(kind: Kind, delim = ","): Decoder {
-  if (kind.endsWith("[]")) {
-    const element = textDecoder(kind.slice(0, -2), delim);
+  if (kind.endsWith(ARRAY_KIND_SUFFIX)) {
+    const element = textDecoder(kind.slice(TEXT_START, -ARRAY_KIND_SUFFIX.length), delim);
     return (x) => parseArray(x, element, delim);
   }
   return TEXT_DECODERS[kind as ScalarKind] ?? identity;
@@ -598,6 +622,9 @@ export class ParameterError extends TypeError {}
  */
 export const zoned = /(?:\d:\d\d(?::\d\d(?:\.\d+)?)?(?:\s*(?:z|[+-]\d\d?(?::?\d\d){0,2})|\s+[a-z][\w/+-]*)|^-?infinity|^epoch|^now)(?:\s+bc)?$/i;
 
+const DISPLAY_TEXT_LIMIT = 60;
+const ELLIPSIS = "...";
+
 /** A value as a message about a parameter names it: its kind, or a short form of itself. */
 export function describe(v: unknown): string {
   if (matchesNull(v)) {return "null";}
@@ -605,7 +632,7 @@ export function describe(v: unknown): string {
   if (Array.isArray(v)) {return "an array";}
   if (v instanceof Uint8Array) {return "binary data";}
   if (matchesBigInt(v)) {return `${v}n`;}
-  if (matchesString(v)) {return JSON.stringify(v.length > 60 ? `${v.slice(0, 57)}...` : v);}
+  if (matchesString(v)) {return JSON.stringify(v.length > DISPLAY_TEXT_LIMIT ? `${v.slice(TEXT_START, DISPLAY_TEXT_LIMIT - ELLIPSIS.length)}${ELLIPSIS}` : v);}
   if (hasObjectType(v)) {return "an object";}
   return String(v);
 }
@@ -650,6 +677,13 @@ export const bigInteger = function bigInteger(v: number | bigint | string, colum
   return v;
 };
 
+const FALSE_VALUE = 0;
+const TRUE_VALUE = 1;
+const FALSE_BIGINT = BigInt(FALSE_VALUE);
+const TRUE_BIGINT = BigInt(TRUE_VALUE);
+const BIT_BYTE_COUNT = 1;
+const FIRST_BIT_BYTE = 0;
+
 /**
  * A truth value as a boolean: true, false, 1, 0, `1n`, `0n`, `t`, `f`, `true`, `false`, `1`, `0`,
  * and a BIT(1)'s one byte. MySQL and SQLite have no boolean type and store one as an integer (a
@@ -662,11 +696,11 @@ export const truth = function truth(v: unknown, column: string): boolean {
       return v;
     }
     case "number": {
-      if (v === 0 || v === 1) {return v === 1;}
+      if (v === FALSE_VALUE || v === TRUE_VALUE) {return v === TRUE_VALUE;}
       break;
     }
     case "bigint": {
-      if (v === BigInt(0) || v === BigInt(1)) {return v === BigInt(1);}
+      if (v === FALSE_BIGINT || v === TRUE_BIGINT) {return v === TRUE_BIGINT;}
       break;
     }
     case "string": {
@@ -675,11 +709,14 @@ export const truth = function truth(v: unknown, column: string): boolean {
       break;
     }
     case "object": {
-      if (v instanceof Uint8Array && v.length === 1 && v[0]! <= 1) {return v[0] === 1;}
+      if (v instanceof Uint8Array && v.length === BIT_BYTE_COUNT) {
+        const bit = v[FIRST_BIT_BYTE];
+        if (!matchesUndefined(bit) && bit <= TRUE_VALUE) {return v[FIRST_BIT_BYTE] === TRUE_VALUE;}
+      }
       break;
     }
   }
-  const shown = v instanceof Uint8Array ? `the bytes 0x${Array.from(v, (b) => b.toString(16).padStart(2, "0")).join("")}` : (matchesString(v) ? JSON.stringify(v) : String(v));
+  const shown = v instanceof Uint8Array ? `the bytes 0x${Array.from(v, (byte) => byte.toString(HEX_RADIX).padStart(HEX_DIGITS_PER_BYTE, "0")).join("")}` : (matchesString(v) ? JSON.stringify(v) : String(v));
   return refuseTruth(column, shown);
 };
 
@@ -699,6 +736,9 @@ function validDate(d: Date, column: string): void {
   if (Number.isNaN(d.getTime())) {throw new DecodeError(`Column "${column}": the driver returned an Invalid Date, which is how Bun.sql decodes a date or timestamp before 1 AD. Reylo refuses it rather than return a wrong value.`);}
 }
 
+const FIRST_ISO_MONTH = 1;
+const MILLISECOND_DIGITS = 3;
+
 /**
  * A Date a driver read as UTC (Bun.sql's date and timestamp) back to the text the server's would
  * decode to: `YYYY-MM-DD`, or with `T` and the fraction the driver kept, the year as `isoYear`
@@ -706,22 +746,24 @@ function validDate(d: Date, column: string): void {
  */
 const utcText = function (d: Date, kind: "date" | "timestamp", column: string): string {
   validDate(d, column);
-  const date = `${isoYear(d.getUTCFullYear())}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())}`;
+  const date = `${isoYear(d.getUTCFullYear())}-${pad(d.getUTCMonth() + FIRST_ISO_MONTH)}-${pad(d.getUTCDate())}`;
   if (kind === "date") {return date;}
   const ms = d.getUTCMilliseconds();
-  return `${date}T${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}:${pad(d.getUTCSeconds())}${ms ? `.${pad(ms, 3).replace(/0+$/u, "")}` : ""}`;
+  return `${date}T${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}:${pad(d.getUTCSeconds())}${ms ? `.${pad(ms, MILLISECOND_DIGITS).replace(/0+$/u, "")}` : ""}`;
 };
 
 const isBytes = (v: unknown): v is Uint8Array => v instanceof Uint8Array;
+const EMPTY_REMAINDER = 0;
+const FLOAT32_BYTES = Float32Array.BYTES_PER_ELEMENT;
 
 /**
  * A MySQL VECTOR's floats from its bytes, 32-bit and little-endian, which mariadb and PlanetScale
  * hand over as they are (mysql2 decodes them itself).
  */
 export const float32s = function float32s(bytes: Uint8Array, column: string): number[] {
-  if (bytes.byteLength % 4 !== 0) {throw new DecodeError(`Column "${column}" is a VECTOR, whose value is 4 bytes per 32-bit float, and holds ${bytes.byteLength} bytes.`);}
+  if (bytes.byteLength % FLOAT32_BYTES !== EMPTY_REMAINDER) {throw new DecodeError(`Column "${column}" is a VECTOR, whose value is 4 bytes per 32-bit float, and holds ${bytes.byteLength} bytes.`);}
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
-  return Array.from({ length: bytes.byteLength / 4 }, (_unused, index) => view.getFloat32(index * 4, true));
+  return Array.from({ length: bytes.byteLength / FLOAT32_BYTES }, (_unused, index) => view.getFloat32(index * FLOAT32_BYTES, true));
 };
 
 /**
@@ -731,8 +773,8 @@ export const float32s = function float32s(bytes: Uint8Array, column: string): nu
  */
 export const coerce = function coerce(kind: Kind, v: unknown, column: string, delim = ","): unknown {
   if (matchesNull(v) || matchesUndefined(v)) {return null;}
-  if (kind.endsWith("[]")) {
-    const element = kind.slice(0, -2);
+  if (kind.endsWith(ARRAY_KIND_SUFFIX)) {
+    const element = kind.slice(TEXT_START, -ARRAY_KIND_SUFFIX.length);
     if (matchesString(v)) {return parseArray(v, (s) => coerce(element, s, column), delim);}
     if (Array.isArray(v)) {return v.map((e) => (Array.isArray(e) ? coerce(kind, e, column, delim) : coerce(element, e, column)));}
     // A MySQL VECTOR's bytes: no driver gives any other array of floats as bytes.
@@ -765,14 +807,14 @@ export const coerce = function coerce(kind: Kind, v: unknown, column: string, de
     case "timestamp": {
       if (v instanceof Date) {return utcText(v, kind as "date" | "timestamp", column);}
       // Bun.sql's `infinity`.
-      if (v === Infinity || v === -Infinity) {return v > 0 ? "infinity" : "-infinity";}
+      if (v === Infinity || v === -Infinity) {return v === Infinity ? "infinity" : "-infinity";}
       return v;
     }
     case "timestamptz": {
       if (matchesString(v)) {return instant(v);}
       if (v instanceof Date) {return instantOfDate(v, column);}
       // Bun.sql's `infinity`.
-      if (v === Infinity || v === -Infinity) {return v > 0 ? "infinity" : "-infinity";}
+      if (v === Infinity || v === -Infinity) {return v === Infinity ? "infinity" : "-infinity";}
       return v;
     }
     case "interval": {
@@ -790,7 +832,7 @@ export const coerce = function coerce(kind: Kind, v: unknown, column: string, de
       if (v instanceof ArrayBuffer) {return new Uint8Array(v);}
       // D1's BLOB is an array of numbers; mariadb's and Bun.sql's BIT(1) a truth value.
       if (Array.isArray(v)) {return Uint8Array.from(v as number[]);}
-      if (matchesBoolean(v)) {return Uint8Array.of(v ? 1 : 0);}
+      if (matchesBoolean(v)) {return Uint8Array.of(v ? TRUE_VALUE : FALSE_VALUE);}
       if (matchesString(v)) {return bytea(v);}
       return v;
     }
