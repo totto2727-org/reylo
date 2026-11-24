@@ -3,33 +3,47 @@
 // Dist/sqlite bundles the build-time TypeScript and HCL parser. Its optional dependencies
 // Install the upstream native engine for the consumer's platform at the pinned upstream version.
 // Repository manifests remain private and point to sources. Published manifests point to JS.
+// oxlint-disable-next-line rules/no-node-imports -- The build invokes the native Node launcher for TypeScript.
 import { execFileSync } from "node:child_process";
+// oxlint-disable-next-line rules/no-node-imports -- Verify that Reylo can synchronously load the published tool with Node's require.
 import { createRequire } from "node:module";
-import { copyFileSync, cpSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
-import { build as bundle, transformSync } from "esbuild";
+// oxlint-disable-next-line rules/no-node-imports -- The build performs file operations directly on the package staging directories.
+import { copyFile, cp, mkdir, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
+// oxlint-disable-next-line rules/no-node-imports -- Package staging uses the host's filesystem paths.
+import path from "node:path";
+import { build as bundle, transform } from "esbuild";
+// oxlint-disable-next-line import/no-relative-parent-imports -- Use the same pinned upstream version as the runtime and generated manifests.
 import { ENGINE_VERSION } from "../src/engine-version.ts";
 
+const { join } = path;
 const root = join(import.meta.dirname, "..");
 const dist = join(root, "dist");
-const js = (path: string) => path.replace(/\.ts$/u, ".js");
+const js = (sourcePath: string): string => sourcePath.replace(/\.ts$/u, ".js");
 const DATABASES = ["sqlite"] as const;
 
-rmSync(dist, { force: true, recursive: true });
+await rm(dist, { force: true, recursive: true });
 const reylo = join(dist, "reylo");
 // TypeScript's own launcher, run by this Node: node_modules/.bin holds a shell script, which Windows cannot start.
-execFileSync(process.execPath, [join(root, "node_modules/typescript/bin/tsc"), "-p", join(root, "tsconfig.build.json")], { stdio: "inherit" });
+// oxlint-disable-next-line node/no-sync -- Keep the native launcher's inherited stdio and failure status before staging compiler output.
+execFileSync(process.execPath, [
+  join(root, "node_modules/typescript/bin/tsc"),
+  "-p",
+  join(root, "tsconfig.build.json"),
+], { stdio: "inherit" });
 // The comments stay in the sources and in the declarations, where an editor shows them. The
 // JavaScript ships without them, since they are about a third of its size.
-for (const file of readdirSync(reylo, { encoding: "utf8", recursive: true }).filter((f) => f.endsWith(".js"))) {
-  const path = join(reylo, file);
-  writeFileSync(path, transformSync(readFileSync(path, "utf8"), { loader: "js", legalComments: "inline" }).code);
-}
-copyFileSync(join(root, "README.md"), join(reylo, "README.md"));
-mkdirSync(join(reylo, "docs"), { recursive: true });
-copyFileSync(join(root, "docs/effect.md"), join(reylo, "docs/effect.md"));
+const emitted = await readdir(reylo, { encoding: "utf8", recursive: true });
+await Promise.all(emitted.filter((file) => file.endsWith(".js")).map(async (file) => {
+  const outputPath = join(reylo, file);
+  const source = await readFile(outputPath, "utf8");
+  const { code } = await transform(source, { legalComments: "inline", loader: "js" });
+  await writeFile(outputPath, code);
+}));
+await copyFile(join(root, "README.md"), join(reylo, "README.md"));
+await mkdir(join(reylo, "docs"), { recursive: true });
+await copyFile(join(root, "docs/effect.md"), join(reylo, "docs/effect.md"));
 
-const pkg = JSON.parse(readFileSync(join(root, "package.json"), "utf8"));
+const pkg = JSON.parse(await readFile(join(root, "package.json"), "utf8"));
 Object.entries(pkg.optionalDependencies).forEach(([name, version]) => {
   if (version !== ENGINE_VERSION) {throw new Error(`package.json: the upstream engine ${name} is ${version}, expected ${ENGINE_VERSION}`);}
 });
@@ -48,10 +62,10 @@ const built = {
   exports: Object.fromEntries(Object.entries(exports as Record<string, string>).map(([key, path]) => [key, { types: path.replace(/\.ts$/u, ".d.ts"), default: js(path) }])),
   typescript: { ...typescript, contentMapper: { ...typescript.contentMapper, exec: (typescript.contentMapper.exec as string[]).map(js) } },
 };
-writeFileSync(join(reylo, "package.json"), `${JSON.stringify(built, null, 2)  }\n`);
+await writeFile(join(reylo, "package.json"), `${JSON.stringify(built, null, 2)  }\n`);
 
 // Nothing TypeScript ships but declarations, and no engine ships inside reylo.
-const files = readdirSync(reylo, { encoding: "utf8", recursive: true });
+const files = await readdir(reylo, { encoding: "utf8", recursive: true });
 const source = files.filter((f) => /\.(c|m)?ts$/u.test(f) && !/\.d\.(c|m)?ts$/u.test(f));
 if (source.length) {throw new Error(`dist/reylo holds TypeScript sources: ${source.join(", ")}`);}
 const wasm = files.filter((f) => f.endsWith(".wasm"));
@@ -65,18 +79,29 @@ console.log(`dist/reylo: ${files.length} files, package ${built.name}@${built.ve
 // Leaves out the comments.
 const bundled = { bundle: true, platform: "node", format: "esm", target: "node24", legalComments: "inline", logLevel: "warning", metafile: true } as const;
 
-for (const db of DATABASES) {
+const packageSize = async (packagePath: string): Promise<number> => {
+  const info = await stat(packagePath);
+  if (info.isDirectory()) {
+    const items = await readdir(packagePath);
+    const sizes = await Promise.all(items.map((item) => packageSize(join(packagePath, item))));
+    // oxlint-disable-next-line unicorn/no-array-reduce -- Report the total bytes across this package directory.
+    return sizes.reduce((total, bytes) => total + bytes, 0);
+  }
+  return info.size;
+};
+
+await Promise.all(DATABASES.map(async (db) => {
   const from = join(root, "packages", db);
   const to = join(dist, db);
-  mkdirSync(to);
-  const { private: _p, exports: entries, devDependencies: _dev, ...engine } = JSON.parse(readFileSync(join(from, "package.json"), "utf8"));
+  await mkdir(to);
+  const { private: _enginePrivate, exports: entries, devDependencies: _engineDev, ...engine } = JSON.parse(await readFile(join(from, "package.json"), "utf8"));
   if (engine.version !== pkg.version) {throw new Error(`packages/${db}/package.json is ${engine.version}, and reylo is ${pkg.version}; they move together`);}
   const exported = Object.fromEntries(Object.entries(entries as Record<string, string>).map(([key, path]) => [key, js(path)]));
   // The tooling bundle includes the MPL-covered native HCL parser port alongside MIT code.
-  writeFileSync(join(to, "package.json"), `${JSON.stringify({ ...engine, license: "MIT AND MPL-2.0", files: [...engine.files, "licenses"], exports: exported }, null, 2)  }\n`);
-  cpSync(join(root, "licenses"), join(to, "licenses"), { recursive: true });
+  await writeFile(join(to, "package.json"), `${JSON.stringify({ ...engine, license: "MIT AND MPL-2.0", files: [...engine.files, "licenses"], exports: exported }, null, 2)  }\n`);
+  await cp(join(root, "licenses"), join(to, "licenses"), { recursive: true });
   if (JSON.stringify(engine.optionalDependencies) !== JSON.stringify(pkg.optionalDependencies)) {throw new Error(`packages/${db}: upstream native engine versions must match the root manifest`);}
-  copyFileSync(join(from, "README.md"), join(to, "README.md"));
+  await copyFile(join(from, "README.md"), join(to, "README.md"));
   const half = await bundle({ ...bundled, entryPoints: [join(root, "src/tooling.ts")], outfile: join(to, "tooling.js") });
   // Reylo's entry points load it with a `require` (src/engine-package.ts), which refuses an ES
   // Module with a top-level await.
@@ -87,10 +112,11 @@ for (const db of DATABASES) {
   if (native.length) {throw new Error(`dist/${db}/tooling.js bundles a driver or a native addon: ${native.join(", ")}`);}
   // A child process src/sqlite-drivers.ts starts beside the module that starts it.
   await bundle({ ...bundled, entryPoints: [join(root, "src/d1-proxy.ts")], outfile: join(to, "d1-proxy.js") });
-  const shipped = readdirSync(to);
-  const missing = (engine.files as string[]).filter((f) => !shipped.includes(f));
+  const shipped = await readdir(to);
+  const missing = (engine.files as string[]).filter((file) => !shipped.includes(file));
   if (missing.length) {throw new Error(`dist/${db} is missing what its package.json lists: ${missing.join(", ")}`);}
-  const size = (path: string): number => (statSync(path).isDirectory() ? readdirSync(path).reduce((n, f) => n + size(join(path, f)), 0) : statSync(path).size);
-  const sizes = shipped.filter((f) => f !== "package.json" && f !== "README.md").map((f) => `${f} ${size(join(to, f))} bytes`);
+  const sizes = await Promise.all(shipped
+    .filter((file) => file !== "package.json" && file !== "README.md")
+    .map(async (file) => `${file} ${await packageSize(join(to, file))} bytes`));
   console.log(`dist/${db}: package ${engine.name}@${engine.version}, ${sizes.join(", ")}`);
-}
+}));
