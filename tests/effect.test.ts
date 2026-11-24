@@ -61,11 +61,11 @@ const failure = function <A, E>(effect: Effect.Effect<A, E>): E {
   return error.success;
 };
 
-for (const [ErrorType, message] of [
+Iterator.from([
   [QueryPreparationError, "Failed to prepare the query"],
   [QueryExecutionError, "Failed to execute the query"],
   [QueryDecodeError, "Failed to decode the query result"],
-] as const) {
+] as const).forEach(([ErrorType, message]) => {
   // oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
   test(`${ErrorType.name} supports direct Effect failure and tagged recovery`, () => {
     const cause = new Error("original query failure");
@@ -80,7 +80,7 @@ for (const [ErrorType, message] of [
     // oxlint-disable-next-line rules/no-effect-runtime-run -- This test independently evaluates tagged error recovery.
     assert.equal(Effect.runSync(program.pipe(Effect.catchTag(error._tag, (failure) => Effect.succeed(failure.cause)))), cause);
   });
-}
+});
 
 // oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
 test("Effect prepares lazily, reorders and encodes inputs without executing", (testContext) => {

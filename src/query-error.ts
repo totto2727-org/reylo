@@ -315,7 +315,7 @@ export async function readQueryError(dialect: Dialect, error: unknown): Promise<
   if (!read) {return undefined;}
   const { MYSQL_CODES } = await import("./error-codes-mysql.ts");
   let code: string | undefined;
-  for (const [first, names] of MYSQL_CODES) {if (read.errno >= first && read.errno < first + names.length) {code = names[read.errno - first];}}
+  Iterator.from(MYSQL_CODES).forEach(([first, names]) => {if (read.errno >= first && read.errno < first + names.length) {code = names[read.errno - first];}});
   return new DatabaseError(read.message, error, { code, errno: read.errno, sqlState: read.sqlState, ...mysqlNames(read.errno, read.message) }) as MysqlQueryError;
 }
 

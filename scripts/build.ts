@@ -49,11 +49,11 @@ Object.entries(pkg.optionalDependencies).forEach(([name, version]) => {
 });
 const { private: _private, scripts: _scripts, devDependencies: _dev, bin, exports, typescript, ...rest } = pkg;
 // SQLite tooling is a peer at reylo's own fork version (src/engine-package.ts).
-for (const db of DATABASES) {
+Iterator.from(DATABASES).forEach((db) => {
   const name = `@totto2727/reylo-${db}`;
   if (rest.peerDependencies?.[name] !== pkg.version) {throw new Error(`package.json: the peer ${name} is ${rest.peerDependencies?.[name]}, and reylo is ${pkg.version}; they move together`);}
   if (!rest.peerDependenciesMeta?.[name]?.optional) {throw new Error(`package.json: the peer ${name} must be optional, since a project installs only its databases' engines`);}
-}
+});
 const built = {
   ...rest,
   // A bin path without its "./", as npm writes it: npm rewrites `./src/cli.js` to `src/cli.js` at

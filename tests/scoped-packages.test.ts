@@ -15,17 +15,17 @@ test("the fork exposes only its runtime and exact-version SQLite tooling under i
   assert.deepEqual(manifest.peerDependencies, { "@totto2727/reylo-sqlite": manifest.version, effect: "^4.0.6" });
   assert.equal(manifest.peerDependenciesMeta.effect.optional, true);
   assert.equal(manifest.exports["./effect"], "./src/effect.ts");
-  for (const dialect of ["sqlite"] as const) {
+  Iterator.from(["sqlite"] as const).forEach((dialect) => {
     const name = `@totto2727/reylo-${dialect}`;
     const engine = JSON.parse(readFileSync(require.resolve(`${name}/package.json`), "utf8"));
     assert.equal(engine.name, name);
     assert.equal(engine.version, manifest.version);
     assert.equal(manifest.peerDependencies[name], manifest.version);
     assert.equal(manifest.peerDependenciesMeta[name].optional, true);
-  }
+  });
 });
 
-for (const dialect of ["postgres", "mysql", "duckdb"] as const) {
+Iterator.from(["postgres", "mysql", "duckdb"] as const).forEach((dialect) => {
   // oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
   test(`the fork refuses ${dialect} analysis without discovering an engine package`, async () => {
     await assert.rejects(engine(dialect), {
@@ -33,7 +33,7 @@ for (const dialect of ["postgres", "mysql", "duckdb"] as const) {
       message: `This fork supports SQLite analysis only, not ${dialect} statements`,
     });
   });
-}
+});
 
 // oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
 test("the scoped public runtime preserves the Standard Query contract", () => {
@@ -49,9 +49,9 @@ test("the scoped public runtime preserves the Standard Query contract", () => {
 
 // oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
 test("source packages stay private while distributions target public npm publication", () => {
-  for (const path of ["../package.json", "../packages/sqlite/package.json"]) {
+  Iterator.from(["../package.json", "../packages/sqlite/package.json"]).forEach((path) => {
     const source = JSON.parse(readFileSync(new URL(path, import.meta.url), "utf8"));
     assert.equal(source.private, true);
     assert.deepEqual(source.publishConfig, { access: "public", registry: "https://registry.npmjs.org/" });
-  }
+  });
 });

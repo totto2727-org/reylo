@@ -53,7 +53,7 @@ test("a value is checked against its column list, and written as the JSON the st
     [{ id: 1, ts: "2026-10-20T10:00:00Z", tags: ["a", 1] }, /"tags" element 2 is text, a string; got 1/u],
     [{ id: 1, ts: "2026-10-20T10:00:00Z", meta: { n: BigInt("1") } }, /holds a JSON value/u],
   ];
-  for (const [value, message] of refused) {assert.throws(() => prepareRows("events", events, [value], "postgres", true), message, JSON.stringify(value, (_, v) => (typeof v === "bigint" ? `${v}n` : v)));}
+  Iterator.from(refused).forEach(([value, message]) => {assert.throws(() => prepareRows("events", events, [value], "postgres", true), message, JSON.stringify(value, (_, v) => (typeof v === "bigint" ? `${v}n` : v)));});
   assert.throws(() => prepareRows("events", events, { id: 1 }, "postgres", true), /pass an array of objects, one per row; got an object/u);
   assert.throws(() => prepareRows("user", { ...events, one: true }, [], "postgres", true), /each row is an object/u);
 });
@@ -88,7 +88,7 @@ test("a pgvector vector member takes an array of finite numbers, written as the 
   };
   assert.equal(renderParamType(items), "readonly { embedding: number[]; history?: (number[] | null)[] | null }[]");
   assert.deepEqual(prepareRows("items", items, [{ embedding: [1, 2.5, 3], history: [[0.5], null] }], "postgres", true).value, [{ embedding: "[1,2.5,3]", history: ["[0.5]", null] }]);
-  for (const embedding of [[], [1, NaN], ["1"], "x".length]) {assert.throws(() => prepareRows("items", items, [{ embedding }], "postgres", true), /embedding.* is vector\(3\), an array of finite numbers with one at least/);}
+  Iterator.from([[], [1, NaN], ["1"], "x".length]).forEach((embedding) => {assert.throws(() => prepareRows("items", items, [{ embedding }], "postgres", true), /embedding.* is vector\(3\), an array of finite numbers with one at least/);});
 });
 
 // oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.

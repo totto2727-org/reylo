@@ -22,7 +22,7 @@ const project = function (...linked: string[]): string {
   const root = mkdtempSync(join(tmpdir(), "reylo-representation-"));
   writeFileSync(join(root, "package.json"), "{}");
   mkdirSync(join(root, "node_modules"));
-  for (const driver of linked) {symlinkSync(join(DRIVERS, driver), join(root, "node_modules", driver));}
+  Iterator.from(linked).forEach((driver) => {symlinkSync(join(DRIVERS, driver), join(root, "node_modules", driver));});
   return root;
 };
 
@@ -226,7 +226,7 @@ test("SQLite: a column declared BIGINT or INT8 is a BigInt on every driver, exac
   const rounded = /Column "v" is a 64-bit integer, and the driver already rounded its value to 9007199254740992/u;
   // Better-sqlite3 at its default, every integer a number: Reylo's statement reads the BIGINT
   // Column exact, and the INTEGER column as a number, whatever the database says.
-  for (const safe of [false, true]) {
+  Iterator.from([false, true]).forEach((safe) => {
     const db = new Database(file);
     db.defaultSafeIntegers(safe);
     // oxlint-disable-next-line rules/no-effect-runtime-run -- This test exercises Reylo's native synchronous query API, which does not run Effect.
@@ -239,7 +239,7 @@ test("SQLite: a column declared BIGINT or INT8 is a BigInt on every driver, exac
     // oxlint-disable-next-line rules/no-effect-runtime-run -- This test exercises Reylo's native synchronous query API, which does not run Effect.
     assert.deepEqual(plain(byV.runSync(db, { v: exactRows[0]!.v })), [{ id: 1, v: BigInt("9007199254740993") }], "better-sqlite3: the BIGINT's value as a parameter");
     db.close();
-  }
+  });
   for (const readBigInts of [false, true]) {
     const node = new DatabaseSync(file, { readBigInts });
     assert.deepEqual(plain(await exact.run(node)), exactRows, `node:sqlite with readBigInts ${readBigInts}`);

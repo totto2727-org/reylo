@@ -69,12 +69,12 @@ test("the runtime's lexer agrees with the engine's", async () => {
     ["select 'C:\\', ?3, `:w`, ? -- :v\n /* :u */", "sqlite"],
     ["select 'C:\\', :x, \"\\\", :y -- :v\n", "sqlite"],
   ];
-  for (const [sql, dialect] of statements) {
+  Iterator.from(statements).forEach(([sql, dialect]) => {
     const ours = lexPlaceholders(sql, dialect);
     const theirs = engine.lex(sql, dialect);
     assert.deepEqual(ours.params, theirs.params, `${dialect}: ${sql}`);
     assert.deepEqual(ours.placeholders, theirs.placeholders, `${dialect}: ${sql}`);
-  }
+  });
 });
 
 // Without the engine's rewritten statement (a query defined by hand) the runtime rewrites it itself.

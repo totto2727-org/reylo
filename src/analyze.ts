@@ -200,10 +200,10 @@ export class Session {
     // Newest by the time the entry records, since a copy (`cp -r`, `fs.cpSync`, a CI artifact) may
     // Reset the file's.
     let newest: { file: string; entry: Entry } | undefined;
-    for (const file of names.map((n) => join(dir, n))) {
+    Iterator.from(names.map((n) => join(dir, n))).forEach((file) => {
       const other = readEntry(file);
       if (other && (!newest || (other.at ?? -Infinity) > (newest.entry.at ?? -Infinity))) {newest = { file, entry: other };}
-    }
+    });
     return newest;
   }
 
@@ -399,7 +399,7 @@ export class Session {
   }
 
   public async close(): Promise<void> {
-    for (const [key, session] of sessions) {if (session === this) {sessions.delete(key);}}
+    Iterator.from(sessions).forEach(([key, session]) => {if (session === this) {sessions.delete(key);}});
     await this.release();
   }
 

@@ -132,7 +132,7 @@ async function openBridge(path: string, dialect: "postgres" | "mysql", token: st
     client.on("close", () => clearTimeout(refused));
     const pipe = (upstream: Socket, toServer: Buffer[]) => {
       clearTimeout(refused);
-      for (const chunk of toServer) {upstream.write(chunk);}
+      Iterator.from(toServer).forEach((chunk) => {upstream.write(chunk);});
       client.pipe(upstream).pipe(client);
     };
     if (dialect === "postgres") {gatePostgres(client, token, () => openUpstream(path, client, track, failed), pipe);}
@@ -147,7 +147,7 @@ async function openBridge(path: string, dialect: "postgres" | "mysql", token: st
     port: (server.address() as AddressInfo).port,
     close: () => {
       server.close();
-      for (const socket of open) {socket.destroy();}
+      Iterator.from(open).forEach((socket) => {socket.destroy();});
     },
     failure: () => failure,
   };

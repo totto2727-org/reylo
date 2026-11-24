@@ -134,7 +134,7 @@ export async function mysqlStandIn(options: { version: string; accepts?: () => s
     open: () => open,
     ended: () => ended,
     close: async () => {
-      for (const socket of sockets) {socket.destroy();}
+      Iterator.from(sockets).forEach((socket) => {socket.destroy();});
       await new Promise((resolve) => server.close(resolve));
     },
   };

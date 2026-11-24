@@ -104,7 +104,7 @@ const generate = async function (args: string[]): Promise<number> {
     if (statSync(full).isDirectory()) {
       const files = await sqlFiles(full);
       const ignored = gitIgnored(full, files);
-      for (const file of files) {if (!ignored.has(file)) {found.add(file);}}
+      Iterator.from(files).forEach((file) => {if (!ignored.has(file)) {found.add(file);}});
     } else if (full.endsWith(".sql")) {named.add(full);}
     else {
       console.error(`reylo generate: ${arg} is not a .sql file or a directory.`);
@@ -182,15 +182,15 @@ const generate = async function (args: string[]): Promise<number> {
       rows.push({ file, ok: true });
     }
     const width = Math.max(...rows.map((r) => shown(r.file).length));
-    for (const { file, ok } of rows) {
+    Iterator.from(rows).forEach(({ file, ok }) => {
       if (ok) {typed++;}
       else {failed.push(file);}
       console.log(`  ${shown(file).padEnd(width)}  ${ok ? paint("green", "✓") : paint("red", "✗")}`);
-    }
+    });
   }
   for (const session of Session.opened()) {await session.close();}
 
-  for (const lines of errors) {console.log(`\n${lines.join("\n")}`);}
+  Iterator.from(errors).forEach((lines) => {console.log(`\n${lines.join("\n")}`);});
   if (skipped.length) {
     const listed = skipped.slice(0, 3).map(shown).join(", ") + (skipped.length > 3 ? ` and ${skipped.length - 3} more` : "");
     console.log(paint("dim", `\nSkipped ${skipped.length === 1 ? "1 file that is" : `${skipped.length} files that are`} not one query (a migration?): ${listed}`));

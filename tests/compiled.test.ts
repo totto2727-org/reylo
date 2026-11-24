@@ -49,11 +49,11 @@ test("a query defined by hand: `raw` is its statement as written and `sql` the o
   const pg = defineQuery({ dialect: "postgres", sql: raw, params: ["id", "name"] });
   assert.equal(pg.raw, raw);
   assert.equal(pg.sql, "select $1 as id, $2 as name, $1 as again");
-  for (const dialect of ["mysql", "sqlite"] as const) {
+  Iterator.from(["mysql", "sqlite"] as const).forEach((dialect) => {
     const q = defineQuery({ dialect, sql: raw, params: ["id", "name"] });
     assert.equal(q.raw, raw);
     assert.equal(q.sql, "select ? as id, ? as name, ? as again");
-  }
+  });
   // The compiled text a build step writes wins over the run time's own lexer.
   assert.equal(defineQuery({ dialect: "postgres", sql: "select :id", params: ["id"], text: "select $1::int", order: ["id"] }).sql, "select $1::int");
   // A placeholder its params miss fails where `sql` is read, as `run` does.

@@ -24,13 +24,13 @@ execFileSync(go, ['test', '-overlay', join(work, 'overlay.json'), './hclsyntax',
 const fixtures = readFileSync(raw, 'utf8').trimEnd().split('\n').map(line => JSON.parse(line));
 fixtures.sort((a, b) => `${a.name}\0${a.api}\0${a.source}`.localeCompare(`${b.name}\0${b.api}\0${b.source}`, 'en'));
 const counts = {};
-for (const fixture of fixtures) {
+Iterator.from(fixtures).forEach((fixture) => {
   const name = fixture.name.split('/')[0];
   const count = counts[name] ??= { calls: 0, apis: {}, cases: new Set() };
   count.calls++;
   count.apis[fixture.api] = (count.apis[fixture.api] ?? 0) + 1;
   count.cases.add(fixture.name);
-}
+});
 const functions = JSON.parse(readFileSync(join(work, 'functions.json'), 'utf8'));
 const manifest = {
   upstream: { repository: 'https://github.com/hashicorp/hcl', tag: 'v2.25.0', revision, license: 'MPL-2.0', go: execFileSync(go, ['version'], { encoding: 'utf8' }).trim() },

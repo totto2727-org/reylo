@@ -121,10 +121,10 @@ export function hclPath(url: string, root: string): string | undefined {
 export function readEnvFile(path: string): Record<string, string> {
   if (!existsSync(path)) {return {};}
   const out: Record<string, string> = {};
-  for (const line of readFileSync(path, "utf8").split("\n")) {
+  Iterator.from(readFileSync(path, "utf8").split("\n")).forEach((line) => {
     const regexMatch = /^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*?)\s*$/.exec(line);
     if (regexMatch) {out[regexMatch[1]!] = regexMatch[2]!.replace(/^(["'])(.*)\1$/, "$2");}
-  }
+  });
   return out;
 }
 
@@ -194,13 +194,13 @@ const urlParts = function (written: string): UrlPart[] | { open: number } {
 const inUserinfo = function (parts: UrlPart[]): Set<UrlPart> {
   let skeleton = "";
   const placed = new Map<number, UrlPart>();
-  for (const part of parts) {
+  Iterator.from(parts).forEach((part) => {
     if ("text" in part) {skeleton += part.text;}
     else {
       placed.set(skeleton.length, part);
       skeleton += "\0";
     }
-  }
+  });
   const inside = new Set<UrlPart>();
   const scheme = skeleton.indexOf("://");
   if (scheme < 0) {return inside;}
@@ -208,7 +208,7 @@ const inUserinfo = function (parts: UrlPart[]): Set<UrlPart> {
   const ends = ["/", "?", "#"].map((d) => skeleton.indexOf(d, start)).filter((k) => k >= 0);
   const authorityEnd = Math.min(skeleton.length, ...ends);
   const userinfoEnd = skeleton.lastIndexOf("@", authorityEnd - 1);
-  for (const [at, part] of placed) {if (at >= start && at < userinfoEnd) {inside.add(part);}}
+  Iterator.from(placed).forEach(([at, part]) => {if (at >= start && at < userinfoEnd) {inside.add(part);}});
   return inside;
 };
 
@@ -315,7 +315,7 @@ export function resolveProject(engine: Engine | MissingEngine, projectDir: strin
         error ??= `${shown(file!)}: "direct_url" names ${missing.map((m) => `\${${m}}`).join(", ")}, which neither the environment nor ${envFiles.map(shown).join(" nor ")} sets.`;
       } else if (parts.some((part) => "command" in part)) {
         const shellEnv: Record<string, string> = {};
-        for (const path of [...envFiles].reverse()) {Object.assign(shellEnv, readEnvFile(path));}
+        Iterator.from([...envFiles].reverse()).forEach((path) => {Object.assign(shellEnv, readEnvFile(path));});
         Object.entries({ ...process.env, ...env }).forEach(([name, value]) => {if (!matchesUndefined(value)) {shellEnv[name] = value;}});
         const encoded = inUserinfo(parts);
         const build = (fresh: boolean): { url: string } | { error: string } => {

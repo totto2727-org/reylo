@@ -237,7 +237,7 @@ export function encodeDuckdb(type: EngineType | undefined, v: unknown, name: str
   if (type.kind === "map" && Array.isArray(v)) {return v.map((e) => (!matchesNull(e) && hasObjectType(e) ? { ...e, key: encodeDuckdb(type.key, (e as { key?: unknown }).key, name), value: encodeDuckdb(type.value, (e as { value?: unknown }).value, name) } : e));}
   if (type.kind === "struct" && hasObjectType(v) && !Array.isArray(v)) {
     const out: Record<string, unknown> = { ...(v as Record<string, unknown>) };
-    for (const f of type.fields) {out[f.name] = encodeDuckdb(f.type, out[f.name], name);}
+    Iterator.from(type.fields).forEach((f) => {out[f.name] = encodeDuckdb(f.type, out[f.name], name);});
     return out;
   }
   // A UNION takes `{ tag, value }`, its tag one of its members and its value that member's.

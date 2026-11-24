@@ -86,11 +86,11 @@ export function shortType(type: string): string {
 /** The catalog from its queries' rows; a database with no query for functions or types gives none, or the names it takes. */
 export function catalog(dialect: Dialect, tables: unknown[][], functions: unknown[][] = [], types: unknown[][] = []): Catalog {
   const byName = new Map<string, Table>();
-  for (const [table, name, type, nullable] of tables as [string, string, string, unknown][]) {
+  Iterator.from(tables as [string, string, string, unknown][]).forEach(([table, name, type, nullable]) => {
     let t = byName.get(table);
     if (!t) {byName.set(table, (t = { name: table, columns: [] }));}
     t.columns.push({ name, type: shortType(String(type ?? "")), nullable: Boolean(Number(nullable) || nullable === true) });
-  }
+  });
   return {
     tables: [...byName.values()],
     functions: (functions as [string, unknown, string[] | null, unknown][]).map(([name, aggregate, returns, rows]) => {

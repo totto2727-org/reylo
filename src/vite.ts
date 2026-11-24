@@ -38,7 +38,7 @@ export default function reylo() {
       const { code, entry, watched } = await (await tooling(dirname(id))).sqlModule(id, readFileSync(id, "utf8"));
       // A new analysis of the statement (the type check's, after a migration) rebuilds the module,
       // And so does a change to the project file or a `.env` file, which the module's text reads.
-      for (const file of [entry, ...watched]) {this.addWatchFile(file);}
+      Iterator.from([entry, ...watched]).forEach((file) => {this.addWatchFile(file);});
       return { code, map: null };
     },
     // Vitest keeps a transformed module across runs (`fsModuleCache`, on by default from Vitest

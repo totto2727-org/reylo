@@ -43,7 +43,7 @@ export function withDefaults(schema: Schema, value: unknown): unknown {
       if (!Object.prototype.hasOwnProperty.call(o, key) && !matchesNull(sub) && hasObjectType(sub) && "default" in sub) {o[key] = cloneJson((sub as Object_).default);}
     });
     const patterns = Object.entries((s.patternProperties ?? {}) as Record<string, Schema>).map(([p, sub]) => [regex(p), sub] as const);
-    for (const key of Object.keys(o)) {
+    Iterator.from(Object.keys(o)).forEach((key) => {
       let named = false;
       if (Object.prototype.hasOwnProperty.call(properties, key)) {
         named = true;
@@ -56,7 +56,7 @@ export function withDefaults(schema: Schema, value: unknown): unknown {
         }
       }
       if (!named && !matchesUndefined(s.additionalProperties)) {o[key] = withDefaults(s.additionalProperties as Schema, o[key]);}
-    }
+    });
     if (s.dependentSchemas && hasObjectType(s.dependentSchemas)) {
       Object.entries(s.dependentSchemas as Record<string, Schema>).forEach(([key, sub]) => {if (Object.prototype.hasOwnProperty.call(o, key)) {Object.assign(o, withDefaults(sub, o) as object);}});
     }
@@ -70,7 +70,7 @@ export function withDefaults(schema: Schema, value: unknown): unknown {
     for (let i = 0; i < a.length; i++) {a[i] = withDefaults(i < prefix.length ? prefix[i]! : (s.items as Schema) ?? true, a[i]);}
     out = a;
   }
-  if (Array.isArray(s.allOf)) {for (const sub of s.allOf as Schema[]) {out = withDefaults(sub, out);}}
+  if (Array.isArray(s.allOf)) {Iterator.from(s.allOf as Schema[]).forEach((sub) => {out = withDefaults(sub, out);});}
   // Only the branch the value takes: `if` decides it as the checks will.
   if (!matchesUndefined(s.if)) {
     const branch = matchesUndefined(validate(s.if as Schema, out)) ? s.then : s.else;
@@ -130,7 +130,7 @@ function check(schema: Schema, value: unknown, path: string, out: Failure[]): Ev
     if (!matchesUndefined(s.items)) {for (let i = prefix.length; i < value.length; i++) {if (!check(s.items as Schema, value[i], `${path}/${i}`, out)) {return undefined;}}}
     if (!matchesUndefined(s.contains)) {
       let matched = 0;
-      for (const item of value) {if (check(s.contains as Schema, item, path, [])) {matched++;}}
+      Iterator.from(value).forEach((item) => {if (check(s.contains as Schema, item, path, [])) {matched++;}});
       const min = matchesNumber(s.minContains) ? s.minContains : 1;
       if (matched < min) {return fail(out, path, min === 1 ? "must contain an item that matches its `contains` schema" : `must contain at least ${min} items that match its \`contains\` schema`);}
       if (matchesNumber(s.maxContains) && matched > s.maxContains) {return fail(out, path, `must contain at most ${s.maxContains} items that match its \`contains\` schema`);}
@@ -191,24 +191,24 @@ function check(schema: Schema, value: unknown, path: string, out: Failure[]): Ev
   }
   if (Array.isArray(s.anyOf)) {
     let any = false;
-    for (const sub of s.anyOf as Schema[]) {
+    Iterator.from(s.anyOf as Schema[]).forEach((sub) => {
       const e = check(sub, value, path, []);
       if (e) {
         any = true;
         e.forEach((k) => evaluated.add(k));
       }
-    }
+    });
     if (!any) {return fail(out, path, "must match one of its `anyOf` schemas");}
   }
   if (Array.isArray(s.oneOf)) {
     let matched = 0;
-    for (const sub of s.oneOf as Schema[]) {
+    Iterator.from(s.oneOf as Schema[]).forEach((sub) => {
       const e = check(sub, value, path, []);
       if (e) {
         matched++;
         e.forEach((k) => evaluated.add(k));
       }
-    }
+    });
     if (matched !== 1) {return fail(out, path, matched === 0 ? "must match one of its `oneOf` schemas" : "must match only one of its `oneOf` schemas, and matches more");}
   }
   if (!matchesUndefined(s.not) && check(s.not as Schema, value, path, [])) {return fail(out, path, "must not match its `not` schema");}

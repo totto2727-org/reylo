@@ -32,7 +32,7 @@ test("the default native executable comes from the installed upstream platform p
   });
 });
 
-for (const profiles of [["release"], ["debug"], ["release", "debug"]]) {
+Iterator.from([["release"], ["debug"], ["release", "debug"]]).forEach((profiles) => {
   // oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
   test(`a missing upstream package is not masked by legacy ${profiles.join(" and ")} binaries`, async (testContext) => {
     // A separate install layout keeps the repository's real optional dependency out of resolution.
@@ -56,4 +56,4 @@ for (const profiles of [["release"], ["debug"], ["release", "debug"]]) {
       });
     });
   });
-}
+});

@@ -306,7 +306,7 @@ const isSlonik = function (c: AnyClient): boolean {
 function asByteaHex(v: unknown) {
   if (!(v instanceof Uint8Array)) {return v;}
   let hex = "\\x";
-  for (const byte of v) {hex += (byte < 16 ? "0" : "") + byte.toString(16);}
+  Iterator.from(v).forEach((byte) => {hex += (byte < 16 ? "0" : "") + byte.toString(16);});
   return hex;
 }
 
@@ -636,7 +636,7 @@ const isTime = (type: EngineType | undefined) => type?.kind === "scalar" && type
 function checkTime(type: EngineType | undefined, name: string, v: unknown): void {
   if (matchesUndefined(type) || matchesNullish(v)) {return;}
   if (type.kind === "array") {
-    if (Array.isArray(v)) {for (const e of v) {checkTime(Array.isArray(e) ? type : type.of, name, e);}}
+    if (Array.isArray(v)) {Iterator.from(v).forEach((e) => {checkTime(Array.isArray(e) ? type : type.of, name, e);});}
     return;
   }
   if (type.kind !== "scalar") {return;}
@@ -660,7 +660,7 @@ function checkTime(type: EngineType | undefined, name: string, v: unknown): void
 function checkBinary(type: EngineType | undefined, name: string, v: unknown): void {
   if (matchesUndefined(type) || matchesNullish(v)) {return;}
   if (type.kind === "array") {
-    if (Array.isArray(v)) {for (const e of v) {checkBinary(Array.isArray(e) ? type : type.of, name, e);}}
+    if (Array.isArray(v)) {Iterator.from(v).forEach((e) => {checkBinary(Array.isArray(e) ? type : type.of, name, e);});}
     return;
   }
   if (type.kind !== "scalar" || (type.name !== "bytea" && type.name !== "blob") || v instanceof Uint8Array) {return;}
@@ -777,12 +777,12 @@ export function compile(query: QueryModule): { text: string; order: Readonly<str
   let text = "";
   let last = 0;
   const order: string[] = [];
-  for (const p of placeholders) {
+  Iterator.from(placeholders).forEach((p) => {
     const index = indexOf(query, p);
     text += query.sql.slice(last, p.start) + (numbered ? `$${index + 1}` : "?");
     order.push(p.name);
     last = p.end;
-  }
+  });
   return { text: text + query.sql.slice(last), order: numbered ? query.params : order };
 }
 
@@ -799,10 +799,10 @@ function unsupported(c: unknown, dialect: Dialect): TypeError {
   else {
     const names = new Set<string>();
     for (let o: object | null = c; o && o !== Object.prototype && o !== Function.prototype; o = Object.getPrototypeOf(o)) {
-      for (const key of Object.getOwnPropertyNames(o)) {
+      Iterator.from(Object.getOwnPropertyNames(o)).forEach((key) => {
         const d = Object.getOwnPropertyDescriptor(o, key);
         if (key !== "constructor" && hasFunctionType(d?.value)) {names.add(key);}
-      }
+      });
     }
     seen = names.size ? `an object with ${[...names].slice(0, 12).join(", ")}${names.size > 12 ? ", ..." : ""}` : "an object with no methods";
   }

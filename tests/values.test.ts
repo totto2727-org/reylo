@@ -86,7 +86,7 @@ test("the representation, value by value", () => {
 test("interval: an ISO 8601 duration with its sign in front, which Temporal reads, and each part signed where the parts' signs differ", () => {
   const Temporal = (globalThis as unknown as { Temporal: { Duration: { from(text: string): { toString(): string } } } }).Temporal;
   // Postgres's text in IntervalStyle postgres, Reylo's value, and Postgres's own in iso_8601, as Postgres 18 writes them.
-  for (const [text, iso, postgres] of [
+  Iterator.from([
     ["1 mon", "P1M", "P1M"],
     ["1 year 2 mons 3 days 04:05:06.789", "P1Y2M3DT4H5M6.789S", "P1Y2M3DT4H5M6.789S"],
     ["00:00:00", "PT0S", "PT0S"],
@@ -96,20 +96,20 @@ test("interval: an ISO 8601 duration with its sign in front, which Temporal read
     ["-1 years -2 mons", "-P1Y2M", "P-1Y-2M"],
     ["-1 mons -2 days -00:00:03", "-P1M2DT3S", "P-1M-2DT-3S"],
     ["-178956970 years -7 mons -2147483647 days -2562047788:00:54.775807", "-P178956970Y7M2147483647DT2562047788H54.775807S", "P-178956970Y-7M-2147483647DT-2562047788H-54.775807S"],
-  ] as [string, string, string][]) {
+  ] as [string, string, string][]).forEach(([text, iso, postgres]) => {
     assert.equal(duration(text), iso, text);
     assert.equal(Temporal.Duration.from(iso).toString(), iso, `${text}: Temporal reads it`);
     assert.equal(postgresInterval(iso), postgres, `${text}: as a parameter, in the form Postgres reads`);
-  }
+  });
   // Parts of different signs have no ISO 8601 form: Postgres's own, which Temporal refuses.
-  for (const [text, iso] of [
+  Iterator.from([
     ["1 mon -1 days", "P1M-1D"],
     ["-1 days +01:00:00", "P-1DT1H"],
     ["1 day -01:30:00.5", "P1DT-1H-30M-0.5S"],
-  ] as [string, string][]) {
+  ] as [string, string][]).forEach(([text, iso]) => {
     assert.equal(duration(text), iso, text);
     assert.equal(postgresInterval(iso), iso, `${text}: already the form Postgres reads`);
-  }
+  });
   assert.equal(duration("infinity"), "infinity");
   assert.equal(duration("-infinity"), "-infinity");
   // Any other text, such as a parameter in Postgres's own words, goes as it is.
@@ -125,7 +125,7 @@ test("date and timestamp: a year outside 0000 to 9999 in ISO 8601's extended for
   const Temporal = (globalThis as unknown as { Temporal: { PlainDate: PlainFrom; PlainDateTime: PlainFrom } }).Temporal;
   const date = textDecoder("date");
   const timestamp = textDecoder("timestamp");
-  for (const [text, iso] of [
+  Iterator.from([
     ["2026-10-20", "2026-10-20"],
     ["0001-01-01", "0001-01-01"],
     ["9999-12-31", "9999-12-31"],
@@ -135,13 +135,13 @@ test("date and timestamp: a year outside 0000 to 9999 in ISO 8601's extended for
     ["10000-01-01", "+010000-01-01"],
     ["12345-01-01", "+012345-01-01"],
     ["275760-09-13", "+275760-09-13"],
-  ] as const) {
+  ] as const).forEach(([text, iso]) => {
     assert.equal(date(text), iso, text);
     assert.equal(Temporal.PlainDate.from(iso).toString(), iso, iso);
     // The round-trip rule: the parameter is the text the server wrote, which it reads as the same date.
     assert.equal(postgresYear(iso), text, iso);
-  }
-  for (const [text, iso] of [
+  });
+  Iterator.from([
     ["2026-10-20 10:00:00.123456", "2026-10-20T10:00:00.123456"],
     ["0001-12-31 23:59:59.999999 BC", "0000-12-31T23:59:59.999999"],
     ["0002-06-01 12:00:00 BC", "-000001-06-01T12:00:00"],
@@ -149,21 +149,21 @@ test("date and timestamp: a year outside 0000 to 9999 in ISO 8601's extended for
     ["10000-01-01 00:00:00", "+010000-01-01T00:00:00"],
     ["123456-01-01 00:00:00.5", "+123456-01-01T00:00:00.5"],
     ["275760-09-13 00:00:00", "+275760-09-13T00:00:00"],
-  ] as const) {
+  ] as const).forEach(([text, iso]) => {
     assert.equal(timestamp(text), iso, text);
     assert.equal(Temporal.PlainDateTime.from(iso).toString(), iso, iso);
     assert.equal(postgresYear(iso), text.replace(" ", "T"), iso);
-  }
+  });
   // A date past 999999 AD, which only Postgres's date reaches (5874897), keeps a sign before the
   // Digits it needs; Temporal holds no such date, and the parameter still reads it back.
   assert.equal(date("5874897-12-31"), "+5874897-12-31");
   assert.equal(date("1000000-01-01"), "+1000000-01-01");
   assert.equal(postgresYear("+5874897-12-31"), "5874897-12-31");
   assert.throws(() => Temporal.PlainDate.from("+5874897-12-31"), RangeError);
-  for (const word of ["infinity", "-infinity"]) {
+  Iterator.from(["infinity", "-infinity"]).forEach((word) => {
     assert.equal(date(word), word);
     assert.equal(timestamp(word), word);
-  }
+  });
   // Arrays: each element as a scalar's, a BC element quoted in Postgres's text.
   assert.deepEqual(textDecoder("date[]")('{"0002-06-01 BC",12345-01-01,2026-10-20,NULL,infinity}'), ["-000001-06-01", "+012345-01-01", "2026-10-20", null, "infinity"]);
   assert.deepEqual(textDecoder("timestamp[]")('{"0002-06-01 12:00:00 BC","10000-01-01 00:00:00",-infinity}'), ["-000001-06-01T12:00:00", "+010000-01-01T00:00:00", "-infinity"]);
@@ -176,7 +176,7 @@ test("date and timestamp: a year outside 0000 to 9999 in ISO 8601's extended for
 // oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
 test("timestamptz: the instant's ISO 8601 text in UTC, the server's fraction kept, which new Date(text) gets wrong for BC, year 1 and offsets with seconds", () => {
   const Temporal = (globalThis as unknown as { Temporal: { Instant: { from(text: string): { toString(): string; epochNanoseconds: bigint } } } }).Temporal;
-  for (const [text, iso] of [
+  Iterator.from([
     ["2026-10-20 03:03:00.123456-07", "2026-10-20T10:03:00.123456Z"],
     ["2026-10-20 10:00:00+00", "2026-10-20T10:00:00Z"],
     ["2026-10-20 10:00:00.5+05:30", "2026-10-20T04:30:00.5Z"],
@@ -193,11 +193,11 @@ test("timestamptz: the instant's ISO 8601 text in UTC, the server's fraction kep
     ["12345-01-01 00:00:00+05:30", "+012344-12-31T18:30:00Z"],
     ["2000-02-29 12:00:00+00", "2000-02-29T12:00:00Z"],
     ["1900-03-01 00:00:00+01", "1900-02-28T23:00:00Z"],
-  ] as const) {
+  ] as const).forEach(([text, iso]) => {
     assert.equal(instant(text), iso, text);
     // Temporal reads each back to the same text: an ISO 8601 instant, the year extended outside 0000 to 9999.
     assert.equal(Temporal.Instant.from(iso).toString(), iso, iso);
-  }
+  });
   // Each to the nanosecond against Temporal's own reading of the server's offset (its microseconds kept).
   assert.equal(Temporal.Instant.from(instant("2026-10-20 03:03:00.123456-07")).epochNanoseconds, Temporal.Instant.from("2026-10-20T03:03:00.123456-07:00").epochNanoseconds);
   // Past Temporal's range (±10^8 days), which Postgres's reaches (294276 AD): still ISO 8601 text.
@@ -233,7 +233,7 @@ test("SQLite: a column declared BIGINT, INT8 or UNSIGNED BIG INT (the engine's i
 
 // oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
 test("SQLite: a BIGINT column on node:sqlite exact past 2^53 beside an INTEGER read as a number, whatever the database's setting; on the drivers that round, a BigInt within 2^53 and a rounded value refused", async () => {
-  for (const readBigInts of [false, true]) {
+  Iterator.from([false, true]).forEach((readBigInts) => {
     const db = new DatabaseSync(":memory:", { readBigInts });
     db.exec("create table t (id integer primary key, n integer, big bigint); insert into t values (1, 5, 9007199254740993), (2, 6, -9007199254740993), (3, 7, null)");
     const q: QueryModule<"sqlite"> = { dialect: "sqlite", sql: "select id, n, big from t order by id", params: [], columns: [["id", "int"], ["n", "int"], ["big", "int8"]] };
@@ -244,7 +244,7 @@ test("SQLite: a BIGINT column on node:sqlite exact past 2^53 beside an INTEGER r
     if (readBigInts) {assert.deepEqual(own(), { n: BigInt("5"), big: BigInt("9007199254740993") });}
     else {assert.throws(own, /^RangeError: Value is too large to be represented as a JavaScript number: 9007199254740993/u);}
     db.close();
-  }
+  });
   const q: QueryModule<"sqlite"> = { dialect: "sqlite", sql: "select n, big from t", params: [], columns: [["n", "int"], ["big", "int8"]] };
   const d1 = (results: unknown[]) => ({ batch: promiseDriverStub(() => []), prepare: () => ({ first: promiseDriverStub(() => null), bind: () => ({ all: promiseDriverStub(() => ({ results })) }) }) });
   assert.deepEqual(await execute(d1([{ n: 5, big: 9_007_199_254_740_991 }, { n: 6, big: -3 }]), q), [{ n: 5, big: BigInt("9007199254740991") }, { n: 6, big: -BigInt("3") }]);
@@ -270,9 +270,9 @@ test("coerce: a value a driver decoded, given its kind; an integer a number cann
   assert.equal(coerce("date", nativeDriverDate("2026-10-20T00:00:00Z"), "c"), "2026-10-20");
   // Bun.sql decodes a date or timestamp before 1 AD as an Invalid Date (its infinities are ±Infinity):
   // Refused, never read as infinity.
-  for (const kind of ["date", "timestamp", "timestamptz", "timestamp|timestamptz"]) {
+  Iterator.from(["date", "timestamp", "timestamptz", "timestamp|timestamptz"]).forEach((kind) => {
     assert.throws(() => coerce(kind, nativeDriverDate(Number.NaN), "born"), (e: Error) => e instanceof DecodeError && /^Column "born": the driver returned an Invalid Date/u.test(e.message), kind);
-  }
+  });
   assert.equal(coerce("timestamptz", Infinity, "c"), "infinity");
   assert.equal(coerce("timestamptz", -Infinity, "c"), "-infinity");
   assert.equal(coerce("timestamp", nativeDriverDate("2026-10-20T10:00:00.500Z"), "c"), "2026-10-20T10:00:00.5");
@@ -290,7 +290,7 @@ test("coerce: a value a driver decoded, given its kind; an integer a number cann
   assert.equal(coerce("int", BigInt("9007199254740991"), "c"), 9_007_199_254_740_991);
   // The bounds, exactly: ±(2^53 - 1) is a number, ±2^53 refused.
   assert.deepEqual([BigInt("9007199254740991"), -BigInt("9007199254740991"), BigInt("0")].map((v) => coerce("int", v, "n")), [9_007_199_254_740_991, -9_007_199_254_740_991, 0]);
-  for (const v of [BigInt("9007199254740992"), -BigInt("9007199254740992"), BigInt("2") ** BigInt("63") - BigInt("1"), -(BigInt("2") ** BigInt("63"))]) {assert.throws(() => coerce("int", v, "n"), DecodeError, String(v));}
+  Iterator.from([BigInt("9007199254740992"), -BigInt("9007199254740992"), BigInt("2") ** BigInt("63") - BigInt("1"), -(BigInt("2") ** BigInt("63"))]).forEach((v) => {assert.throws(() => coerce("int", v, "n"), DecodeError, String(v));});
   assert.throws(() => coerce("int", BigInt("9007199254740993"), "big_id"), (e: Error) => e instanceof DecodeError && /^Column "big_id" holds 9007199254740993, an integer past ±\(2\^53 - 1\)/.test(e.message));
   assert.throws(() => coerce("int", 9_007_199_254_740_992, "big_id"), /Column "big_id" holds an integer past ±\(2\^53 - 1\), which the driver already rounded to 9007199254740992/);
   // A NUMERIC may hold a REAL past 2^53, which is no rounded integer.
@@ -303,12 +303,12 @@ test("coerce: a value a driver decoded, given its kind; an integer a number cann
 
 // oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
 test("a truth value: 0 or 1 in every form a driver gives it, and any other value refused, naming the column", () => {
-  for (const v of [true, 1, BigInt("1"), "1", "t", "true", Uint8Array.of(1)]) {assert.equal(coerce("bool", v, "c"), true, String(v));}
-  for (const v of [false, 0, BigInt("0"), "0", "f", "false", Uint8Array.of(0)]) {assert.equal(coerce("bool", v, "c"), false, String(v));}
+  Iterator.from([true, 1, BigInt("1"), "1", "t", "true", Uint8Array.of(1)]).forEach((v) => {assert.equal(coerce("bool", v, "c"), true, String(v));});
+  Iterator.from([false, 0, BigInt("0"), "0", "f", "false", Uint8Array.of(0)]).forEach((v) => {assert.equal(coerce("bool", v, "c"), false, String(v));});
   // The failing control: a MySQL TINYINT(1) or a SQLite BOOLEAN holds any integer the database lets in.
-  for (const [v, shown] of [[2, "2"], [-1, "-1"], [BigInt("255"), "255"], ["yes", '"yes"'], [0.5, "0.5"], [Uint8Array.of(2), "the bytes 0x02"]] as const) {
+  Iterator.from([[2, "2"], [-1, "-1"], [BigInt("255"), "255"], ["yes", '"yes"'], [0.5, "0.5"], [Uint8Array.of(2), "the bytes 0x02"]] as const).forEach(([v, shown]) => {
     assert.throws(() => coerce("bool", v, "active"), (e: Error) => e instanceof DecodeError && e.message.startsWith(`Column "active" is a boolean, stored as 0 or 1, and holds ${shown}, which is neither`), String(v));
-  }
+  });
 });
 
 // oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
@@ -324,7 +324,7 @@ test("the kinds: a BIGINT is a BigInt, and an integer a temporary table may wide
   assert.deepEqual(typeSchema(scalar("bool"), "sqlite"), { type: "boolean" });
   assert.deepEqual(typeSchema(scalar("integer"), "sqlite"), { format: "int64", type: "integer" });
   assert.deepEqual(typeSchema(scalar("numeric"), "sqlite"), { type: ["number", "string"] });
-  for (const kind of ["bool", "int", "float", "int8", "decimal", "text", "date", "timestamp", "timestamptz", "json", "bytes", "unknown"]) {assert.notEqual(kindType(kind), "Date", kind);}
+  Iterator.from(["bool", "int", "float", "int8", "decimal", "text", "date", "timestamp", "timestamptz", "json", "bytes", "unknown"]).forEach((kind) => {assert.notEqual(kindType(kind), "Date", kind);});
 });
 
 // oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
@@ -377,7 +377,7 @@ test("SQLite: a value its column's type does not allow, which a table that is no
     [9, /^TypeError: Column "big" is typed bigint and holds the text "x"/u],
     [10, /^TypeError: Column "z" is typed number \| string and holds a BLOB of 1 byte:/u],
   ];
-  for (const [id, refused] of refusals) {assert.throws(() => execute(db, q, { id }), (e: Error) => e instanceof DecodeError && refused.test(String(e)), `row ${id}`);}
+  Iterator.from(refusals).forEach(([id, refused]) => {assert.throws(() => execute(db, q, { id }), (e: Error) => e instanceof DecodeError && refused.test(String(e)), `row ${id}`);});
   // The drivers that read integers as numbers or strings: libSQL's digits are its INTEGER, any other text in a number's column is refused, and so is D1's BLOB in a string's.
   const libsql = (rows: unknown[]) => ({ execute: promiseDriverStub(() => ({ rows })), executeMultiple: async () => {} });
   const ints: QueryModule<"sqlite"> = { dialect: "sqlite", sql: "select n, big, b from loose", params: [], columns: [["n", "int"], ["big", "int8"], ["b", "bytes"]] };

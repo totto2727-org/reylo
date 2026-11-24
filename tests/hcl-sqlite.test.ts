@@ -10,7 +10,7 @@ const table = (body: string, name = "items") => `table ${JSON.stringify(name)} {
 const open = function (source: string) {
   const db = new DatabaseSync(":memory:");
   try {
-    for (const sql of sqliteSchemaFromHcl(source, "test.hcl")) {db.prepare(sql).run();}
+    Iterator.from(sqliteSchemaFromHcl(source, "test.hcl")).forEach((sql) => {db.prepare(sql).run();});
     return db;
   } catch (error) {
     db.close();
@@ -97,5 +97,5 @@ test("Atlas semantic boundary rejects unsupported expressions and declarations i
     ['schema "other" {}\n', /schema "main"/u],
     [schema(valid).replace("type = text", "type = varchar(-1)"), /nonnegative integer/u],
   ];
-  for (const [source, expected] of cases) {assert.throws(() => sqliteSchemaFromHcl(source, "invalid.hcl"), expected, source);}
+  Iterator.from(cases).forEach(([source, expected]) => {assert.throws(() => sqliteSchemaFromHcl(source, "invalid.hcl"), expected, source);});
 });

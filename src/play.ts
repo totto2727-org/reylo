@@ -101,13 +101,13 @@ export type Playground = { url: string; label: string; notice?: string; close():
 function pageDir(cwd: string): string | undefined {
   const candidates = [process.env.REYLO_PLAY_PAGE];
   // Reylo exports no package.json: its entry is resolved, and its directory found above it.
-  for (const from of [join(cwd, "noop.js"), import.meta.filename]) {
+  Iterator.from([join(cwd, "noop.js"), import.meta.filename]).forEach((from) => {
     try {
       let dir = dirname(createRequire(from).resolve("@totto2727/reylo"));
       while (dir !== dirname(dir) && !existsSync(join(dir, "package.json"))) {dir = dirname(dir);}
       candidates.push(join(dir, "play"));
     } catch {}
-  }
+  });
   candidates.push(join(import.meta.dirname, "..", "dist", "reylo", "play"));
   return candidates.find((dir): dir is string => !!dir && existsSync(join(dir, "index.html")));
 }

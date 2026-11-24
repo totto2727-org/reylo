@@ -238,7 +238,7 @@ const FILE_VARIABLES = ["NODE_EXTRA_CA_CERTS", "PGSSLROOTCERT", "PGSSLCERT", "PG
  */
 const engineEnv = function (): NodeJS.ProcessEnv {
   const env = { ...process.env };
-  for (const name of FILE_VARIABLES) {if (env[name] && env[name] !== "system") {env[name] = resolve(env[name]);}}
+  Iterator.from(FILE_VARIABLES).forEach((name) => {if (env[name] && env[name] !== "system") {env[name] = resolve(env[name]);}});
   return env;
 };
 
@@ -301,7 +301,7 @@ class Channel {
     });
     // Neither the child nor its pipes keep this process alive, from the start (`#hold`).
     child.unref();
-    for (const stream of [child.stdin, child.stdout, child.stderr]) {(stream as unknown as { unref?(): void }).unref?.();}
+    Iterator.from([child.stdin, child.stdout, child.stderr]).forEach((stream) => {(stream as unknown as { unref?(): void }).unref?.();});
   }
 
   public get ended(): boolean {
@@ -349,8 +349,8 @@ class Channel {
   }
 
   #end(why: string): void {
-    this.#ended ??= why;
-    for (const resolve of this.#pending.values()) {resolve({ status: "unreachable", message: this.#ended });}
+    const message = (this.#ended ??= why);
+    Iterator.from(this.#pending.values()).forEach((resolve) => {resolve({ status: "unreachable", message });});
     this.#pending.clear();
     this.#hold(false);
   }

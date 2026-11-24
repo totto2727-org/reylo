@@ -326,9 +326,9 @@ export function duration(x: string): string {
   const time = regexMatch[4] === "-" ? -1 : 1;
   // Each designator Postgres writes, its magnitude and its sign; a zero is left out.
   const parts: [designator: string, magnitude: string, sign: number][] = [];
-  for (const [designator, digits] of [["Y", regexMatch[1]], ["M", regexMatch[2]], ["D", regexMatch[3]]] as const) {
+  Iterator.from([["Y", regexMatch[1]], ["M", regexMatch[2]], ["D", regexMatch[3]]] as const).forEach(([designator, digits]) => {
     if (!matchesUndefined(digits) && +digits !== 0) {parts.push([designator, String(Math.abs(+digits)), digits.startsWith("-") ? -1 : 1]);}
-  }
+  });
   const date = parts.length;
   if (+(regexMatch[5] ?? 0) !== 0) {parts.push(["H", String(+regexMatch[5]!), time]);}
   if (+(regexMatch[6] ?? 0) !== 0) {parts.push(["M", String(+regexMatch[6]!), time]);}

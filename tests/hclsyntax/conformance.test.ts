@@ -44,7 +44,7 @@ const assertNumericLexemes = function (value: unknown, source: Buffer, startByte
   Object.values(v).forEach((item) => {assertNumericLexemes(item, source, startByte);});
 };
 
-for (const [index, fixture] of fixtures.entries()) {
+Iterator.from(fixtures.entries()).forEach(([index, fixture]) => {
   // oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
   test(`official HCL ${fixture.api} #${index}: ${fixture.name}`, () => {
     const source = Buffer.from(fixture.source, 'base64');
@@ -82,17 +82,17 @@ for (const [index, fixture] of fixtures.entries()) {
       }
     }
   });
-}
+});
 
 // oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
 test('official HCL fixture manifest maps every exported case without silent omissions', () => {
   assert.equal(fixtures.length, manifest.fixtures);
-  for (const functions of Object.values(manifest.functions)) {for (const entry of functions) {
+  Iterator.from(Object.values(manifest.functions)).forEach((functions) => {for (const entry of functions) {
     const matched = fixtures.filter(fixture => fixture.name.split('/')[0] === entry.name);
     assert.equal(matched.length, entry.calls, entry.name);
     assert.equal(new Set(matched.map(fixture => fixture.name)).size, entry.cases, entry.name);
-  }}
-  for (const required of ['TestParseConfig', 'TestParseConfig_incompleteFunctionCall', 'TestParseConfigDiagnostics', 'TestScanTokens_normal', 'TestScanTokens_template', 'TestScanStringLit', 'TestCheckInvalidTokensTest', 'TestValidIdentifier', 'TestExpressionParseAndValue', 'TestExpressionErrorMessages', 'TestParseExpression_incompleteFunctionCall', 'TestTemplateExprParseAndValue', 'TestTemplateExprIsStringLiteral']) {assert(fixtures.some(fixture => fixture.name.split('/')[0] === required), required);}
+  }});
+  Iterator.from(['TestParseConfig', 'TestParseConfig_incompleteFunctionCall', 'TestParseConfigDiagnostics', 'TestScanTokens_normal', 'TestScanTokens_template', 'TestScanStringLit', 'TestCheckInvalidTokensTest', 'TestValidIdentifier', 'TestExpressionParseAndValue', 'TestExpressionErrorMessages', 'TestParseExpression_incompleteFunctionCall', 'TestTemplateExprParseAndValue', 'TestTemplateExprIsStringLiteral']).forEach((required) => {assert(fixtures.some(fixture => fixture.name.split('/')[0] === required), required);});
 });
 
 // Full three-scenario table from upstream hclsyntax/peeker_test.go.

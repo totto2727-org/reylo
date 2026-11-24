@@ -123,12 +123,12 @@ const byKind = function (kind: Kind | undefined): Fix | undefined {
 /** Applies each column's fix, in place: the drivers build new rows per call. */
 const fixRows = function (rows: Record<string, unknown>[], fixes: (Readonly<[string, Fix]>)[]): void {
   if (!fixes.length) {return;}
-  for (const row of rows) {
+  Iterator.from(rows).forEach((row) => {
     for (const [name, fix] of fixes) {
       const v = row[name];
       if (!matchesNull(v) && !matchesUndefined(v)) {row[name] = fix(v, name);}
     }
-  }
+  });
 };
 
 /** Mysql2's execute(), resolving to [rows, fields]. */
@@ -145,12 +145,12 @@ export async function mysql2(m: AnyClient, text: string, values: unknown[], colu
     if (fix) {fixes.push([f.name, fix]);}
   });
   // A DATETIME's, TIMESTAMP's and TIME's text, padded to the column's own fraction digits.
-  for (const f of described) {
+  Iterator.from(described).forEach((f) => {
     if (f.columnType === DATETIME || f.columnType === TIMESTAMP || (f.columnType === TIME && f.decimals > 0)) {
       const decimals = f.decimals > 6 ? 0 : f.decimals; const type = f.columnType;
       fixes.push([f.name, (v) => (matchesString(v) ? wallClock(v, decimals, type) : v)]);
     }
-  }
+  });
   fixRows(rows as Record<string, unknown>[], fixes);
   return rows;
 }
@@ -191,10 +191,10 @@ type MariadbColumn = { type?: string; columnType?: number; name?: string | (() =
 /** The fixes the module's kinds call for, for a driver that tells each type by its value. */
 function columnFixes(columns: Columns | undefined): (Readonly<[string, Fix]>)[] {
   const fixes: (Readonly<[string, Fix]>)[] = [];
-  for (const [name, kind] of columns ?? []) {
+  Iterator.from(columns ?? []).forEach(([name, kind]) => {
     const fix = byKind(kind);
     if (fix) {fixes.push([name, fix]);}
-  }
+  });
   return fixes;
 }
 

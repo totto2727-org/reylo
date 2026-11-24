@@ -21,8 +21,8 @@ for (const [source, destination, prefix, notice] of [
     const kind = match[2] === 'byte' ? 'Uint8Array' : match[2] === 'int16' ? 'Int16Array' : match[2] === 'uint16' ? 'Uint16Array' : 'Int32Array';
     output += `export const ${match[1].slice(prefix.length + 1)} = new ${kind}([${match[3]}\n]);\n\n`;
   }
-  for (const match of input.matchAll(/const (\w+) int = (\d+)/gu)) {
+  Iterator.from(input.matchAll(/const (\w+) int = (\d+)/gu)).forEach((match) => {
     output += `export const ${match[1].replace(/^hcltok_|^hclstrtok_/u, '')} = ${match[2]};\n`;
-  }
+  });
   writeFileSync(resolve(out, destination), output);
 }

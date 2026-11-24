@@ -859,13 +859,13 @@ function flushHeredocTemplateParts(parts: TemplateParts): void {
     }
     if (token.kind === 'literal' && token.value.endsWith('\n')) {newline = true;}
   }
-  for (const token of adjust) {
+  Iterator.from(adjust).forEach((token) => {
     const bytes = encoder.encode(token.value); const clusters = graphemeClusters(bytes);
     let byteCount = 0;
     for (let i = 0; i < minSpaces; i++) {byteCount += clusters[i]!.length;}
     token.value = decoder.decode(bytes.subarray(byteCount));
     token.range.start.column += minSpaces; token.range.start.byte += byteCount;
-  }
+  });
 }
 function meldConsecutiveStringLiterals(parts: TemplateParts): void {
   let i = 1;
@@ -885,11 +885,11 @@ export function parseStringLiteralToken(token: Token): { value: string; diagnost
   for (const slice of scanStringLit(token.bytes, quoted)) {
     if (!slice.length) {continue;}
     const start = { ...end };
-    for (const cluster of graphemeClusters(slice)) {
+    Iterator.from(graphemeClusters(slice)).forEach((cluster) => {
       end = { ...end, byte: end.byte + cluster.length };
       if (cluster[0] === 13 || cluster[0] === 10) { end.line++; end.column = 1 }
       else {end.column++;}
-    }
+    });
     const range: Range = { filename: token.range.filename, start, end: { ...end } };
     const invalid = (detail: string): void => { diagnostics.push(error('Invalid escape sequence', detail, range)) };
     if (slice[0] === 92 && quoted) {
@@ -918,6 +918,6 @@ export function parseStringLiteralToken(token: Token): { value: string; diagnost
   }
   const joined = new Uint8Array(output.reduce((length, bytes) => length + bytes.length, 0));
   let offset = 0;
-  for (const slice of output) { joined.set(slice, offset); offset += slice.length }
+  Iterator.from(output).forEach((slice) => { joined.set(slice, offset); offset += slice.length });
   return { value: decoder.decode(joined), diagnostics };
 }

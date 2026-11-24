@@ -117,15 +117,15 @@ const learn = async function (key: object, oids: Iterable<number>, load: Load): 
   const rows = await load(catalogSql([...missing]));
   // An array oid takes its element's kind, never the text its own row as a type would give it.
   const arrays = new Set<number>();
-  for (const [array, base, isText, delim, oid, name] of rows) {
+  Iterator.from(rows).forEach(([array, base, isText, delim, oid, name]) => {
     const element = isText === "true" ? undefined : (builtin(Number(base))?.kind ?? (name ? scalarKind(name, "postgres") : "text"));
     if (missing.has(Number(array))) {
       arrays.add(Number(array));
       known.set(Number(array), matchesUndefined(element) || element.endsWith("[]") ? { kind: "text", delim: "," } : { kind: `${element}[]`, delim: delim ?? "," });
     }
     if (missing.has(Number(oid)) && !arrays.has(Number(oid))) {known.set(Number(oid), { kind: element ?? "text", delim: "," });}
-  }
-  for (const oid of missing) {if (!known.has(oid)) {known.set(oid, { kind: "text", delim: "," });}}
+  });
+  Iterator.from(missing).forEach((oid) => {if (!known.has(oid)) {known.set(oid, { kind: "text", delim: "," });}});
 };
 
 /**
@@ -201,16 +201,16 @@ const pgFamily = async function (key: object, run: (types: object) => Promise<Pg
   // Learned from the module's columns where the result has their fields, else from the catalog.
   if (result.fields && !Array.isArray(result)) {await fieldDecoders(result.fields.map((f) => ({ name: f.name, oid: f.dataTypeID })), columns, key, load);}
   const oids = new Set<number>();
-  for (const row of rows) {Object.values(row).forEach((v) => {if (v instanceof Pending) {oids.add(v.oid);}});}
+  Iterator.from(rows).forEach((row) => {Object.values(row).forEach((v) => {if (v instanceof Pending) {oids.add(v.oid);}});});
   await learn(key, oids, load);
   const known = learnedOf(key);
   const decoders = new Map([...oids].map((oid) => [oid, textDecoder(known.get(oid)!.kind, known.get(oid)!.delim)]));
-  for (const row of rows) {
+  Iterator.from(rows).forEach((row) => {
     for (const name in row) {
       const v = row[name];
       if (v instanceof Pending) {row[name] = decoders.get(v.oid)!(v.text);}
     }
-  }
+  });
   return rows;
 };
 
@@ -295,7 +295,7 @@ async function pglite(db: AnyClient, text: string, values: unknown[], columns: C
   let named = pgliteOids.get(text);
   const oids = named ?? new Set([...builtinOids, ...Object.keys(db.parsers ?? {}).map(Number)]);
   const parsers: Record<number, Decoder> = {};
-  for (const oid of oids) {parsers[oid] = builtinDecoder(oid) ?? keepText;}
+  Iterator.from(oids).forEach((oid) => {parsers[oid] = builtinDecoder(oid) ?? keepText;});
   const result = await db.query(text, values, { rowMode: "object", parsers });
   const rows: Record<string, unknown>[] = result.rows;
   const fields: Field[] = (result.fields ?? []).map((f: { name: string; dataTypeID: number }) => ({ name: f.name, oid: f.dataTypeID }));
@@ -306,13 +306,13 @@ async function pglite(db: AnyClient, text: string, values: unknown[], columns: C
     const load: Load = async (sql) => (await db.query(sql, [], { rowMode: "array", parsers: { 25: keepText } })).rows;
     const decoders = await fieldDecoders(fields, columns, db, load);
     const kinds = fields.map((f, i) => (columns && columns.length === fields.length ? columns[i]![1] : (builtin(f.oid)?.kind ?? learnedOf(db).get(f.oid)?.kind ?? "text")));
-    for (const [f, i] of after) {
+    Iterator.from(after).forEach(([f, i]) => {
       const decode = decoders[i]!;
       for (const row of rows) {
         const v = row[f.name];
         if (!matchesNull(v) && !matchesUndefined(v)) {row[f.name] = matchesString(v) ? decode(v) : coerce(kinds[i]!, v, f.name);}
       }
-    }
+    });
   }
   if (!named || fields.some((f) => !named!.has(f.oid))) {
     if (pgliteOids.size >= PGLITE_STATEMENTS) {pgliteOids.clear();}
@@ -339,11 +339,11 @@ export async function postgresJs(c: AnyClient, text: string, params: unknown[], 
   const fields: Field[] = (raw.columns ?? []).map((f: { name: string; type: number }) => ({ name: f.name, oid: f.type }));
   if (!raw.length) {return [];}
   // A row transform (`transform: { row }`) runs on `.raw()` rows too, and leaves them not an array of each value's bytes.
-  for (const row of raw) {
+  Iterator.from(raw).forEach((row) => {
     if (!Array.isArray(row) || row.length !== fields.length || !row.every((v) => matchesNull(v) || v instanceof Uint8Array)) {
       throw new TypeError(`Reylo cannot read this postgres.js client's rows: its transform.row rewrites every row, Reylo's too, so they would not have the types the query declares. Run Reylo's queries on a postgres() instance without transform.row.`);
     }
-  }
+  });
   const load: Load = async (sql) => ((await c.unsafe(sql).raw()) as (BufferLike | null)[][]).map((r) => r.map((v) => (matchesNull(v) ? null : textOf(v))));
   const decoders = await fieldDecoders(fields, columns, c, load);
   // The module's names, which a `transform.column` of the app's does not rename; a query defined by
@@ -481,10 +481,10 @@ const slonikTemplate = function (text: string, values: Readonly<unknown[]>): [Te
   }
   const strings: string[] = [];
   let last = 0;
-  for (const p of placeholders) {
+  Iterator.from(placeholders).forEach((p) => {
     strings.push(text.slice(last, p.start));
     last = p.end;
-  }
+  });
   strings.push(text.slice(last));
   // A tag takes only what a template literal gives it: frozen strings and their raw form.
   const template = Object.freeze(Object.assign(strings, { raw: Object.freeze([...strings]) })) as unknown as TemplateStringsArray;
@@ -517,9 +517,9 @@ function slonikRows(rows: Record<string, unknown>[], fields: { name: string; dat
       const b = builtin(f.dataTypeId);
       return b ? ([f.name, b.kind, b.delim] as const) : ([f.name, "text"] as const);
     });
-  for (const row of rows) {
+  Iterator.from(rows).forEach((row) => {
     for (const [name, kind, delim] of work) {row[name] = slonikValue(kind, row[name], name, delim);}
-  }
+  });
   return rows;
 }
 

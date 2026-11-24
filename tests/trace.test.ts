@@ -145,11 +145,11 @@ test("a store bound to start is the current one while the driver runs, so its sp
 // oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
 test("a query builds no context while nothing subscribes, and is published once anything subscribes to any event", () => {
   assert.equal(listening(), undefined);
-  for (const event of ["start", "end", "asyncStart", "asyncEnd", "error"] as const) {
+  Iterator.from(["start", "end", "asyncStart", "asyncEnd", "error"] as const).forEach((event) => {
     const listener = () => {};
     channel[event].subscribe(listener);
     assert.ok(listening(), event);
     channel[event].unsubscribe(listener);
-  }
+  });
   assert.equal(listening(), undefined);
 });

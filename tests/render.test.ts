@@ -89,7 +89,7 @@ test("a scalar that names two types is either", () => {
 
 // oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
 test("pgvector's vector and halfvec are arrays of numbers, as columns and as parameters; inside a document their text", () => {
-  for (const name of ["vector", "halfvec"]) {
+  Iterator.from(["vector", "halfvec"]).forEach((name) => {
     assert.equal(renderType(scalar(name), false, "postgres"), "number[]");
     assert.equal(renderType(scalar(name), true, "postgres"), "string");
     assert.equal(renderParamType(scalar(name), "postgres"), "number[]");
@@ -97,7 +97,7 @@ test("pgvector's vector and halfvec are arrays of numbers, as columns and as par
     assert.equal(renderParamType({ kind: "array", of: scalar(name) }, "postgres"), "number[][]");
     assert.deepEqual(typeSchema(scalar(name), "postgres"), { items: { format: "float", type: "number" }, type: "array" });
     assert.deepEqual(typeSchema(scalar(name), "postgres", false, true), { type: "string" });
-  }
+  });
   // A sparsevec stays its text.
   assert.equal(renderType(scalar("sparsevec"), false, "postgres"), "string");
 });
@@ -124,7 +124,7 @@ test("inside a document an oid is its text, a geometry its GeoJSON, and an exten
   assert.equal(renderType(scalar("geometry"), true, "postgres"), "{ type: string; [key: string]: Json | undefined }");
   assert.deepEqual(typeSchema(scalar("geometry"), "postgres", false, true), { description: "a GeoJSON geometry", properties: { type: { type: "string" } }, required: ["type"], type: "object" });
   // A pgvector vector, a geography, a cube or an isbn inside a document is the JSON string of its text: `{"v" : "[1,2,3]"}`.
-  for (const name of ["vector", "halfvec", "sparsevec", "geography", "cube", "seg", "isbn", "semver", "ulid", "point"]) {assert.equal(renderType(scalar(name), true, "postgres"), "string", name);}
+  Iterator.from(["vector", "halfvec", "sparsevec", "geography", "cube", "seg", "isbn", "semver", "ulid", "point"]).forEach((name) => {assert.equal(renderType(scalar(name), true, "postgres"), "string", name);});
 });
 
 // oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
@@ -207,11 +207,11 @@ const admits = function (column: EngineType, param: EngineType, dialect: "postgr
 
 // oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
 test("a parameter takes every value run returns for the column it is compared with, on every dialect: the round-trip rule", () => {
-  for (const [dialect, pairs] of Object.entries(ROUND_TRIPS) as ["postgres" | "mysql" | "sqlite", [EngineType, EngineType][]][]) {
+  Iterator.from(Object.entries(ROUND_TRIPS) as ["postgres" | "mysql" | "sqlite", [EngineType, EngineType][]][]).forEach(([dialect, pairs]) => {
     for (const [column, param] of pairs) {
       assert.ok(admits(column, param, dialect), `${dialect}: a column of ${JSON.stringify(column)} returns ${renderType(column, false, dialect)}, which a parameter of ${JSON.stringify(param)}, typed ${renderParamType(param, dialect)}, does not take`);
     }
-  }
+  });
 });
 
 // oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
@@ -243,11 +243,11 @@ test("two columns or keys of one name keep the last, as a row object and JSON.pa
 test("every date and time parameter takes a string: a timestamptz one the text that names its zone, which run returns, and no Date", () => {
   assert.equal(renderParamType(scalar("timestamptz"), "postgres"), "string");
   assert.equal(renderParamType({ kind: "array", of: scalar("timestamptz") }, "postgres"), "string[]");
-  for (const name of ["timestamp", "date"]) {
+  Iterator.from(["timestamp", "date"]).forEach((name) => {
     assert.equal(renderParamType(scalar(name), "postgres"), "string");
     assert.equal(renderParamType(scalar(name), "mysql"), "string");
     assert.equal(renderParamType({ kind: "array", of: scalar(name) }, "postgres"), "string[]");
-  }
+  });
   // What MySQL answers by what is bound for a placeholder compared with a DATE and a DATETIME.
   assert.equal(renderParamType(scalar("date|timestamp"), "mysql"), "string");
 });
@@ -281,10 +281,10 @@ test("a returned array's elements may be NULL unless the statement shows they ar
 
 // oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
 test("a JSON value nothing constrains is any JSON value, Json, and so is a value nothing types inside JSON the statement builds", () => {
-  for (const dialect of ["postgres", "mysql", "sqlite", "duckdb"] as const) {
+  Iterator.from(["postgres", "mysql", "sqlite", "duckdb"] as const).forEach((dialect) => {
     assert.equal(renderType({ kind: "json" }, false, dialect), "Json");
     assert.equal(renderParamType({ kind: "json" }, dialect), "Json");
-  }
+  });
   // Json admits null, which a NOT NULL jsonb column can hold, so a nullable one reads the same.
   assert.equal(orNull("Json"), "Json");
   assert.equal(orNull("string"), "string | null");

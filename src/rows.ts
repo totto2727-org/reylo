@@ -238,7 +238,7 @@ function scalar(name: string, written: string, v: unknown, dialect: Dialect, fai
       const n = /\(\s*(\d+)\s*\)/u.exec(written)?.[1];
       if (!matchesUndefined(n) && v.length > Number(n)) {fail(`is ${written}, at most ${n} bytes; got ${v.length}, which the database would refuse or cut.`);}
       let hex = dialect === "postgres" ? "\\x" : "";
-      for (const byte of v) {hex += (byte < 16 ? "0" : "") + byte.toString(16);}
+      Iterator.from(v).forEach((byte) => {hex += (byte < 16 ? "0" : "") + byte.toString(16);});
       return hex;
     }
     case "interval": {
@@ -386,12 +386,12 @@ function decimal(written: string, v: unknown, fail: (message: string) => never):
 export function variant(text: string, structured: Structured, fields: Readonly<RowField[]>, present: ReadonlySet<string>): string {
   const lists = [...structured.lists].sort((a, b) => b.start - a.start);
   let out = text;
-  for (const list of lists) {
+  Iterator.from(lists).forEach((list) => {
     const kept = list.entries.filter((_, k) => {
       const f = fields[k];
       return matchesUndefined(f) || !f.optional || present.has(f.name);
     });
     out = out.slice(0, list.start) + kept.join(", ") + out.slice(list.end);
-  }
+  });
   return out;
 }

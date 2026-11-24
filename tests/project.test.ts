@@ -93,13 +93,13 @@ test("the project file may be named .reylo.yml, and both names beside one packag
 // oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
 test("a types section, removed on 2026-10-20, is refused where it stands, whatever it holds; package.json decides no type", async () => {
   const e = await engine("sqlite");
-  for (const types of ["types:\n  dates: temporal\n", "types: {}\n", "types:\n  datez: Date\n"]) {
+  Iterator.from(["types:\n  dates: temporal\n", "types: {}\n", "types:\n  datez: Date\n"]).forEach((types) => {
     const root = tree({ "package.json": JSON.stringify({ dependencies: { mariadb: "^3", "@planetscale/database": "^1" } }), ".reylo.yaml": `direct_url: mysql://root@127.0.0.1:3306/app\n\n${types}` });
     const r = resolveProject(e, root, {});
     assert.match(r.error!, /^\.reylo\.yaml:3:1: types: the types section was removed on 2026-10-20\. Reylo now gives every value one type on every driver, whatever the driver's settings: .* Delete the section\.$/, types);
     assert.equal("repr" in r || "driver" in r, false);
     assert.ok(!r.watched.includes(join(root, "package.json")));
-  }
+  });
   // A key that merely starts with `types` is the engine's to refuse, and a nested `types:` is another section's.
   const nested = tree({ "package.json": "{}", ".reylo.yaml": "direct_url: postgres://x/db\napi:\n  types: whatever\n" });
   assert.equal(resolveProject(e, nested, {}).error, undefined);

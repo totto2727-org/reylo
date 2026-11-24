@@ -17,6 +17,6 @@ console.log(`created #${post.id} ${post.title}`);
 
 const posts = await listPosts.run(db, { role: "admin" });
 //    ^? { id: number; title: string; body: string | null; author: string }[]
-for (const post of posts) {console.log(`#${post.id} ${post.title} by ${post.author}`);}
+posts.forEach((post) => {console.log(`#${post.id} ${post.title} by ${post.author}`);});
 
 db.close();

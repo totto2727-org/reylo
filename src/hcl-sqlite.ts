@@ -17,7 +17,7 @@ const fail: (node: { range: { filename: string; start: { line: number; column: n
 
 const shape = function (body: Body, attributes: Readonly<string[]>, blocks: Readonly<string[]>) {
   Object.values(body.attributes).forEach((attribute) => {if (!attributes.includes(attribute.name)) {fail(attribute, `Unsupported Atlas SQLite attribute ${attribute.name}.`);}});
-  for (const block of body.blocks) {if (!blocks.includes(block.type)) {fail(block, `Unsupported Atlas SQLite block ${block.type}.`);}}
+  Iterator.from(body.blocks).forEach((block) => {if (!blocks.includes(block.type)) {fail(block, `Unsupported Atlas SQLite block ${block.type}.`);}});
 };
 
 const labels = function (block: Block, count: number): string[] {
@@ -116,7 +116,7 @@ const indexes = function (table: Table): { constraints: string[]; statements: st
   const constraints: string[] = [];
   const statements: string[] = [];
   const names = new Set<string>();
-  for (const block of table.block.body.blocks.filter((block) => block.type === "index")) {
+  Iterator.from(table.block.body.blocks.filter((block) => block.type === "index")).forEach((block) => {
     const name = labels(block, 1)[0]!;
     if (names.has(name)) {fail(block, `Duplicate index ${name}.`);}
     names.add(name);
@@ -151,7 +151,7 @@ const indexes = function (table: Table): { constraints: string[]; statements: st
     } else {
       statements.push(`CREATE ${unique ? "UNIQUE " : ""}INDEX ${identifier(name)} ON ${identifier(table.name)} (${terms.join(", ")})${where}`);
     }
-  }
+  });
   return { constraints, statements };
 };
 
@@ -190,7 +190,7 @@ export function sqliteSchemaFromHcl(source: string | Uint8Array, filename = "sch
   if (schemas.length !== 1 || labels(schemas[0]!, 1)[0] !== "main") {fail(body, "Exactly one SQLite schema \"main\" declaration is required.");}
   shape(schemas[0]!.body, [], []);
   const tables = new Map<string, Table>();
-  for (const block of body.blocks.filter((block) => block.type === "table")) {
+  Iterator.from(body.blocks.filter((block) => block.type === "table")).forEach((block) => {
     const name = labels(block, 1)[0]!;
     if (tables.has(name)) {fail(block, `Duplicate table ${name}.`);}
     shape(block.body, ["schema", "without_rowid", "strict"], ["column", "primary_key", "foreign_key", "index", "check"]);
@@ -204,11 +204,11 @@ export function sqliteSchemaFromHcl(source: string | Uint8Array, filename = "sch
     }
     if (!columns.size) {fail(block, "A SQLite table requires at least one column.");}
     tables.set(name, { name, block, columns });
-  }
+  });
   const statements: string[] = [];
   const indexStatements: string[] = [];
   const indexNames = new Set<string>();
-  for (const table of tables.values()) {
+  Iterator.from(tables.values()).forEach((table) => {
     const definitions = table.block.body.blocks.filter((block) => block.type === "column").map((column) => {
       shape(column.body, ["type", "null", "default"], []);
       let sql = `${identifier(column.labels[0]!)} ${columnType(attribute(column.body, "type"))}`;
@@ -246,6 +246,6 @@ export function sqliteSchemaFromHcl(source: string | Uint8Array, filename = "sch
     if (table.block.body.attributes.strict && boolean(attribute(table.block.body, "strict"))) {options.push("STRICT");}
     statements.push(`CREATE TABLE ${identifier(table.name)} (${definitions.join(", ")})${options.length ? ` ${options.join(", ")}` : ""}`);
     indexStatements.push(...index.statements);
-  }
+  });
   return [...statements, ...indexStatements];
 }

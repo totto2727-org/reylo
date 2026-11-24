@@ -245,7 +245,7 @@ async function startD1(entry: string, dir: string, ended: () => void): Promise<D
   let running = false;
   child.once("exit", () => {
     if (running) {ended();}
-    for (const settle of pending.values()) {settle(undefined);}
+    Iterator.from(pending.values()).forEach((settle) => {settle(undefined);});
     pending.clear();
   });
   const stop = () => {

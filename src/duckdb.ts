@@ -162,7 +162,7 @@ const copyOf = function (path: string, fresh = false): string {
   if (!cleanup) {
     cleanup = true;
     process.once("exit", () => {
-      for (const { dir } of copies.values()) {rmSync(dir, { force: true, recursive: true });}
+      Iterator.from(copies.values()).forEach(({ dir }) => {rmSync(dir, { force: true, recursive: true });});
     });
   }
   return file;

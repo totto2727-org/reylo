@@ -296,9 +296,9 @@ export function defineQuery<Params, Row, C extends Cardinality, D extends Dialec
     if (matchesUndefined(columns)) {throw new TypeError("A query defined by hand without its columns cannot map rows to its output.");}
     const keyed = rows.map((row) => {
       if (matchesNull(row) || !hasObjectType(row) || Array.isArray(row)) {throw new DecodeError("Expected an object row from the query executor.");}
-      for (const [name] of columns) {
+      Iterator.from(columns).forEach(([name]) => {
         if (!Object.hasOwn(row, name)) {throw new DecodeError(`The query executor's row is missing column "${name}".`);}
-      }
+      });
       return { ...row };
     });
     // Normalize validates the SQLite storage classes, as the existing runtime path does.

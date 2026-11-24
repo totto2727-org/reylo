@@ -82,13 +82,13 @@ test("postgres: every client gets an array for a SQL array parameter as its lite
   await execute(bun, typed, typedValues);
   await execute({ unsafe }, typed, typedValues);
   assert.equal(seen.length, 2);
-  for (const [ids, name, data] of seen) {
+  Iterator.from(seen).forEach(([ids, name, data]) => {
     assert.deepEqual([ids, name], ['{"1","3"}', "ada"]);
     // Not a string, which they would store as a JSON string, and not the array, whose type they would take from its first element.
     assert.equal(typeof data, "object");
     assert.ok(!Array.isArray(data));
     assert.equal(JSON.stringify(data), '[1,{"a":"b"}]');
-  }
+  });
   // Postgres.js (typed() beside unsafe()), whose JSON serializer Drizzle replaces with one that passes the value through.
   const postgresJs = { unsafe, typed: (value: unknown, type: number) => ({ value, type }) };
   await execute(postgresJs, typed, typedValues);
@@ -121,7 +121,7 @@ test("postgres: a JSON parameter's value is a JavaScript value, which every driv
   const postgresJs = { unsafe: async (_: string, values?: unknown[]) => (seen.push(values!.map(unwrap)), []), typed: (value: unknown, type: number) => ({ value, type }) };
   await execute(postgresJs, jsonQuery, jsonValues);
   assert.equal(seen.length, 6);
-  for (const values of seen) {assert.deepEqual(values, jsonTexts);}
+  Iterator.from(seen).forEach((values) => {assert.deepEqual(values, jsonTexts);});
 });
 
 // oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
@@ -139,7 +139,7 @@ test("mysql and sqlite: every driver gets a JSON parameter as its JSON text, and
   assert.equal(seen.length, 4);
   // Node:sqlite would read an array as its named parameters.
   assert.deepEqual((execute(new DatabaseSync(":memory:"), lq, values) as object[]).map((r) => ({ ...r })), [{ a: "[1,2]", again: "[1,2]", b: '"abc"', name: "ada", z: null }]);
-  for (const v of seen) {assert.deepEqual(v, expected);}
+  Iterator.from(seen).forEach((v) => {assert.deepEqual(v, expected);});
 });
 
 // oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
@@ -150,7 +150,7 @@ test("postgres: pg's family, PGlite and Neon, which write any array as an array 
   await execute(pgp, typed, typedValues);
   await execute((_: string, values?: unknown[]) => (seen.push(values!), Promise.resolve([])), typed, typedValues);
   assert.equal(seen.length, 3);
-  for (const values of seen) {assert.deepEqual(values, ['{"1","3"}', "ada", '[1,{"a":"b"}]']);}
+  Iterator.from(seen).forEach((values) => {assert.deepEqual(values, ['{"1","3"}', "ada", '[1,{"a":"b"}]']);});
 });
 
 // oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
@@ -217,7 +217,7 @@ test("a query without inputs, defined by hand or built before them, binds every 
   await execute(bun, bare, typedValues);
   await execute({ unsafe }, bare, typedValues);
   await execute({ query: async (_: string, values?: unknown[]) => (seen.push(values!), { rows: [] }) }, bare, typedValues);
-  for (const values of seen) {assert.deepEqual(values, [[1, 3], "ada", [1, { a: "b" }]]);}
+  Iterator.from(seen).forEach((values) => {assert.deepEqual(values, [[1, 3], "ada", [1, { a: "b" }]]);});
   // Hand-written inputs work through the runtime's own lexer too, a repeated name included.
   const hand: QueryModule<"postgres"> = { dialect: "postgres", sql: "select :ids::int[] = :ids::int[]", params: ["ids"], inputs: { ids: { type: { kind: "array", of: { kind: "scalar", name: "int4" } } } } };
   seen.length = 0;
@@ -505,7 +505,7 @@ test("every other driver gets a binary value as it is, pg-promise included, sinc
   await execute({ query: promiseDriverStub(() => [[], []] as [unknown, unknown]), execute: async (_: unknown, values?: unknown[]) => (seen.push(values![0]), [[], []] as [unknown, unknown]) }, { ...bin, sql: "select hex(:b)", params: ["b"] }, { b: plain });
   await execute({ prepare: () => ({ all: (...values: unknown[]) => (seen.push(values[0]), []) }) }, liteq, { b: plain });
   assert.equal(seen.length, 5);
-  for (const v of seen) {assert.equal(v, plain);}
+  Iterator.from(seen).forEach((v) => {assert.equal(v, plain);});
 });
 
 // oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.

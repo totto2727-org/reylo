@@ -99,7 +99,7 @@ test("two databases the project uses in turn keep an entry each, so neither anal
   assert.deepEqual(sources, ["database 2", "database 3", "cache 2", "cache 3"]);
   // Where neither can be reached, a URL with no entry of its own reads the one written last, by
   // The time it records, which a copy that resets the files' times (cp -r, fs.cpSync) keeps.
-  for (const f of ["app.db", "test.db"]) {renameSync(join(root, f), join(root, `${f}.gone`));}
+  Iterator.from(["app.db", "test.db"]).forEach((f) => {renameSync(join(root, f), join(root, `${f}.gone`));});
   const queries = join(root, ".reylo", "queries");
   const [older, newer] = readdirSync(queries).map((n) => join(queries, n)).sort((a, b) => JSON.parse(readFileSync(a, "utf8")).at - JSON.parse(readFileSync(b, "utf8")).at);
   utimesSync(newer!, new Date(2000, 0, 1), new Date(2000, 0, 1));

@@ -80,10 +80,10 @@ test("a default a structured insert copied is a fact by its text: changed, given
 
 // oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
 test("a SQLite default is compared in one spelling, as node:sqlite and Turso's engine write the same one differently", () => {
-  for (const [sqlite, turso] of [["member", "'member'"], ['"quoted"', "'quoted'"], ["lower(hex(randomblob(4)))", "(lower (hex (randomblob (4))))"], ["-7", "- 7"], ["current_timestamp", "CURRENT_TIMESTAMP"], ["true", "TRUE"], ["x'00ff'", "x'00ff'"], ["'it''s A b'", "'it''s A b'"]]) {
+  Iterator.from([["member", "'member'"], ['"quoted"', "'quoted'"], ["lower(hex(randomblob(4)))", "(lower (hex (randomblob (4))))"], ["-7", "- 7"], ["current_timestamp", "CURRENT_TIMESTAMP"], ["true", "TRUE"], ["x'00ff'", "x'00ff'"], ["'it''s A b'", "'it''s A b'"]]).forEach(([sqlite, turso]) => {
     assert.equal(sqliteDefault(sqlite!), sqliteDefault(turso!), `${sqlite} and ${turso}`);
-  }
-  for (const [a, b] of [["'member'", "'Member'"], ["'a b'", "'ab'"], ["7", "-7"], ["member", "'guest'"]]) {assert.notEqual(sqliteDefault(a!), sqliteDefault(b!), `${a} and ${b}`);}
+  });
+  Iterator.from([["'member'", "'Member'"], ["'a b'", "'ab'"], ["7", "-7"], ["member", "'guest'"]]).forEach(([a, b]) => {assert.notEqual(sqliteDefault(a!), sqliteDefault(b!), `${a} and ${b}`);});
   const fresh: Fresh = { query: "…", rows: [["a", "role", "TEXT", "1", "1", "lower(hex(randomblob(4)))"]], inserts: ["a"], defaults: [["a", "role"]] };
   assert.deepEqual(differences(fresh, [["a", "role", "text", "1", "1", "(lower (hex (randomblob (4))))"]], "sqlite"), []);
   assert.equal(differences(fresh, [["a", "role", "text", "1", "1", "(lower (hex (randomblob (4))))"]], "postgres")?.length, 1);

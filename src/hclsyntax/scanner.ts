@@ -42,14 +42,14 @@ function trimSpace(data: Uint8Array): Uint8Array {
   const decoded = new TextDecoder('utf-8', { ignoreBOM: true }).decode(data);
   let leading = true;
   let trailing = 0;
-  for (const ch of decoded) {
+  Iterator.from(decoded).forEach((ch) => {
     const n = ch.codePointAt(0)!;
     const width = n <= 0x7F ? 1 : n <= 0x7_FF ? 2 : n <= 0xFF_FF ? 3 : 4;
     if (ws(n)) {
       if (leading) {from += width;}
       else {trailing += width;}
     } else { leading = false; trailing = 0; }
-  }
+  });
   to -= trailing;
   return data.subarray(from, to);
 }
@@ -66,12 +66,12 @@ const scanTokens = function (input: Uint8Array, filename: string, start: Pos, mo
     const begin: Pos = { ...pos, column: pos.column + from + startByte - pos.byte, byte: from + startByte };
     const end: Pos = { ...begin, byte: to + startByte };
     const bytes = data.subarray(from, to);
-    for (const cluster of graphemeClusters(bytes)) {
+    Iterator.from(graphemeClusters(bytes)).forEach((cluster) => {
       if ((cluster.length === lfLength && cluster[0] === lineFeed) || (cluster.length === crlfLength && cluster[0] === carriageReturn && cluster[1] === lineFeed)) {
         end.line++;
         end.column = 1;
       } else {end.column++;}
-    }
+    });
     pos = end;
     tokens.push({ type, bytes, range: { filename, start: begin, end } });
   };

@@ -18,7 +18,7 @@ export default function reyloSqlLoader(this: LoaderContext, source: string): voi
     ({ code, entry, watched }) => {
       // A new analysis of the statement (the type check's, after a migration) rebuilds the module,
       // And so does a change to the project file or a `.env` file, which the module's text reads.
-      for (const file of [entry, ...watched]) {this.addDependency(file);}
+      Iterator.from([entry, ...watched]).forEach((file) => {this.addDependency(file);});
       done(null, code);
     },
     (error: Error) => done(error),

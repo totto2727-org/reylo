@@ -85,7 +85,7 @@ export function differences(fresh: Fresh, rows: Readonly<unknown[]>, dialect?: "
   const out: string[] = [];
   const seen = new Set<string>();
   const copied = new Set((fresh.defaults ?? []).map((d) => `${d[0]}\u0000${d[1]}`));
-  for (const was of fresh.rows) {
+  Iterator.from(fresh.rows).forEach((was) => {
     const key = `${was[0]}\u0000${was[1]}`;
     seen.add(key);
     const is = now.get(key);
@@ -93,11 +93,11 @@ export function differences(fresh: Fresh, rows: Readonly<unknown[]>, dialect?: "
     else if (!sameType(is[2]!, was[2]!) || yes(is[3]!) !== yes(was[3]!) || yes(is[4]!) !== yes(was[4]!)) {out.push(`${table(was[0]!)}.${was[1]} was ${describe(was)} and is now ${describe(is)}`);}
     // The insert writes the default as the build read it, for a row that leaves the key out.
     else if (copied.has(key) && !sameDefault(is[5]!, was[5]!)) {out.push(`${table(was[0]!)}.${was[1]} had ${was[5] ? `the default ${was[5]}` : "no default"}, which the insert writes for a row that leaves its key out, and now has ${is[5] ? `the default ${is[5]}` : "none"}`);}
-  }
+  });
   // A column an insert must now fill, which the build did not see.
-  for (const [key, is] of now) {
+  Iterator.from(now).forEach(([key, is]) => {
     if (!seen.has(key) && fresh.inserts.includes(is[0]!) && yes(is[3]!) && !yes(is[4]!)) {out.push(`${table(is[0]!)}.${is[1]} is now ${describe(is)}, which the insert does not write`);}
-  }
+  });
   return out;
 }
 
