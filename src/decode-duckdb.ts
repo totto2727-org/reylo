@@ -16,7 +16,7 @@
 import { DecodeError, duration, ParameterError } from "./values.ts";
 import type { EngineType } from "./engine-type.ts";
 import type { Columns } from "./values.ts";
-import { hasFunctionType, hasObjectType, matchesBigInt, matchesNull, matchesNumber, matchesString, matchesUndefined } from "./native-predicates.ts";
+import { hasFunctionType, hasObjectType, matchesBigInt, matchesNull, matchesNullish, matchesNumber, matchesString, matchesUndefined } from "./native-predicates.ts";
 
 /** @duckdb/node-api's DuckDBConnection, a connection of a DuckDBInstance: `run` takes it. */
 export type DuckdbClient = {
@@ -139,7 +139,7 @@ async function loadNodeApi(c: DuckdbClient): Promise<Api> {
 
 /** Whether a client is @duckdb/node-api's DuckDBConnection. */
 export function isDuckdb(c: { [key: string]: unknown } | null | undefined): boolean {
-  return c != null && hasFunctionType(c.runAndReadAll) && hasFunctionType(c.prepare) && hasFunctionType(c.run);
+  return !matchesNullish(c) && hasFunctionType(c.runAndReadAll) && hasFunctionType(c.prepare) && hasFunctionType(c.run);
 }
 
 // DuckDB's type ids (duckdb_type), which node-api's types carry.
@@ -168,7 +168,7 @@ export async function runDuckdb(c: DuckdbClient, text: string, values: unknown[]
   const kinds = reader.columnTypes();
   return reader.getRows().map((row) => {
     const out: Record<string, unknown> = {};
-    for (let i = 0; i < names.length; i++) {out[names[i]!] = decode(row[i], kinds[i]!, names[i]!);}
+    for (let nameIndex = 0; nameIndex < names.length; nameIndex++) {out[names[nameIndex]!] = decode(row[nameIndex], kinds[nameIndex]!, names[nameIndex]!);}
     return out;
   });
 }
@@ -186,7 +186,7 @@ function bindType(a: Api, t: EngineType | undefined, v: unknown): unknown {
   if (t?.kind === "tuple" && Array.isArray(v)) {return a.TUPLE(t.items.map((item, i) => bindType(a, item, v[i])));}
   if (Array.isArray(v)) {
     if (t?.kind === "map") {return a.MAP(bindType(a, t.key, firstOf(v, "key")), bindType(a, t.value, firstOf(v, "value")));}
-    return a.LIST(bindType(a, t?.kind === "array" ? t.of : undefined, v.find((e) => e != null)));
+    return a.LIST(bindType(a, t?.kind === "array" ? t.of : undefined, v.find((e) => !matchesNullish(e))));
   }
   if (t?.kind === "struct" && !matchesNull(v) && hasObjectType(v)) {
     return a.STRUCT(Object.fromEntries(t.fields.map((f) => [f.name, bindType(a, f.type, (v as Record<string, unknown>)[f.name])])));
@@ -198,7 +198,7 @@ function bindType(a: Api, t: EngineType | undefined, v: unknown): unknown {
 }
 
 function firstOf(entries: unknown[], key: "key" | "value"): unknown {
-  for (const e of entries) {if (!matchesNull(e) && hasObjectType(e) && (e as Record<string, unknown>)[key] != null) {return (e as Record<string, unknown>)[key];}}
+  for (const e of entries) {if (!matchesNull(e) && hasObjectType(e) && !matchesNullish((e as Record<string, unknown>)[key])) {return (e as Record<string, unknown>)[key];}}
   return undefined;
 }
 
@@ -231,7 +231,7 @@ function bindValue(a: Api, t: EngineType | undefined, v: unknown): unknown {
  * text. An array's elements and a struct's fields are checked by their own types.
  */
 export function encodeDuckdb(type: EngineType | undefined, v: unknown, name: string): unknown {
-  if (matchesUndefined(type) || v == null) {return v;}
+  if (matchesUndefined(type) || matchesNullish(v)) {return v;}
   if (type.kind === "array" && Array.isArray(v)) {return v.map((e) => encodeDuckdb(type.of, e, name));}
   if (type.kind === "tuple" && Array.isArray(v)) {return v.map((e, i) => encodeDuckdb(type.items[i], e, name));}
   if (type.kind === "map" && Array.isArray(v)) {return v.map((e) => (!matchesNull(e) && hasObjectType(e) ? { ...e, key: encodeDuckdb(type.key, (e as { key?: unknown }).key, name), value: encodeDuckdb(type.value, (e as { value?: unknown }).value, name) } : e));}
@@ -247,7 +247,7 @@ export function encodeDuckdb(type: EngineType | undefined, v: unknown, name: str
     const member = type.members.find((m) => m.name === tag);
     const tags = type.members.map((m) => JSON.stringify(m.name)).join(", ");
     if (matchesUndefined(member)) {throw new ParameterError(`Parameter "${name}" is a UNION, so it takes { tag, value } with the tag one of ${tags}; got ${JSON.stringify(v)}.`);}
-    if (value == null) {throw new ParameterError(`Parameter "${name}" is a UNION, and @duckdb/node-api cannot bind one whose ${JSON.stringify(tag)} member is null: pass null for the whole parameter, or a value of the member.`);}
+    if (matchesNullish(value)) {throw new ParameterError(`Parameter "${name}" is a UNION, and @duckdb/node-api cannot bind one whose ${JSON.stringify(tag)} member is null: pass null for the whole parameter, or a value of the member.`);}
     return { tag, value: encodeDuckdb(member.type, value, name) };
   }
   if (type.kind !== "scalar") {return v;}
@@ -273,13 +273,13 @@ const TIMES = new Set(["date", "timestamp", "timestamp_s", "timestamp_ms", "time
  */
 export function duckdbInterval(text: string): string {
   const n = "([+-]?\\d+(?:[.,]\\d+)?)";
-  const m = new RegExp(`^\\s*([+-])?P(?:${n}Y)?(?:${n}M)?(?:${n}W)?(?:${n}D)?(?:T(?:${n}H)?(?:${n}M)?(?:${n}S)?)?\\s*$`, "i").exec(text);
-  if (matchesNull(m) || !/\d/u.test(text)) {return text;}
-  const negate = m[1] === "-";
+  const regexMatch = new RegExp(`^\\s*([+-])?P(?:${n}Y)?(?:${n}M)?(?:${n}W)?(?:${n}D)?(?:T(?:${n}H)?(?:${n}M)?(?:${n}S)?)?\\s*$`, "i").exec(text);
+  if (matchesNull(regexMatch) || !/\d/u.test(text)) {return text;}
+  const negate = regexMatch[1] === "-";
   const units = ["years", "months", "weeks", "days", "hours", "minutes", "seconds"];
   const parts: string[] = [];
   units.forEach((unit, i) => {
-    const value = m[i + 2];
+    const value = regexMatch[i + 2];
     if (matchesUndefined(value)) {return;}
     const number = value.replace(",", ".");
     parts.push(`${negate ? (number.startsWith("-") ? number.slice(1) : `-${number.replace(/^\+/u, "")}`) : number} ${unit}`);

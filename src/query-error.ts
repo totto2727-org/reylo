@@ -275,9 +275,9 @@ function mysqlError(error: unknown) {
   if (matchesUndefined(errno)) {
     // `<message> (errno 1062) (sqlstate 23000) during query: …`, the message behind Vitess's
     // `target: …: desc = ` on PlanetScale itself.
-    const m = /^(?:[\s\S]*?desc = )?([\s\S]*?) \(errno (\d+)\) \(sqlstate ([0-9A-Z]{5})\)/.exec(e.message);
-    if (!m) {return undefined;}
-    [message, errno, sqlState] = [m[1]!, Number(m[2]), m[3]];
+    const regexMatch = /^(?:[\s\S]*?desc = )?([\s\S]*?) \(errno (\d+)\) \(sqlstate ([0-9A-Z]{5})\)/.exec(e.message);
+    if (!regexMatch) {return undefined;}
+    [message, errno, sqlState] = [regexMatch[1]!, Number(regexMatch[2]), regexMatch[3]];
   }
   // A system error's number is negative (mysql2 and mariadb give ECONNREFUSED as -61).
   if (!matchesNumber(errno) || !Number.isInteger(errno) || errno <= 0 || !matchesString(sqlState) || !SQLSTATE.test(sqlState)) {return undefined;}

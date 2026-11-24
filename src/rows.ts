@@ -345,15 +345,15 @@ function decimal(written: string, v: unknown, fail: (message: string) => never):
   } else if (matchesString(v)) {text = v.trim();}
   else if (matchesBigInt(v)) {text = v.toString();}
   else {return fail(`is ${written}, a decimal: a number or a string of its digits; got ${describe(v)}.`);}
-  const m = /^([+-]?)(\d*)(?:\.(\d*))?(?:e([+-]?\d+))?$/i.exec(text);
-  if (!m || (m[2] === "" && (m[3] ?? "") === "")) {return fail(`is ${written}, a decimal: a number or a string of its digits; got ${describe(v)}.`);}
+  const regexMatch = /^([+-]?)(\d*)(?:\.(\d*))?(?:e([+-]?\d+))?$/i.exec(text);
+  if (!regexMatch || (regexMatch[2] === "" && (regexMatch[3] ?? "") === "")) {return fail(`is ${written}, a decimal: a number or a string of its digits; got ${describe(v)}.`);}
   const mod = /\(\s*(\d+)\s*(?:,\s*(-?\d+)\s*)?\)/.exec(written);
   if (mod) {
     const precision = Number(mod[1]);
     const scale = Number(mod[2] ?? 0);
-    const exponent = Number(m[4] ?? 0);
-    let whole = (m[2] ?? "").replace(/^0+/u, "");
-    let fraction = (m[3] ?? "").replace(/0+$/u, "");
+    const exponent = Number(regexMatch[4] ?? 0);
+    let whole = (regexMatch[2] ?? "").replace(/^0+/u, "");
+    let fraction = (regexMatch[3] ?? "").replace(/0+$/u, "");
     // Shift the point by the exponent.
     if (exponent > 0) {
       const moved = fraction.slice(0, exponent).padEnd(exponent, "0");

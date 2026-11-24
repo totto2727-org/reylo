@@ -14,7 +14,7 @@ import type { ResolvedProject } from './project.ts';
 import { duckdbDatabase } from "./duckdb.ts";
 import { NotMysql, refusedLogin } from "./connection.ts";
 import type { SqliteDriver } from "./sqlite-drivers.ts";
-import { matchesNull, matchesUndefined } from "./native-predicates.ts";
+import { matchesNull, matchesNullish, matchesUndefined } from "./native-predicates.ts";
 
 /** What `.reylo/` holds for one statement. */
 export type Entry = {
@@ -209,7 +209,7 @@ export class Session {
    */
   async #onDrivers(sql: string, outcome: Extract<Outcome, { ok: true }>): Promise<Outcome> {
     const { analysis } = outcome;
-    if (analysis.diagnostics.length || this.#schema?.value == null) {return outcome;}
+    if (analysis.diagnostics.length || matchesNullish(this.#schema?.value)) {return outcome;}
     const io = await this.#connection().catch(() => undefined);
     for (const driver of io?.drivers ?? []) {
       const refusal = await driver.refuses(analysis.rewritten.sql, analysis.rewritten.order.length);

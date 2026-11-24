@@ -20,7 +20,7 @@ import type { Checks } from "./checks.ts";
 import type { Structured } from "./rows.ts";
 import { differences, due, passed, staleError } from './fresh.ts';
 import type { Fresh } from './fresh.ts';
-import { hasFunctionType, hasObjectType, matchesBigInt, matchesBoolean, matchesNull, matchesNumber, matchesString, matchesUndefined } from "./native-predicates.ts";
+import { hasFunctionType, hasObjectType, matchesBigInt, matchesBoolean, matchesNull, matchesNullish, matchesNumber, matchesString, matchesUndefined } from "./native-predicates.ts";
 
 export type Dialect = "postgres" | "mysql" | "sqlite" | "duckdb";
 
@@ -223,8 +223,8 @@ export function execute<D extends Dialect>(
  */
 function underneath(c: AnyClient): AnyClient {
   const o = c as unknown as { select?: unknown; session?: { client?: unknown; tx?: unknown; dialect?: unknown } } | null | undefined;
-  const session = o != null && hasObjectType(o) && hasFunctionType(o.select) ? o.session : undefined;
-  if (session == null || !hasObjectType(session) || session.dialect == null) {return c;}
+  const session = !matchesNullish(o) && hasObjectType(o) && hasFunctionType(o.select) ? o.session : undefined;
+  if (matchesNullish(session) || !hasObjectType(session) || matchesNullish(session.dialect)) {return c;}
   const client = ((session.tx ?? session.client) as AnyClient | undefined) ?? c;
   // Drizzle-orm/durable-sqlite keeps the Durable Object's storage, whose SQL storage is its sql.
   const sql = (client as { sql?: AnyClient }).sql;
@@ -262,7 +262,7 @@ function executeSyncSqlite(c: AnyClient, query: QueryModule, params: ParamsInput
 // A SQLite-backed Durable Object's `ctx.storage.sql`: exec() and databaseSize, and no prepare().
 // Sqlite3's Database has exec() too, beside all().
 function isDurableObjectSql(c: AnyClient | null | undefined): boolean {
-  return c != null && hasFunctionType(c.exec) && !hasFunctionType(c.prepare) && !hasFunctionType(c.all) && "databaseSize" in c;
+  return !matchesNullish(c) && hasFunctionType(c.exec) && !hasFunctionType(c.prepare) && !hasFunctionType(c.all) && "databaseSize" in c;
 }
 
 // A Durable Object's exec() refuses a BigInt ("Cannot convert a BigInt value to a number").
@@ -277,7 +277,7 @@ function durableObjectValues(query: QueryModule, names: Readonly<string[]>, valu
 // Connection has prepare() too, answering through a promise, and runAndReadAll() beside it.
 function isSyncSqlite(c: AnyClient | null | undefined): boolean {
   return (
-    c != null &&
+    !matchesNullish(c) &&
     hasFunctionType(c.prepare) &&
     !hasFunctionType(c.runAndReadAll) &&
     (!hasFunctionType(c.batch) || hasFunctionType(c.maxWriteReplicationIndex)) &&
@@ -315,7 +315,7 @@ const slonikParam = function (v: unknown): unknown {
 };
 
 async function executeAsync(c: AnyClient | null | undefined, query: QueryModule, params: ParamsInput): Promise<unknown[]> {
-  if (c == null || (!hasObjectType(c) && !hasFunctionType(c))) {throw unsupported(c, query.dialect);}
+  if (matchesNullish(c) || (!hasObjectType(c) && !hasFunctionType(c))) {throw unsupported(c, query.dialect);}
   // A DuckDB connection has prepare() as SQLite's drivers do, and runs no other database's statement.
   if (query.dialect !== "duckdb" && isDuckdb(c)) {throw unsupported(c, query.dialect);}
   checkParams(query, params);
@@ -343,7 +343,7 @@ async function executeAsync(c: AnyClient | null | undefined, query: QueryModule,
       // Left the connection out of step. Each element of a `jsonb[]` is a JSON value.
       const bound = values.map((v, i) => {
         const t = type(i);
-        return Array.isArray(v) && t?.kind === "array" ? arrayLiteral(isJson(t.of.kind) ? v.map((e) => (e == null ? e : JSON.stringify(e))) : v, t.delimiter) : v;
+        return Array.isArray(v) && t?.kind === "array" ? arrayLiteral(isJson(t.of.kind) ? v.map((e) => (matchesNullish(e) ? e : JSON.stringify(e))) : v, t.delimiter) : v;
       });
       // A JSON parameter goes to pg's family, PGlite and Neon as its JSON text, and to postgres.js
       // As its JSON text declared `unknown` (below). Bun.sql serializes a value for a JSON
@@ -526,9 +526,9 @@ export function rawStatement(query: QueryModule, params: unknown): { text: strin
 
 /** A bound value as the text Postgres's input function reads, as `.run()` sends it through pg. */
 function postgresText(query: QueryModule, name: string, v: unknown): string | null {
-  if (v == null) {return null;}
+  if (matchesNullish(v)) {return null;}
   const t = query.inputs?.[name]?.type;
-  if (Array.isArray(v) && t?.kind === "array") {return arrayLiteral(isJson(t.of.kind) ? v.map((e) => (e == null ? e : JSON.stringify(e))) : v, t.delimiter);}
+  if (Array.isArray(v) && t?.kind === "array") {return arrayLiteral(isJson(t.of.kind) ? v.map((e) => (matchesNullish(e) ? e : JSON.stringify(e))) : v, t.delimiter);}
   if (isJsonValue(query, name, v)) {return jsonText(v);}
   if (Array.isArray(v)) {return arrayLiteral(v);}
   if (v instanceof Uint8Array) {return asByteaHex(v) as string;}
@@ -548,7 +548,7 @@ function checksFor(query: QueryModule, name: string): Checks {
 function nullElement(array: Readonly<unknown[]>, path = ""): string | undefined {
   for (let i = 0; i < array.length; i++) {
     const e = array[i];
-    if (e == null) {return `${path}[${i}]`;}
+    if (matchesNullish(e)) {return `${path}[${i}]`;}
     if (Array.isArray(e)) {
       const inner = nullElement(e, `${path}[${i}]`);
       if (!matchesUndefined(inner)) {return inner;}
@@ -595,7 +595,7 @@ const isJson = (kind: EngineType["kind"] | undefined) => kind === "json" || kind
 // An array literal and a string as raw JSON text, mariadb expanded an array into a list, the
 // SQLite drivers refused an object, and mysql2 bound 5 as 5.0.
 function isJsonValue(query: QueryModule, name: string, v: unknown): boolean {
-  return v != null && isJson(query.inputs?.[name]?.type.kind);
+  return !matchesNullish(v) && isJson(query.inputs?.[name]?.type.kind);
 }
 
 /**
@@ -627,7 +627,7 @@ const jsonText = (v: unknown) => JSON.stringify(jsonValue(v));
 const isTime = (type: EngineType | undefined) => type?.kind === "scalar" && type.name.split("|").every((part) => part === "timestamp" || part === "timestamptz" || part === "date");
 
 function checkTime(type: EngineType | undefined, name: string, v: unknown): void {
-  if (matchesUndefined(type) || v == null) {return;}
+  if (matchesUndefined(type) || matchesNullish(v)) {return;}
   if (type.kind === "array") {
     if (Array.isArray(v)) {for (const e of v) {checkTime(Array.isArray(e) ? type : type.of, name, e);}}
     return;
@@ -651,7 +651,7 @@ function checkTime(type: EngineType | undefined, name: string, v: unknown): void
 // As bytea's hex or escape text, MySQL stores the bytes of its UTF-8, and SQLite stores it as
 // TEXT, which comes back a string. So base64 text was stored as its own letters.
 function checkBinary(type: EngineType | undefined, name: string, v: unknown): void {
-  if (matchesUndefined(type) || v == null) {return;}
+  if (matchesUndefined(type) || matchesNullish(v)) {return;}
   if (type.kind === "array") {
     if (Array.isArray(v)) {for (const e of v) {checkBinary(Array.isArray(e) ? type : type.of, name, e);}}
     return;
@@ -672,7 +672,7 @@ function checkBinary(type: EngineType | undefined, name: string, v: unknown): vo
 // Pgvector vector the same way, as the text its input reads, and an array of vectors as an array
 // Of those texts.
 function encode(type: EngineType | undefined, v: unknown, dialect: Dialect, name: string): unknown {
-  if (matchesUndefined(type) || v == null) {return v;}
+  if (matchesUndefined(type) || matchesNullish(v)) {return v;}
   if (dialect === "duckdb") {return encodeDuckdb(type, v, name);}
   if (dialect === "sqlite") {return matchesBoolean(v) ? (v ? 1 : 0) : v;}
   if (dialect === "mysql") {return type.kind === "array" && Array.isArray(v) ? vectorText(v, name, "a VECTOR") : v;}
@@ -736,7 +736,7 @@ export function arrayLiteral(array: Readonly<unknown[]>, delim = ","): string {
   for (let i = 0; i < array.length; i++) {
     const v = array[i];
     if (i) {out += delim;}
-    if (v == null) {out += "NULL";}
+    if (matchesNullish(v)) {out += "NULL";}
     else if (Array.isArray(v)) {out += arrayLiteral(v, delim);}
     else if (ArrayBuffer.isView(v)) {out += `\\${  asByteaHex(new Uint8Array(v.buffer, v.byteOffset, v.byteLength))}`;}
     else {out += `"${(v instanceof Date ? dateText(v) : hasObjectType(v) ? JSON.stringify(v) : String(v)).replace(/[\\"]/g, "\\$&")}"`;}

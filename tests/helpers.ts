@@ -5,7 +5,7 @@ import { createRequire } from "node:module";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 // oxlint-disable-next-line import/no-relative-parent-imports -- The native test runner loads this private guard directly from the source tree.
-import { matchesString } from "../src/native-predicates.ts";
+import { hasObjectType, matchesNull, matchesNumber, matchesString, matchesUndefined } from "../src/native-predicates.ts";
 
 export const ROOT = join(import.meta.dirname, "..");
 export const DRIVERS = join(ROOT, "lab", "drivers", "node_modules");
@@ -55,6 +55,38 @@ export const plain = (rows: Readonly<object[]>) => [...rows].map((r) => ({ ...r 
 /** A diagnostic the content mapper reports. */
 export type Diagnostic = { messageText: string; start: number; length: number; code: number };
 
+interface MappedFile {
+  diagnostics: Diagnostic[];
+  text: string;
+}
+
+const readDiagnostic = (value: unknown): Diagnostic => {
+  if (
+    !hasObjectType(value) || matchesNull(value) ||
+    !("code" in value) || !matchesNumber(value.code) ||
+    !("length" in value) || !matchesNumber(value.length) ||
+    !("messageText" in value) || !matchesString(value.messageText) ||
+    !("start" in value) || !matchesNumber(value.start)
+  ) {
+    // oxlint-disable-next-line rules/require-tagged-error -- A malformed mapper diagnostic must fail the native test.
+    throw new TypeError("The content mapper returned a malformed diagnostic");
+  }
+  return { ...value, code: value.code, length: value.length, messageText: value.messageText, start: value.start };
+};
+
+const readMappedFile = (value: unknown): MappedFile => {
+  if (
+    !hasObjectType(value) || matchesNull(value) ||
+    !("text" in value) || !matchesString(value.text) ||
+    !("diagnostics" in value) || !Array.isArray(value.diagnostics)
+  ) {
+    // oxlint-disable-next-line rules/require-tagged-error -- Require a complete transform reply from the real child process.
+    throw new TypeError("The content mapper returned a malformed transform result");
+  }
+  const diagnostics: unknown[] = value.diagnostics;
+  return { diagnostics: diagnostics.map((diagnostic) => readDiagnostic(diagnostic)), text: value.text };
+};
+
 /** The declaration the content mapper writes for each file of `files` (name to content), which it must write with no diagnostic. */
 export async function declarations(root: string, files: Record<string, string>): Promise<Record<string, string>> {
   const out: Record<string, string> = {};
@@ -66,9 +98,27 @@ export async function declarations(root: string, files: Record<string, string>):
 }
 
 /** What the content mapper answers for each file of `files` (name to content) in the project at `root`, through its own JSON-RPC process, as the type check runs it: the declaration and its diagnostics. */
-export async function transform(root: string, files: Record<string, string>): Promise<Record<string, { text: string; diagnostics: Diagnostic[] }>> {
+export async function transform(root: string, files: Record<string, string>): Promise<Record<string, MappedFile>> {
   const child = spawn(process.execPath, [MAPPER], { cwd: root, stdio: ["pipe", "pipe", "inherit"] });
-  const pending = new Map<number, (result: unknown) => void>();
+  const pending = new Map<number, PromiseWithResolvers<unknown>>();
+  const settleReply = (message: unknown): void => {
+    if (
+      !hasObjectType(message) || matchesNull(message) ||
+      !("id" in message) || !matchesNumber(message.id)
+    ) {
+      return;
+    }
+    const request = pending.get(message.id);
+    if (matchesUndefined(request)) {return;}
+    pending.delete(message.id);
+    const error = "error" in message ? message.error : undefined;
+    if (hasObjectType(error) && !matchesNull(error) && "message" in error && matchesString(error.message)) {
+      // oxlint-disable-next-line rules/require-tagged-error -- Surface the child process's JSON-RPC failure in the native test.
+      request.reject(new Error(error.message));
+      return;
+    }
+    request.resolve("result" in message ? message.result : undefined);
+  };
   let buffer = Buffer.alloc(0);
   child.stdout.on("data", (chunk: Buffer) => {
     buffer = Buffer.concat([buffer, chunk]);
@@ -77,26 +127,29 @@ export async function transform(root: string, files: Record<string, string>): Pr
       if (end === -1) {return;}
       const length = Number(/Content-Length:\s*(\d+)/i.exec(buffer.subarray(0, end).toString("ascii"))![1]);
       if (buffer.length < end + 4 + length) {return;}
-      const message = JSON.parse(buffer.subarray(end + 4, end + 4 + length).toString("utf8"));
+      const message: unknown = JSON.parse(buffer.subarray(end + 4, end + 4 + length).toString("utf8"));
       buffer = buffer.subarray(end + 4 + length);
-      pending.get(message.id)?.(message.error ? Promise.reject(new Error(message.error.message)) : message.result);
+      settleReply(message);
     }
   });
   let id = 0;
-  const call = (method: string, params: unknown) =>
-    new Promise<any>((resolve) => {
-      pending.set(++id, resolve);
-      const body = Buffer.from(JSON.stringify({ jsonrpc: "2.0", id, method, params }), "utf8");
-      child.stdin.write(`Content-Length: ${body.length}\r\n\r\n`);
-      child.stdin.write(body);
-    });
+  const call = (method: string, params: unknown): Promise<unknown> => {
+    const request = Promise.withResolvers<unknown>();
+    id += 1;
+    pending.set(id, request);
+    const body = Buffer.from(JSON.stringify({ jsonrpc: "2.0", id, method, params }), "utf8");
+    child.stdin.write(`Content-Length: ${body.length}\r\n\r\n`);
+    child.stdin.write(body);
+    return request.promise;
+  };
   try {
     await call("initialize", { protocolVersion: 1 });
     await call("openProject", { projectHandle: "p", configFileName: join(root, "tsconfig.json"), options: {} });
-    const out: Record<string, { text: string; diagnostics: Diagnostic[] }> = {};
+    const out: Record<string, MappedFile> = {};
     for (const [name, content] of Object.entries(files)) {
       const result = await call("transform", { fileName: join(root, name), content, projectHandle: "p" });
-      out[name] = { text: result.text, diagnostics: result.diagnostics };
+      const { diagnostics, text } = readMappedFile(result);
+      out[name] = { text, diagnostics };
     }
     await call("closeProject", { projectHandle: "p" });
     return out;

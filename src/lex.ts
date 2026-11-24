@@ -45,8 +45,8 @@ export function lexPlaceholders(sql: string, dialect: "postgres" | "mysql" | "sq
     if (ch === "/" && next === "*") { const end = sql.indexOf("*/", i + 2); i = end === -1 ? sql.length : end + 2; continue; }
     if (ch === ":" && next === ":") {
       // A `::` cast: the type name after it is not a parameter.
-      const m = /^[A-Za-z_][A-Za-z0-9_]*/.exec(sql.slice(i + 2));
-      i += 2 + (m ? m[0].length : 0); last = "operand"; continue;
+      const regexMatch = /^[A-Za-z_][A-Za-z0-9_]*/.exec(sql.slice(i + 2));
+      i += 2 + (regexMatch ? regexMatch[0].length : 0); last = "operand"; continue;
     }
     // A colon that opens a Postgres subscript is a slice with no lower bound, since no expression
     // Starts with a colon there; an array constructor's `[` follows `array` or another `[`.

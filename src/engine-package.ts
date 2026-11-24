@@ -11,9 +11,15 @@
 // That engine is not installed; an `import()` of a computed URL, which tsc wraps in a helper of its
 // Own, Turbopack reports as a module it cannot resolve. A `require` loads an ES module that has no
 // Top-level await, which scripts/build.ts checks of each `tooling.js`.
+// oxlint-disable-next-line rules/no-node-imports -- The native loader reads its own package version before resolving optional tooling.
 import { readFileSync } from "node:fs";
+// oxlint-disable-next-line rules/no-node-imports -- Read metadata for an optional engine without blocking the asynchronous build step.
+import { readFile } from "node:fs/promises";
+// oxlint-disable-next-line rules/no-node-imports -- Resolve the engine through the consumer's Node resolution context.
 import { createRequire } from "node:module";
-import { dirname, join } from "node:path";
+// oxlint-disable-next-line rules/no-node-imports -- Resolve package metadata against the host paths that Node returns.
+import path from "node:path";
+import { hasFunctionType, hasObjectType, matchesNull, matchesString } from "./native-predicates.ts";
 
 /** What an engine package's build-time half offers reylo's entry points. */
 export type Tooling = {
@@ -28,9 +34,43 @@ export type Tooling = {
 };
 
 const PACKAGES = ["@totto2727/reylo-sqlite"];
-const VERSION: string = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")).version;
 
-let loaded: Promise<Tooling> | undefined;
+const readVersion = (source: string): string | undefined => {
+  const metadata: unknown = JSON.parse(source);
+  return hasObjectType(metadata) && !matchesNull(metadata) && "version" in metadata &&
+    matchesString(metadata.version) ? metadata.version : undefined;
+};
+
+// oxlint-disable-next-line node/no-sync -- Native require can load this module, so its package version must be read without top-level await.
+const VERSION = readVersion(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
+
+const versionAt = async (manifest: string): Promise<string | undefined> => {
+  try {
+    return readVersion(await readFile(manifest, "utf8"));
+  } catch {
+    return undefined;
+  }
+};
+
+const exportedTooling = (module: unknown): Tooling => {
+  const value = hasObjectType(module) && !matchesNull(module) && "default" in module
+    ? module.default
+    : undefined;
+  if (
+    !hasObjectType(value) || matchesNull(value) ||
+    !("mapperHandlers" in value) || !hasFunctionType(value.mapperHandlers) ||
+    !("releaseConnections" in value) || !hasFunctionType(value.releaseConnections) ||
+    !("runCli" in value) || !hasFunctionType(value.runCli) ||
+    !("sqlModule" in value) || !hasFunctionType(value.sqlModule)
+  ) {
+    // oxlint-disable-next-line rules/require-tagged-error -- Report an invalid native tooling module through the build entry point.
+    throw new TypeError("The installed Reylo engine does not export its build tooling.");
+  }
+  // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- The loader verifies the engine version and callable exports before using its own tooling contract.
+  return value as Tooling;
+};
+
+let loaded: Promise<Tooling> | undefined = undefined;
 
 /** The build-time half, as the project of the directory `from` finds it, or reylo's own install. */
 export function tooling(from: string = process.cwd()): Promise<Tooling> {
@@ -53,36 +93,30 @@ export async function releaseConnections(): Promise<void> {
 
 async function load(from: string): Promise<Tooling> {
   let other: { name: string; version: string | undefined; dir: string } | undefined;
-  for (const base of [join(from, "package.json"), import.meta.url]) {
+  for (const base of [path.join(from, "package.json"), import.meta.url]) {
     const require = createRequire(base);
     for (const name of PACKAGES) {
-      let path: string;
+      let toolingPath: string;
       try {
-        path = require.resolve(`${name}/tooling`);
+        toolingPath = require.resolve(`${name}/tooling`);
       } catch {
         // An engine package from before it carried this half has no such entry: its version says why.
         try {
           const manifest = require.resolve(`${name}/package.json`);
-          other ??= { name, version: versionAt(manifest), dir: dirname(manifest) };
+          other ??= { dir: path.dirname(manifest), name, version: await versionAt(manifest) };
         } catch {}
         continue;
       }
-      const version = versionAt(join(dirname(path), "package.json"));
+      const version = await versionAt(path.join(path.dirname(toolingPath), "package.json"));
       if (version !== VERSION) {
-        other ??= { name, version, dir: dirname(path) };
+        other ??= { dir: path.dirname(toolingPath), name, version };
         continue;
       }
-      return (require(path) as { default: Tooling }).default;
+      // oxlint-disable-next-line import/no-dynamic-require -- Resolve the installed engine without forcing bundlers to include an optional package.
+      const module: unknown = require(toolingPath);
+      return exportedTooling(module);
     }
   }
   if (other) {throw new Error(`reylo ${VERSION} runs with ${other.name} ${VERSION}, and the one installed is ${other.version ?? "of no version"} (${other.dir}): npm install -D ${other.name}@${VERSION}`);}
   throw new Error(`reylo's SQLite/HCL build steps are not installed: npm install -D @totto2727/reylo-sqlite`);
-}
-
-function versionAt(manifest: string): string | undefined {
-  try {
-    return JSON.parse(readFileSync(manifest, "utf8")).version;
-  } catch {
-    return undefined;
-  }
 }

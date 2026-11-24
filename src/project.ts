@@ -122,8 +122,8 @@ export function readEnvFile(path: string): Record<string, string> {
   if (!existsSync(path)) {return {};}
   const out: Record<string, string> = {};
   for (const line of readFileSync(path, "utf8").split("\n")) {
-    const m = /^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*?)\s*$/.exec(line);
-    if (m) {out[m[1]!] = m[2]!.replace(/^(["'])(.*)\1$/, "$2");}
+    const regexMatch = /^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*?)\s*$/.exec(line);
+    if (regexMatch) {out[regexMatch[1]!] = regexMatch[2]!.replace(/^(["'])(.*)\1$/, "$2");}
   }
   return out;
 }

@@ -7,6 +7,8 @@ import { arrayLiteral, execute, executeSync } from '../src/execute.ts';
 import type { QueryModule } from '../src/execute.ts';
 import { checks, defineQuery } from "../src/index.ts";
 import type { EngineType, JsonSchema } from "../src/engine-type.ts";
+// oxlint-disable-next-line import/no-relative-parent-imports -- Match the native driver boundary in this direct Node integration test.
+import { matchesNullish } from "../src/native-predicates.ts";
 
 // Each fake client records what execute handed it and answers the way its driver does; the
 // Driver behaviour each one copies was checked against the real package (lab/driver-matrix).
@@ -534,7 +536,7 @@ test("mysql: PlanetScale 2.0, which binds no parameters, runs a statement withou
   const conn = {
     execute: async (...args: unknown[]) => {
       calls.push(args);
-      if (args.length > 2 || (args[1] != null && (typeof args[1] !== "object" || Array.isArray(args[1])))) {throw new Error("Query parameters are not supported: pass a complete SQL string and options to execute(query, options)");}
+      if (args.length > 2 || (!matchesNullish(args[1]) && (typeof args[1] !== "object" || Array.isArray(args[1])))) {throw new Error("Query parameters are not supported: pass a complete SQL string and options to execute(query, options)");}
       return { rows: [row], statement: String(args[0]), headers: [] };
     },
   };

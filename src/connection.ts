@@ -58,7 +58,7 @@ export class NotMysql extends Error {
 /** The server's name and version, when it is not MySQL: from version(), "11.8.2-MariaDB-ubu2404" on MariaDB. */
 export function notMysql(version: unknown): string | undefined {
   const v = String(version ?? "");
-  const m = /^(?:5\.5\.5-)?(\d+(?:\.\d+)*).*mariadb/i.exec(v);
-  if (m) {return `MariaDB ${m[1]}`;}
+  const regexMatch = /^(?:5\.5\.5-)?(\d+(?:\.\d+)*).*mariadb/i.exec(v);
+  if (regexMatch) {return `MariaDB ${regexMatch[1]}`;}
   return /mariadb/i.test(v) ? "MariaDB" : undefined;
 }

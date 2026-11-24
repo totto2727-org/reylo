@@ -413,11 +413,11 @@ const USERINFO = new RegExp(`^(?:[${UNRESERVED}${SUB_DELIMS}:]|${PCT})*$`);
 const REG_NAME = new RegExp(`^(?:[${UNRESERVED}${SUB_DELIMS}]|${PCT})*$`);
 
 function uri(v: string): boolean {
-  const m = URI.exec(v);
-  if (!m) {return false;}
-  const authority = m[2];
+  const regexMatch = URI.exec(v);
+  if (!regexMatch) {return false;}
+  const authority = regexMatch[2];
   // Without an authority a path may not start with `//`.
-  if (matchesUndefined(authority)) {return !(m[3] ?? "").startsWith("//");}
+  if (matchesUndefined(authority)) {return !(regexMatch[3] ?? "").startsWith("//");}
   const at = authority.lastIndexOf("@");
   if (at >= 0 && !USERINFO.test(authority.slice(0, at))) {return false;}
   const hostport = authority.slice(at + 1);

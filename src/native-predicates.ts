@@ -16,6 +16,9 @@ export const matchesNull = (value: unknown) => value === null;
 // oxlint-disable-next-line rules/force-predicate, typescript/explicit-function-return-type, typescript/explicit-module-boundary-types -- Infer an exact native sentinel guard without the optional Effect peer.
 export const matchesUndefined = (value: unknown) => value === undefined;
 
+// oxlint-disable-next-line typescript/explicit-function-return-type, typescript/explicit-module-boundary-types -- Infer the pair of native absent values without loading Effect.
+export const matchesNullish = (value: unknown) => matchesNull(value) || matchesUndefined(value);
+
 // oxlint-disable-next-line rules/force-predicate, typescript/explicit-function-return-type, typescript/explicit-module-boundary-types -- Infer a native type guard without the optional Effect peer.
 export const hasFunctionType = (value: unknown) => typeof value === "function";
 

@@ -272,10 +272,10 @@ const isoYear = (y: number) => (y >= 0 && y <= 9999 ? pad(y, 4) : `${y < 0 ? "-"
  * `0002 … BC` and `0000` or `+000000` is `0001 … BC`. Any other text is left as it is.
  */
 export function postgresYear(text: string): string {
-  const m = /^([+-]\d{6,}|0000)(-.*)$/.exec(text);
-  if (matchesNull(m) || /\sbc$/i.test(text)) {return text;}
-  const year = +m[1]!;
-  return year > 0 ? `${pad(year, 4)}${m[2]}` : `${pad(1 - year, 4)}${m[2]} BC`;
+  const regexMatch = /^([+-]\d{6,}|0000)(-.*)$/.exec(text);
+  if (matchesNull(regexMatch) || /\sbc$/i.test(text)) {return text;}
+  const year = +regexMatch[1]!;
+  return year > 0 ? `${pad(year, 4)}${regexMatch[2]}` : `${pad(1 - year, 4)}${regexMatch[2]} BC`;
 }
 
 /**
@@ -285,15 +285,15 @@ export function postgresYear(text: string): string {
  * words.
  */
 export function instant(x: string): string {
-  const m = TSTZ.exec(x);
-  if (matchesNull(m)) {return x;}
-  const year = matchesUndefined(m[12]) ? +m[1]! : 1 - +m[1]!;
-  const offset = (m[8] === "-" ? -1 : 1) * (+m[9]! * 3600 + (matchesUndefined(m[10]) ? 0 : +m[10] * 60) + (matchesUndefined(m[11]) ? 0 : +m[11]));
-  const seconds = daysFromCivil(year, +m[2]!, +m[3]!) * 86_400 + +m[4]! * 3600 + +m[5]! * 60 + +m[6]! - offset;
+  const regexMatch = TSTZ.exec(x);
+  if (matchesNull(regexMatch)) {return x;}
+  const year = matchesUndefined(regexMatch[12]) ? +regexMatch[1]! : 1 - +regexMatch[1]!;
+  const offset = (regexMatch[8] === "-" ? -1 : 1) * (+regexMatch[9]! * 3600 + (matchesUndefined(regexMatch[10]) ? 0 : +regexMatch[10] * 60) + (matchesUndefined(regexMatch[11]) ? 0 : +regexMatch[11]));
+  const seconds = daysFromCivil(year, +regexMatch[2]!, +regexMatch[3]!) * 86_400 + +regexMatch[4]! * 3600 + +regexMatch[5]! * 60 + +regexMatch[6]! - offset;
   const days = Math.floor(seconds / 86_400);
   const s = seconds - days * 86_400;
   const [y, mo, d] = civilFromDays(days);
-  return `${isoYear(y)}-${pad(mo)}-${pad(d)}T${pad(Math.floor(s / 3600))}:${pad(Math.floor(s / 60) % 60)}:${pad(s % 60)}${m[7] ?? ""}Z`;
+  return `${isoYear(y)}-${pad(mo)}-${pad(d)}T${pad(Math.floor(s / 3600))}:${pad(Math.floor(s / 60) % 60)}:${pad(s % 60)}${regexMatch[7] ?? ""}Z`;
 }
 
 /**
@@ -321,19 +321,19 @@ const INTERVAL = /^(?:([+-]?\d+) years? ?)?(?:([+-]?\d+) mons? ?)?(?:([+-]?\d+) 
  * those words.
  */
 export function duration(x: string): string {
-  const m = INTERVAL.exec(x);
-  if (matchesNull(m) || x === "") {return x;}
-  const time = m[4] === "-" ? -1 : 1;
+  const regexMatch = INTERVAL.exec(x);
+  if (matchesNull(regexMatch) || x === "") {return x;}
+  const time = regexMatch[4] === "-" ? -1 : 1;
   // Each designator Postgres writes, its magnitude and its sign; a zero is left out.
   const parts: [designator: string, magnitude: string, sign: number][] = [];
-  for (const [designator, digits] of [["Y", m[1]], ["M", m[2]], ["D", m[3]]] as const) {
+  for (const [designator, digits] of [["Y", regexMatch[1]], ["M", regexMatch[2]], ["D", regexMatch[3]]] as const) {
     if (!matchesUndefined(digits) && +digits !== 0) {parts.push([designator, String(Math.abs(+digits)), digits.startsWith("-") ? -1 : 1]);}
   }
   const date = parts.length;
-  if (+(m[5] ?? 0) !== 0) {parts.push(["H", String(+m[5]!), time]);}
-  if (+(m[6] ?? 0) !== 0) {parts.push(["M", String(+m[6]!), time]);}
-  const fraction = (m[8] ?? "").replace(/0+$/u, "");
-  if (+(m[7] ?? 0) !== 0 || fraction !== "") {parts.push(["S", `${+(m[7] ?? 0)}${fraction && `.${fraction}`}`, time]);}
+  if (+(regexMatch[5] ?? 0) !== 0) {parts.push(["H", String(+regexMatch[5]!), time]);}
+  if (+(regexMatch[6] ?? 0) !== 0) {parts.push(["M", String(+regexMatch[6]!), time]);}
+  const fraction = (regexMatch[8] ?? "").replace(/0+$/u, "");
+  if (+(regexMatch[7] ?? 0) !== 0 || fraction !== "") {parts.push(["S", `${+(regexMatch[7] ?? 0)}${fraction && `.${fraction}`}`, time]);}
   if (parts.length === 0) {return "PT0S";}
   const negative = parts.every(([, , sign]) => sign < 0);
   const write = ([designator, magnitude, sign]: [string, string, number]) => `${sign < 0 && !negative ? "-" : ""}${magnitude}${designator}`;
@@ -348,9 +348,9 @@ export function duration(x: string): string {
  * text is left as it is.
  */
 export function postgresInterval(text: string): string {
-  const m = /^\s*([+-])(P[^+-]*)$/i.exec(text);
-  if (matchesNull(m)) {return text;}
-  return m[1] === "+" ? m[2]! : m[2]!.replace(/(\d+(?:[.,]\d+)?)([YMWDHS])/gi, "-$1$2");
+  const regexMatch = /^\s*([+-])(P[^+-]*)$/i.exec(text);
+  if (matchesNull(regexMatch)) {return text;}
+  return regexMatch[1] === "+" ? regexMatch[2]! : regexMatch[2]!.replace(/(\d+(?:[.,]\d+)?)([YMWDHS])/gi, "-$1$2");
 }
 
 type BufferClass = { from(data: string, encoding: string): Uint8Array; isBuffer(v: unknown): boolean };
