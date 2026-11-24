@@ -9,12 +9,12 @@ import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 // oxlint-disable-next-line rules/no-node-imports -- Exercise the native SQLite driver used by Reylo's Node runtime.
 import { DatabaseSync } from "node:sqlite";
-import { Session } from "../src/analyze.ts";
-import { sqlModule } from "../src/loader.ts";
-import { mapperHandlers } from "../src/mapper-server.ts";
-import { hclPath } from "../src/project.ts";
-import { hclCatalog } from "../src/hcl.ts";
-import { engine } from "../src/engine.ts";
+import { Session } from "#reylo-source/analyze.ts";
+import { sqlModule } from "#reylo-source/loader.ts";
+import { mapperHandlers } from "#reylo-source/mapper-server.ts";
+import { hclPath } from "#reylo-source/project.ts";
+import { hclCatalog } from "#reylo-source/hcl.ts";
+import { engine } from "#reylo-source/engine.ts";
 
 const tmp = fileURLToPath(new URL("../tmp/", import.meta.url));
 const INDEX = new URL("../src/index.ts", import.meta.url).href;

@@ -8,7 +8,7 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { DatabaseSync } from "node:sqlite";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { withReylo } from "../src/next.ts";
+import { withReylo } from "#reylo-source/next.ts";
 
 // `next build` type-checks with the project's own tsc and no --runExternalCode, so withReylo turns
 // That check off and runs it with the flag in compiler.runAfterProductionCompile (src/next.ts).

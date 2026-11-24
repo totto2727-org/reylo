@@ -9,8 +9,8 @@ import { DatabaseSync } from "node:sqlite";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
-import { Session } from "../src/analyze.ts";
-import { sqlModule } from "../src/loader.ts";
+import { Session } from "#reylo-source/analyze.ts";
+import { sqlModule } from "#reylo-source/loader.ts";
 import { DRIVERS, INDEX, closeSessions, plain } from "./helpers.ts";
 
 // Structured parameters (wiki/structured-params.md): a parameter cast to `rows(…)` or `row(…)` is

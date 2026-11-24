@@ -2,7 +2,7 @@
 import { test } from "node:test";
 // oxlint-disable-next-line rules/no-node-imports -- Nub's Node suite uses native assertions for driver, CLI, and protocol results.
 import assert from "node:assert/strict";
-import { formatType } from "../src/type-format.ts";
+import { formatType } from "#reylo-source/type-format.ts";
 
 // A row type as src/module-types.ts writes one where columns have comments: a field per line, each
 // After its doc comment, the escaped `*\/` of a comment that holds one included.

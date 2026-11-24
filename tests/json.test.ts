@@ -10,8 +10,8 @@ import { DatabaseSync } from "node:sqlite";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
-import { sqlModule } from "../src/loader.ts";
-import { reyloImport } from "../src/module-types.ts";
+import { sqlModule } from "#reylo-source/loader.ts";
+import { reyloImport } from "#reylo-source/module-types.ts";
 import { closeSessions, declarations, INDEX, ROOT } from "./helpers.ts";
 
 // A value nothing types inside JSON a statement builds is Json, exported by the runtime.

@@ -4,9 +4,9 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 // oxlint-disable-next-line rules/no-node-imports -- Exercise the native SQLite driver used by Reylo's Node runtime.
 import { DatabaseSync } from "node:sqlite";
-import { checks, defineQuery } from '../src/index.ts';
-import type { StandardQueryV1 } from '../src/index.ts';
-import { ParameterError } from "../src/values.ts";
+import { checks, defineQuery } from '#reylo-source/index.ts';
+import type { StandardQueryV1 } from '#reylo-source/index.ts';
+import { ParameterError } from "#reylo-source/values.ts";
 
 const insert = defineQuery<{ id: number; name: string; note?: string | null }, never, "none", "sqlite">({
   dialect: "sqlite",

@@ -9,8 +9,8 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { connect, createServer } from 'node:net';
 import type { AddressInfo, Server } from 'node:net';
-import { engine, reason, Unreachable } from "../src/engine.ts";
-import { hostUrl } from "../src/host-url.ts";
+import { engine, reason, Unreachable } from "#reylo-source/engine.ts";
+import { hostUrl } from "#reylo-source/host-url.ts";
 import { mysqlStandIn } from "./mysql-stand-in.ts";
 
 // Node listens on no Unix socket on Windows, where a path names a named pipe.

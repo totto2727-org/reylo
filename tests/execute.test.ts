@@ -5,12 +5,12 @@ import assert from "node:assert/strict";
 import { join } from "node:path";
 // oxlint-disable-next-line rules/no-node-imports -- Exercise the native SQLite driver used by Reylo's Node runtime.
 import { DatabaseSync } from "node:sqlite";
-import { arrayLiteral, execute, executeSync } from '../src/execute.ts';
-import type { QueryModule } from '../src/execute.ts';
-import { checks, defineQuery } from "../src/index.ts";
-import type { EngineType, JsonSchema } from "../src/engine-type.ts";
+import { arrayLiteral, execute, executeSync } from '#reylo-source/execute.ts';
+import type { QueryModule } from '#reylo-source/execute.ts';
+import { checks, defineQuery } from "#reylo-source/index.ts";
+import type { EngineType, JsonSchema } from "#reylo-source/engine-type.ts";
 // oxlint-disable-next-line import/no-relative-parent-imports -- Match the native driver boundary in this direct Node integration test.
-import { matchesNullish } from "../src/native-predicates.ts";
+import { matchesNullish } from "#reylo-source/native-predicates.ts";
 import { nativeDriverDate, promiseDriverStub } from "./helpers.ts";
 
 // Each fake client records what execute handed it and answers the way its driver does; the

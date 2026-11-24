@@ -4,7 +4,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 // oxlint-disable-next-line rules/no-node-imports -- Exercise the native SQLite driver used by Reylo's Node runtime.
 import { DatabaseSync } from "node:sqlite";
-import { sqliteSchemaFromHcl } from "../src/hcl-sqlite.ts";
+import { sqliteSchemaFromHcl } from "#reylo-source/hcl-sqlite.ts";
 
 const schema = (body: string): string => `schema "main" {}\n${body}\n`;
 const column = (name: string, type = "text", nullable = true, extra = ""): string => `column ${JSON.stringify(name)} {\n type = ${type}\n null = ${nullable}\n ${extra}\n}\n`;

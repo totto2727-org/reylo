@@ -2,7 +2,7 @@
 import { test } from "node:test";
 // oxlint-disable-next-line rules/no-node-imports -- Nub's Node suite uses native assertions for driver, CLI, and protocol results.
 import assert from "node:assert/strict";
-import { validate, withDefaults } from "../src/json-schema.ts";
+import { validate, withDefaults } from "#reylo-source/json-schema.ts";
 
 // The run time's JSON Schema 2020-12 validator (src/json-schema.ts). The official JSON Schema Test
 // Suite runs over it in lab/json-schema-suite; these are the rules Reylo adds or decides.

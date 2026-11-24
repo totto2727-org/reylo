@@ -4,7 +4,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 // oxlint-disable-next-line rules/no-node-imports -- Exercise the native SQLite driver used by Reylo's Node runtime.
 import { DatabaseSync } from "node:sqlite";
-import { withSqlcommenter } from "../src/sqlcommenter.ts";
+import { withSqlcommenter } from "#reylo-source/sqlcommenter.ts";
 
 // oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
 test("the comment ends the statement, before a closing semicolon, its file URL-encoded", () => {

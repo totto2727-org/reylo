@@ -10,10 +10,10 @@ import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 // oxlint-disable-next-line rules/no-node-imports -- Exercise the native SQLite driver used by Reylo's Node runtime.
 import { DatabaseSync } from "node:sqlite";
-import { Session } from "../src/analyze.ts";
-import { sqlModule } from "../src/loader.ts";
-import { renderType } from "../src/render.ts";
-import { defineQuery } from "../src/index.ts";
+import { Session } from "#reylo-source/analyze.ts";
+import { sqlModule } from "#reylo-source/loader.ts";
+import { renderType } from "#reylo-source/render.ts";
+import { defineQuery } from "#reylo-source/index.ts";
 import { DRIVERS, INDEX } from "./helpers.ts";
 
 // Real SQLite drivers must return the same public value representation.

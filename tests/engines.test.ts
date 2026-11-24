@@ -6,10 +6,10 @@ import { chmodSync, readFileSync, rmSync } from "node:fs";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { anyEngine, engine, MissingEngine, Unreachable } from "../src/engine.ts";
-import { nativeBinary, PLATFORM_PACKAGES, platformPackage } from "../src/native.ts";
-import { resolveProject } from "../src/project.ts";
-import { ENGINE_VERSION } from "../src/engine-version.ts";
+import { anyEngine, engine, MissingEngine, Unreachable } from "#reylo-source/engine.ts";
+import { nativeBinary, PLATFORM_PACKAGES, platformPackage } from "#reylo-source/native.ts";
+import { resolveProject } from "#reylo-source/project.ts";
+import { ENGINE_VERSION } from "#reylo-source/engine-version.ts";
 
 const VERSION: string = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")).version;
 const noShell = process.platform === "win32" && "stand-in executables require a POSIX shell";

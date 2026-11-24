@@ -6,9 +6,9 @@ import { AsyncLocalStorage } from "node:async_hooks";
 import { tracingChannel } from "node:diagnostics_channel";
 // oxlint-disable-next-line rules/no-node-imports -- Exercise the native SQLite driver used by Reylo's Node runtime.
 import { DatabaseSync } from "node:sqlite";
-import { defineQuery } from '../src/index.ts';
-import type { QueryTrace } from '../src/index.ts';
-import { listening } from "../src/trace.ts";
+import { defineQuery } from '#reylo-source/index.ts';
+import type { QueryTrace } from '#reylo-source/index.ts';
+import { listening } from "#reylo-source/trace.ts";
 
 // Every query Reylo runs is published on the tracing channel "reylo:query" (src/trace.ts): one
 // Call per `.run()`, `.runSync()`, `.try()`, `.trySync()` and call of the function `.with()`

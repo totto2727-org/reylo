@@ -5,9 +5,9 @@ import assert from "node:assert/strict";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
-import { engine } from "../src/engine.ts";
-import { findProjectFile, resolveProject } from "../src/project.ts";
-import { Session } from "../src/analyze.ts";
+import { engine } from "#reylo-source/engine.ts";
+import { findProjectFile, resolveProject } from "#reylo-source/project.ts";
+import { Session } from "#reylo-source/analyze.ts";
 
 // Any installed engine reads the shared project-file format.
 

@@ -5,7 +5,7 @@ import { createRequire } from "node:module";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 // oxlint-disable-next-line import/no-relative-parent-imports -- The native test runner loads this private guard directly from the source tree.
-import { hasObjectType, matchesNull, matchesNumber, matchesString, matchesUndefined } from "../src/native-predicates.ts";
+import { hasObjectType, matchesNull, matchesNumber, matchesString, matchesUndefined } from "#reylo-source/native-predicates.ts";
 
 export const ROOT = join(import.meta.dirname, "..");
 export const DRIVERS = join(ROOT, "lab", "drivers", "node_modules");
@@ -60,7 +60,7 @@ export function driver(name: string): any {
 
 /** Closes every session the tests opened, so that the next analysis connects afresh. */
 export async function closeSessions(): Promise<void> {
-  const { Session } = await import("../src/analyze.ts");
+  const { Session } = await import("#reylo-source/analyze.ts");
   for (const session of Session.opened()) {await session.close();}
 }
 

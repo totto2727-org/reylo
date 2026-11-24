@@ -4,13 +4,13 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 // oxlint-disable-next-line rules/no-node-imports -- Exercise the native SQLite driver used by Reylo's Node runtime.
 import { DatabaseSync } from "node:sqlite";
-import { execute } from '../src/execute.ts';
-import type { QueryModule } from '../src/execute.ts';
-import { renderParamType, renderType } from "../src/render.ts";
-import { typeSchema } from "../src/schema.ts";
-import { coerce, columnKind, DecodeError, duration, hstore, hstoreText, instant, kindType, postgresInterval, postgresYear, scalarKind, textDecoder } from "../src/values.ts";
-import type { EngineType } from "../src/engine-type.ts";
-import type { Columns } from "../src/values.ts";
+import { execute } from '#reylo-source/execute.ts';
+import type { QueryModule } from '#reylo-source/execute.ts';
+import { renderParamType, renderType } from "#reylo-source/render.ts";
+import { typeSchema } from "#reylo-source/schema.ts";
+import { coerce, columnKind, DecodeError, duration, hstore, hstoreText, instant, kindType, postgresInterval, postgresYear, scalarKind, textDecoder } from "#reylo-source/values.ts";
+import type { EngineType } from "#reylo-source/engine-type.ts";
+import type { Columns } from "#reylo-source/values.ts";
 import { nativeDriverDate, promiseDriverStub } from "./helpers.ts";
 
 // The one table (src/values.ts): the kind of each SQL type, the TypeScript type the module declares
@@ -466,7 +466,7 @@ test("runSync refuses a client whose prepared statement answers through a promis
   const db = { prepare: () => ({ all: promiseDriverStub(() => [{ n: 1 }]) }) };
   const q: QueryModule<"sqlite"> = { dialect: "sqlite", sql: "select 1 as n", params: [], columns: [["n", "int"]] };
   assert.deepEqual(await execute(db as never, q), [{ n: 1 }]);
-  const { executeSync } = await import("../src/execute.ts");
+  const { executeSync } = await import("#reylo-source/execute.ts");
   assert.throws(() => executeSync(db as never, { ...q, sql: "select 2 as n" }), /answered with a promise/u);
 });
 

@@ -47,7 +47,7 @@ const pkg = JSON.parse(await readFile(join(root, "package.json"), "utf8"));
 Object.entries(pkg.optionalDependencies).forEach(([name, version]) => {
   if (version !== ENGINE_VERSION) {throw new Error(`package.json: the upstream engine ${name} is ${version}, expected ${ENGINE_VERSION}`);}
 });
-const { private: _private, scripts: _scripts, devDependencies: _dev, bin, exports, typescript, ...rest } = pkg;
+const { private: _private, scripts: _scripts, devDependencies: _dev, imports: _developmentImports, bin, exports, typescript, ...rest } = pkg;
 // SQLite tooling is a peer at reylo's own fork version (src/engine-package.ts).
 Iterator.from(DATABASES).forEach((db) => {
   const name = `@totto2727/reylo-${db}`;

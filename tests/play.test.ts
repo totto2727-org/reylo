@@ -8,7 +8,7 @@ import { DatabaseSync } from "node:sqlite";
 import { tmpdir } from "node:os";
 import { request } from "node:http";
 import { join } from "node:path";
-import { startPlay } from "../src/play.ts";
+import { startPlay } from "#reylo-source/play.ts";
 
 // `reylo play` (src/play.ts) serves the page it finds in the install; these tests give it one, so
 // That they need no build of it.

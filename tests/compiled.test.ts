@@ -9,8 +9,8 @@ import { DatabaseSync } from "node:sqlite";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
-import { sqlModule } from "../src/loader.ts";
-import { defineQuery } from "../src/index.ts";
+import { sqlModule } from "#reylo-source/loader.ts";
+import { defineQuery } from "#reylo-source/index.ts";
 import { declarations, DRIVERS, INDEX, closeSessions } from "./helpers.ts";
 
 // A query's `sql` is the statement as Reylo sends it to the database, the engine's compiled text,

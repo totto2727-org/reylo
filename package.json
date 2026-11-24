@@ -16,6 +16,9 @@
   "engines": {
     "node": ">=24"
   },
+  "imports": {
+    "#reylo-source/*": "./src/*"
+  },
   "bin": {
     "reylo": "./src/cli.ts"
   },

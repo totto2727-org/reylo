@@ -5,7 +5,7 @@ import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import reylo from "../src/vite.ts";
+import reylo from "#reylo-source/vite.ts";
 
 // The Cloudflare Vite plugin makes every `.sql` import in a Worker an external text module in its
 // Own resolveId (`@cloudflare/vite-plugin` 1.64), so the import never reached Reylo's load hook and

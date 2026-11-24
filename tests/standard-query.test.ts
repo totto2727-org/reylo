@@ -8,10 +8,10 @@ import { join } from "node:path";
 // oxlint-disable-next-line rules/no-node-imports -- Exercise the native SQLite driver used by Reylo's Node runtime.
 import { DatabaseSync } from "node:sqlite";
 import { pathToFileURL } from "node:url";
-import { Session } from "../src/analyze.ts";
-import { defineQuery } from "../src/index.ts";
-import { sqlModule } from "../src/loader.ts";
-import { ParameterError } from "../src/values.ts";
+import { Session } from "#reylo-source/analyze.ts";
+import { defineQuery } from "#reylo-source/index.ts";
+import { sqlModule } from "#reylo-source/loader.ts";
+import { ParameterError } from "#reylo-source/values.ts";
 import { INDEX } from "./helpers.ts";
 
 // Every import is a Standard Query: `~standard.query` holds the statement, its database, and the

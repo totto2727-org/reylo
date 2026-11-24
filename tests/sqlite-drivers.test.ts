@@ -8,8 +8,8 @@ import { writeFile } from "node:fs/promises";
 import { DatabaseSync } from "node:sqlite";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { Session } from "../src/analyze.ts";
-import { placeRefusal, projectDrivers } from "../src/sqlite-drivers.ts";
+import { Session } from "#reylo-source/analyze.ts";
+import { placeRefusal, projectDrivers } from "#reylo-source/sqlite-drivers.ts";
 import { DRIVERS } from "./helpers.ts";
 
 // The drivers are the labs' (lab/drivers), linked into each project as an install would put them.

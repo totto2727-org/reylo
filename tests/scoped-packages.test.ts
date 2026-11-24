@@ -5,7 +5,7 @@ import assert from "node:assert/strict";
 import { createRequire } from "node:module";
 import { readFileSync } from "node:fs";
 import { defineQuery } from "@totto2727/reylo";
-import { engine } from "../src/engine.ts";
+import { engine } from "#reylo-source/engine.ts";
 
 const require = createRequire(import.meta.url);
 const manifest = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));

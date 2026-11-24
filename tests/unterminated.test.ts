@@ -8,7 +8,7 @@ import { mkdirSync, mkdtempSync, realpathSync, symlinkSync, writeFileSync } from
 import { DatabaseSync } from "node:sqlite";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { withinFile } from "../src/module-types.ts";
+import { withinFile } from "#reylo-source/module-types.ts";
 import { ROOT } from "./helpers.ts";
 
 // A statement that ends inside a string, a quoted name or a comment is an error at what it leaves

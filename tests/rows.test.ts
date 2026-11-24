@@ -2,10 +2,10 @@
 import { test } from "node:test";
 // oxlint-disable-next-line rules/no-node-imports -- Nub's Node suite uses native assertions for driver, CLI, and protocol results.
 import assert from "node:assert/strict";
-import type { EngineType } from "../src/engine.ts";
-import { renderParamType } from "../src/render.ts";
-import { prepareRows, variant } from '../src/rows.ts';
-import type { RowsType } from '../src/rows.ts';
+import type { EngineType } from "#reylo-source/engine.ts";
+import { renderParamType } from "#reylo-source/render.ts";
+import { prepareRows, variant } from '#reylo-source/rows.ts';
+import type { RowsType } from '#reylo-source/rows.ts';
 import { nativeDriverDate } from "./helpers.ts";
 
 // What the engine gives for `:events::rows(id int8 not null, ts timestamptz not null, status? text

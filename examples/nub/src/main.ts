@@ -1,7 +1,9 @@
 import { DatabaseSync } from "node:sqlite";
+/* oxlint-disable import/no-relative-parent-imports -- The Nub quick start demonstrates the existing preload with source-relative SQL imports. */
 import createPost from "../queries/create_post.sql";
 import getUser from "../queries/get_user.sql";
 import listPosts from "../queries/list_posts.sql";
+/* oxlint-enable import/no-relative-parent-imports */
 
 const db = new DatabaseSync("app.db");
 

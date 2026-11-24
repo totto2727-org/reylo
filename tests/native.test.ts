@@ -8,7 +8,7 @@ import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { pathToFileURL } from "node:url";
-import { nativeBinary, platformPackage, PLATFORM_PACKAGES } from "../src/native.ts";
+import { nativeBinary, platformPackage, PLATFORM_PACKAGES } from "#reylo-source/native.ts";
 
 const withoutOverride = function (run: () => void): void {
   const before = process.env.REYLO_ENGINE_PATH;
@@ -48,7 +48,7 @@ Iterator.from([["release"], ["debug"], ["release", "debug"]]).forEach((profiles)
       await mkdir(join(root, "target", profile), { recursive: true });
       await writeFile(join(root, "target", profile, exe), "legacy local build");
     }
-    const isolated: typeof import("../src/native.ts") = await import(pathToFileURL(module).href);
+    const isolated: typeof import("#reylo-source/native.ts") = await import(pathToFileURL(module).href);
     withoutOverride(() => {
       const { key, pkg } = platformPackage();
       const why = pkg ? `${pkg} is not installed (an install with --no-optional, or --omit=optional, leaves it out)` : `reylo ships no binary for ${key}`;

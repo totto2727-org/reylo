@@ -5,11 +5,11 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 // oxlint-disable-next-line rules/no-node-imports, vitest/no-import-node-test -- Nub runs this suite with Node's test runner and provides the runtime used by the SQLite integration tests.
 import { test } from 'node:test';
-import { parseConfig, parseExpression, parseTemplate } from '../../src/hclsyntax/parser.ts';
-import { lexConfig, lexExpression, lexTemplate, scanStringLit, validIdentifier } from '../../src/hclsyntax/scanner.ts';
-import { Peeker } from '../../src/hclsyntax/peeker.ts';
-import { isStringLiteral } from '../../src/hclsyntax/types.ts';
-import type { Range, Token } from '../../src/hclsyntax/types.ts';
+import { parseConfig, parseExpression, parseTemplate } from '#reylo-source/hclsyntax/parser.ts';
+import { lexConfig, lexExpression, lexTemplate, scanStringLit, validIdentifier } from '#reylo-source/hclsyntax/scanner.ts';
+import { Peeker } from '#reylo-source/hclsyntax/peeker.ts';
+import { isStringLiteral } from '#reylo-source/hclsyntax/types.ts';
+import type { Range, Token } from '#reylo-source/hclsyntax/types.ts';
 import { actualAST, actualDiagnostics, diagnostics, oracleAST, oracleTokens, position } from './oracle-shape.ts';
 import type { Fixture } from './oracle-shape.ts';
 

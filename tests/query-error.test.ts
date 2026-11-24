@@ -5,9 +5,9 @@ import assert from "node:assert/strict";
 // oxlint-disable-next-line rules/no-node-imports -- Exercise the native SQLite driver used by Reylo's Node runtime.
 import { DatabaseSync } from "node:sqlite";
 import { join } from "node:path";
-import { defineQuery } from '../src/index.ts';
-import type { MysqlClient, MysqlCode, MysqlQueryError, PostgresClient, PostgresCondition, PostgresQueryError, Query, SqliteCode, SqliteQueryError } from '../src/index.ts';
-import { readQueryError, readQueryErrorSync } from "../src/query-error.ts";
+import { defineQuery } from '#reylo-source/index.ts';
+import type { MysqlClient, MysqlCode, MysqlQueryError, PostgresClient, PostgresCondition, PostgresQueryError, Query, SqliteCode, SqliteQueryError } from '#reylo-source/index.ts';
+import { readQueryError, readQueryErrorSync } from "#reylo-source/query-error.ts";
 import { promiseDriverStub } from "./helpers.ts";
 
 // `.try()` and the database's error it reads from each driver's own (src/query-error.ts). The

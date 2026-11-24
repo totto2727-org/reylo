@@ -9,7 +9,7 @@ import { DatabaseSync } from "node:sqlite";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
-import { sqlModule } from "../src/loader.ts";
+import { sqlModule } from "#reylo-source/loader.ts";
 import { DRIVERS, INDEX, closeSessions, plain } from "./helpers.ts";
 
 // SQLite's parameter casts are compiled to its own syntax, and values are checked before binding.

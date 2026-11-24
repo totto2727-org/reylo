@@ -3,10 +3,10 @@ import { test } from "node:test";
 // oxlint-disable-next-line rules/no-node-imports -- Nub's Node suite uses native assertions for driver, CLI, and protocol results.
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
-import { execute } from '../src/execute.ts';
-import type { QueryModule } from '../src/execute.ts';
-import { parseArray } from "../src/decode.ts";
-import type { Columns } from "../src/values.ts";
+import { execute } from '#reylo-source/execute.ts';
+import type { QueryModule } from '#reylo-source/execute.ts';
+import { parseArray } from "#reylo-source/decode.ts";
+import type { Columns } from "#reylo-source/values.ts";
 import { nativeDriverDate, promiseDriverStub } from "./helpers.ts";
 
 // Fakes of the Postgres drivers that decode as the real ones do (checked against

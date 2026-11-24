@@ -1,8 +1,10 @@
 import { Database } from "bun:sqlite";
 import { afterAll, expect, test } from "bun:test";
+/* oxlint-disable import/no-relative-parent-imports -- The tests exercise Bun's separate test preload against the same source-relative queries. */
 import createPost from "../queries/create_post.sql";
 import getUser from "../queries/get_user.sql";
 import listPosts from "../queries/list_posts.sql";
+/* oxlint-enable import/no-relative-parent-imports */
 
 const db = new Database("app.db");
 afterAll(() => db.close());

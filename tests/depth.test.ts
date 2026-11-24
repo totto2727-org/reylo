@@ -7,9 +7,9 @@ import { mkdtemp, writeFile } from "node:fs/promises";
 import { DatabaseSync } from "node:sqlite";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { Engine} from "../src/engine.ts";
-import { engine } from "../src/engine.ts";
-import { Session } from "../src/analyze.ts";
+import type { Engine} from "#reylo-source/engine.ts";
+import { engine } from "#reylo-source/engine.ts";
+import { Session } from "#reylo-source/analyze.ts";
 
 // The embedded SQLite reads an expression 350 deep, where SQLite's own bound is 1,000.
 const nested = function (shape: string, n: number): string {

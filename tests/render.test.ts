@@ -2,9 +2,9 @@
 import { test } from "node:test";
 // oxlint-disable-next-line rules/no-node-imports -- Nub's Node suite uses native assertions for driver, CLI, and protocol results.
 import assert from "node:assert/strict";
-import type { EngineType } from "../src/engine.ts";
-import { orNull, renderParamType, renderType } from "../src/render.ts";
-import { typeSchema } from "../src/schema.ts";
+import type { EngineType } from "#reylo-source/engine.ts";
+import { orNull, renderParamType, renderType } from "#reylo-source/render.ts";
+import { typeSchema } from "#reylo-source/schema.ts";
 
 const scalar = (name: string): EngineType => ({ kind: "scalar", name });
 const field = (name: string, type: EngineType, nullable: boolean) => ({ name, type, nullable });

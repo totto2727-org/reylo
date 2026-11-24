@@ -10,9 +10,9 @@ import { DatabaseSync } from "node:sqlite";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
-import { differences, sqliteDefault } from '../src/fresh.ts';
-import type { Fresh } from '../src/fresh.ts';
-import { sqlModule } from "../src/loader.ts";
+import { differences, sqliteDefault } from '#reylo-source/fresh.ts';
+import type { Fresh } from '#reylo-source/fresh.ts';
+import { sqlModule } from "#reylo-source/loader.ts";
 import { DRIVERS, INDEX, closeSessions } from "./helpers.ts";
 
 // The schema freshness check compares the facts a built SQLite query read against the current schema.

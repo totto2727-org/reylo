@@ -12,7 +12,7 @@ import { Cause, Effect, Exit, Layer } from "effect";
 import { defineQuery } from "@totto2727/reylo";
 import { makeQueryRunner, prepare, QueryDecodeError, QueryExecutionError, QueryExecutor, QueryPreparationError, run } from '@totto2727/reylo/effect';
 import type { BoundQuery } from '@totto2727/reylo/effect';
-import { DecodeError, ParameterError } from "../src/values.ts";
+import { DecodeError, ParameterError } from "#reylo-source/values.ts";
 
 const binding = function (value: unknown): SQLInputValue {
   if (value === null || typeof value === "string" || typeof value === "number" || typeof value === "bigint" || value instanceof Uint8Array) {return value;}

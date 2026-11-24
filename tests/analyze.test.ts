@@ -9,10 +9,10 @@ import { DatabaseSync } from "node:sqlite";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { Session } from "../src/analyze.ts";
-import { sqlModule } from "../src/loader.ts";
-import { refusedLogin, Unreachable } from "../src/connection.ts";
-import { defineQuery } from "../src/index.ts";
+import { Session } from "#reylo-source/analyze.ts";
+import { sqlModule } from "#reylo-source/loader.ts";
+import { refusedLogin, Unreachable } from "#reylo-source/connection.ts";
+import { defineQuery } from "#reylo-source/index.ts";
 
 // A SQLite project: a package, its database, and DATABASE_URL naming it.
 const project = function (): { root: string; env: Record<string, string> } {

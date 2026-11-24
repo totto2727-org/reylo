@@ -2,8 +2,8 @@
 import { test } from "node:test";
 // oxlint-disable-next-line rules/no-node-imports -- Nub's Node suite uses native assertions for driver, CLI, and protocol results.
 import assert from "node:assert/strict";
-import { engine } from "../src/engine.ts";
-import { ENGINE_VERSION } from "../src/engine-version.ts";
+import { engine } from "#reylo-source/engine.ts";
+import { ENGINE_VERSION } from "#reylo-source/engine-version.ts";
 
 // Published upstream binaries are versioned artifacts, not builds of this fork's Rust tree.
 // Their reported fingerprint remains the cache identity, while the handshake checks compatibility.

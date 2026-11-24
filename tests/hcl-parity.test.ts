@@ -5,7 +5,7 @@ import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { Session } from "../src/analyze.ts";
+import { Session } from "#reylo-source/analyze.ts";
 import { declarations, ROOT } from "./helpers.ts";
 
 const schema = `schema "main" {}

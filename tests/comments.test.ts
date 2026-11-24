@@ -2,7 +2,7 @@
 import { test } from "node:test";
 // oxlint-disable-next-line rules/no-node-imports -- Nub's Node suite uses native assertions for driver, CLI, and protocol results.
 import assert from "node:assert/strict";
-import { fieldComment } from "../src/module-types.ts";
+import { fieldComment } from "#reylo-source/module-types.ts";
 
 // oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
 test("a doc comment is one line, or a block of lines, with a star and a slash kept apart", () => {

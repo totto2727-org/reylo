@@ -2,9 +2,11 @@ import assert from "node:assert/strict";
 import { DatabaseSync } from "node:sqlite";
 // oxlint-disable-next-line rules/no-node-imports, vitest/no-import-node-test -- Nub runs this suite with Node's test runner and provides the runtime used by the SQLite integration tests.
 import { after, test } from "node:test";
+/* oxlint-disable import/no-relative-parent-imports -- The tests exercise Nub's Node runner and preload using the quick start's source-relative queries. */
 import createPost from "../queries/create_post.sql";
 import getUser from "../queries/get_user.sql";
 import listPosts from "../queries/list_posts.sql";
+/* oxlint-enable import/no-relative-parent-imports */
 
 const db = new DatabaseSync("app.db");
 after(() => db.close());

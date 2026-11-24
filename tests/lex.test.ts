@@ -2,10 +2,10 @@
 import { test } from "node:test";
 // oxlint-disable-next-line rules/no-node-imports -- Nub's Node suite uses native assertions for driver, CLI, and protocol results.
 import assert from "node:assert/strict";
-import { lexPlaceholders } from "../src/lex.ts";
-import { defineQuery } from "../src/index.ts";
-import { engine as load } from '../src/engine.ts';
-import type { Dialect } from '../src/engine.ts';
+import { lexPlaceholders } from "#reylo-source/lex.ts";
+import { defineQuery } from "#reylo-source/index.ts";
+import { engine as load } from '#reylo-source/engine.ts';
+import type { Dialect } from '#reylo-source/engine.ts';
 
 const names = (sql: string, dialect: "postgres" | "mysql" | "sqlite" = "postgres"): string[] => lexPlaceholders(sql, dialect).params;
 
