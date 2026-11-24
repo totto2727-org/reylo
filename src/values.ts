@@ -427,35 +427,62 @@ export function bytea(x: string): Uint8Array {
   return Uint8Array.from(out);
 }
 
+interface TextCursor {
+  offset: number;
+  text: string;
+}
+
+const CHARACTER_WIDTH = 1;
+const HSTORE_SEPARATOR = "=>";
+const POSTGRES_NULL = "NULL";
+// oxlint-disable-next-line unicorn/no-null -- PostgreSQL NULL inside arrays and hstores has always decoded to JavaScript null.
+const SQL_NULL_VALUE = null;
+
+const consumeCharacter = (cursor: TextCursor): string | undefined => {
+  const character = cursor.text[cursor.offset];
+  cursor.offset += CHARACTER_WIDTH;
+  return character;
+};
+
+const readQuotedText = (cursor: TextCursor): string => {
+  const quoted = { prefix: "", start: cursor.offset + CHARACTER_WIDTH };
+  cursor.offset = quoted.start;
+  while (cursor.offset < cursor.text.length && cursor.text[cursor.offset] !== '"') {
+    if (consumeCharacter(cursor) === "\\") {
+      quoted.prefix += cursor.text.slice(quoted.start, cursor.offset - CHARACTER_WIDTH);
+      quoted.start = cursor.offset;
+      cursor.offset += CHARACTER_WIDTH;
+    }
+  }
+  const suffix = cursor.text.slice(quoted.start, cursor.offset);
+  cursor.offset += CHARACTER_WIDTH;
+  return quoted.prefix + suffix;
+};
+
+const readHstoreValue = (cursor: TextCursor): string | null => {
+  cursor.offset += HSTORE_SEPARATOR.length;
+  if (cursor.text[cursor.offset] === '"') {return readQuotedText(cursor);}
+  cursor.offset += POSTGRES_NULL.length;
+  return SQL_NULL_VALUE;
+};
+
 /**
  * An hstore's text as an object of its keys: `"a"=>"1", "b c"=>NULL` is `{ a: "1", "b c": null }`.
  * The server quotes every key and value, escapes `"` and `\` with a backslash, writes a null value
  * as a bare NULL and separates the pairs with `, `. A key such as `__proto__` is a key like any other.
+ * @param {string} text - The hstore as PostgreSQL writes it.
+ * @returns {Record<string, string | null>} The key and value pairs.
  */
-export function hstore(x: string): Record<string, string | null> {
+export const hstore = (text: string): Record<string, string | null> => {
   const pairs: [string, string | null][] = [];
-  const n = x.length;
-  let i = 0;
-  const quoted = (): string => {
-    let s = "";
-    let from = ++i;
-    while (i < n && x[i] !== '"') {
-      if (x[i] === "\\") {(s += x.slice(from, i)), (from = ++i);}
-      i++;
-    }
-    s += x.slice(from, i++);
-    return s;
-  };
-  while (i < n) {
-    while (x[i] === " " || x[i] === ",") {i++;}
-    if (i >= n || x[i] !== '"') {break;}
-    const key = quoted();
-    i += 2;
-    if (x[i] === '"') {pairs.push([key, quoted()]);}
-    else {(pairs.push([key, null]), (i += 4));}
+  const cursor = { offset: TEXT_START, text };
+  while (cursor.offset < text.length) {
+    while (text[cursor.offset] === " " || text[cursor.offset] === ",") {cursor.offset += CHARACTER_WIDTH;}
+    if (text[cursor.offset] !== '"') {break;}
+    pairs.push([readQuotedText(cursor), readHstoreValue(cursor)]);
   }
   return Object.fromEntries(pairs);
-}
+};
 
 /**
  * An hstore, as `.run()` returns it, in the text its input reads: each key and value quoted, `"`
@@ -499,40 +526,49 @@ const TEXT_DECODERS: Readonly<Record<ScalarKind, Decoder>> = {
   unknown: identity,
 };
 
+interface ArrayFormat {
+  decode: Decoder;
+  delimiter: string;
+}
+
+const readArrayValue = (cursor: TextCursor, { decode, delimiter }: ArrayFormat): unknown => {
+  const { text } = cursor;
+  if (text[cursor.offset] === '"') {return decode(readQuotedText(cursor));}
+  const start = cursor.offset;
+  while (cursor.offset < text.length && text[cursor.offset] !== delimiter && text[cursor.offset] !== "}") {
+    cursor.offset += CHARACTER_WIDTH;
+  }
+  const value = text.slice(start, cursor.offset);
+  return value === POSTGRES_NULL ? SQL_NULL_VALUE : decode(value);
+};
+
+const readArray = (cursor: TextCursor, format: ArrayFormat): unknown[] => {
+  const items: unknown[] = [];
+  cursor.offset += CHARACTER_WIDTH;
+  if (cursor.text[cursor.offset] === "}") {
+    cursor.offset += CHARACTER_WIDTH;
+    return items;
+  }
+  while (cursor.offset < cursor.text.length) {
+    items.push(cursor.text[cursor.offset] === "{" ? readArray(cursor, format) : readArrayValue(cursor, format));
+    if (consumeCharacter(cursor) === "}") {return items;}
+  }
+  return items;
+};
+
 /**
  * Postgres's array output: `{a,"b,c",NULL,{d}}`, optionally after its bounds (`[0:1]={...}`).
  * An element is quoted when it holds the delimiter, a brace, a quote, a backslash or white space,
  * or is empty or the word NULL; inside quotes a backslash escapes the next character.
+ * @param {string} text - The array as PostgreSQL writes it.
+ * @param {Decoder} element - Decodes the text of each non-NULL scalar.
+ * @param {string} delimiter - The type's element separator.
+ * @returns {unknown[]} The decoded array, including any nested arrays.
  */
-export function parseArray(text: string, element: (text: string) => unknown, delim = ","): unknown[] {
-  const n = text.length;
-  let i = text[0] === "[" ? text.indexOf("=") + 1 : 0;
-  const level = (): unknown[] => {
-    const out: unknown[] = [];
-    i++;
-    if (text[i] === "}") {return i++, out;}
-    while (i < n) {
-      if (text[i] === "{") {out.push(level());}
-      else if (text[i] === '"') {
-        let s = "";
-        let from = ++i;
-        while (i < n && text[i] !== '"') {
-          if (text[i] === "\\") {(s += text.slice(from, i)), (from = ++i);}
-          i++;
-        }
-        out.push(element(s + text.slice(from, i++)));
-      } else {
-        const from = i;
-        while (i < n && text[i] !== delim && text[i] !== "}") {i++;}
-        const s = text.slice(from, i);
-        out.push(s === "NULL" ? null : element(s));
-      }
-      if (text[i++] === "}") {return out;}
-    }
-    return out;
-  };
-  return level();
-}
+export const parseArray = (text: string, element: Decoder, delimiter = ","): unknown[] => {
+  const offset = text[TEXT_START] === "[" ? text.indexOf("=") + CHARACTER_WIDTH : TEXT_START;
+  return readArray({ offset, text }, { decode: element, delimiter });
+};
 
 /** The decoder of a Postgres value of `kind` from its text; `delim` is an array's (`;` for `box[]`). */
 export function textDecoder(kind: Kind, delim = ","): Decoder {
