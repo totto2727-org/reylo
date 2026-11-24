@@ -127,8 +127,8 @@ test("SQLite: one row on every driver, whatever its integer setting; an integer 
   // LibSQL's intMode "string" hands the 2 over as its digits.
   const refused = /Column "ok" is a boolean, stored as 0 or 1, and holds "?2"?, which is neither/u;
   const rows = [
-    { id: 1, n: 5, r: 1.5, s: "hi", b: { bytes: [1, 2, 255] }, flag: true, x: 7, z: 2.5, more: false },
-    { id: 2, n: 6, r: null, s: null, b: null, flag: false, x: { bytes: [1] }, z: "abc", more: true },
+    { b: { bytes: [1, 2, 255] }, flag: true, id: 1, more: false, n: 5, r: 1.5, s: "hi", x: 7, z: 2.5 },
+    { b: null, flag: false, id: 2, more: true, n: 6, r: null, s: null, x: { bytes: [1] }, z: "abc" },
   ];
   const bigError = /Column "v" holds .*9007199254740992|Column "v" holds 9007199254740993/;
   // Better-sqlite3 with every integer a BigInt: Reylo's statement reads numbers, the app's keep its setting.
@@ -376,11 +376,11 @@ from users u where u.id = :id::int`,
   }
   const profile = await built(root, "file:./app.db", "profile", sql.profile);
   const values = await built(root, "file:./app.db", "values", sql.values);
-  const ann = { profile: { user: { id: 1, name: "ann" }, posts: [{ id: 10, title: "hello" }, { id: 11, title: "world" }] } };
-  const bob = { profile: { user: { id: 2, name: "bob" }, posts: [] } };
+  const ann = { profile: { posts: [{ id: 10, title: "hello" }, { id: 11, title: "world" }], user: { id: 1, name: "ann" } } };
+  const bob = { profile: { posts: [], user: { id: 2, name: "bob" } } };
   const rows = [
-    { o: { big: 9_007_199_254_740_992, score: 1.5, flag: 1, more: 0, pair: ["ann", 1.5], doc: "[1]" }, doc: "[1]", glued: '{"n":"ann"}' },
-    { o: { big: null, score: null, flag: 0, more: 1, pair: ["bob", null], doc: null }, doc: null, glued: '{"n":"bob"}' },
+    { doc: "[1]", glued: '{"n":"ann"}', o: { big: 9_007_199_254_740_992, doc: "[1]", flag: 1, more: 0, pair: ["ann", 1.5], score: 1.5 } },
+    { doc: null, glued: '{"n":"bob"}', o: { big: null, doc: null, flag: 0, more: 1, pair: ["bob", null], score: null } },
   ];
   const check = async (label: string, run: (query: SqliteQuery, params?: QueryParams) => unknown): Promise<void> => {
     assert.deepEqual(plain(await run(profile, { id: 1 })), ann, `${label}: the profile`);

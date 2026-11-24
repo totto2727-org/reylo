@@ -11,7 +11,7 @@ afterAll(() => db.close());
 
 test("get_user finds ada, and null for an id nobody has", async () => {
   const ada = await getUser.run(db, { id: 1 });
-  expect(ada).toMatchObject({ id: 1, name: "ada", email: "ada@example.com", role: "admin" });
+  expect(ada).toMatchObject({ email: "ada@example.com", id: 1, name: "ada", role: "admin" });
   expect(await getUser.run(db, { id: 999 })).toBeNull();
 });
 
@@ -25,8 +25,8 @@ test("create_post returns the new row, which list_posts then lists", async () =>
 
     const posts = await listPosts.run(db, { role: "admin" });
     expect(posts.slice(0, 2)).toEqual([
-      { id: 1, title: "Hello", body: "first post", author: "ada" },
-      { id: 2, title: "Again", body: null, author: "ada" },
+      { author: "ada", body: "first post", id: 1, title: "Hello" },
+      { author: "ada", body: null, id: 2, title: "Again" },
     ]);
     expect(posts.at(-1)).toEqual({ id: post.id, title: "From the test", body: "draft", author: "ada" });
   } finally {

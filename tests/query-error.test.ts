@@ -227,7 +227,7 @@ test("trySync returns the value or the database's error on a synchronous SQLite 
     assert.deepEqual(insert.trySync(db, { email: "a" }), { value: undefined });
     const unique = insert.trySync(db, { email: "a" });
     assert.ok(unique.error);
-    assert.deepEqual(fields(unique.error), { message: "UNIQUE constraint failed: users.email", code: "SQLITE_CONSTRAINT_UNIQUE", errcode: 2067, table: "users", columns: ["email"], constraint: undefined });
+    assert.deepEqual(fields(unique.error), { code: "SQLITE_CONSTRAINT_UNIQUE", columns: ["email"], constraint: undefined, errcode: 2067, message: "UNIQUE constraint failed: users.email", table: "users" });
     assert.equal(insert.trySync(db, { email: null }).error?.code, "SQLITE_CONSTRAINT_NOTNULL");
     assert.deepEqual(get.trySync(db, { id: 1 }), { value: { id: 1 } });
     assert.throws(() => get.trySync(db, { id: 2 }), /^Error: Expected exactly one row, got 0$/u);
