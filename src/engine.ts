@@ -215,8 +215,8 @@ export class Engine extends EngineCore {
       analyze: async (sql) => (await ask({ op: "run", conn, sql })).analysis!,
       query: async (sql, params) => (await ask({ op: "query", conn, sql, params })).rows!,
       describe: async (sql) => {
-        const d = await ask({ op: "describe", conn, sql });
-        return { params: d.params!.map((oid) => ({ oid })), columns: d.columns! };
+        const answer = await ask({ op: "describe", conn, sql });
+        return { params: answer.params!.map((oid) => ({ oid })), columns: answer.columns! };
       },
       forget: async () => void (await ask({ op: "forget", conn })),
       close: async () => {
@@ -293,7 +293,7 @@ class Channel {
     child.stderr.setEncoding("utf8").on("data", (chunk: string) => (this.#stderr = (this.#stderr + chunk).slice(-STDERR_KEPT)));
     // A child that stopped closes its input under a request being written: the exit says why.
     child.stdin.on("error", () => {});
-    child.on("error", (e: Error) => this.#end(`the engine ${binary} could not start: ${e.message}`));
+    child.on("error", (error: Error) => this.#end(`the engine ${binary} could not start: ${error.message}`));
     // `close`, after the child's output has been read to its end, rather than `exit`.
     child.on("close", (code, signal) => {
       const said = this.#stderr.trim().split("\n").slice(-3).join("\n");

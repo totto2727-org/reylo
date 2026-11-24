@@ -19,9 +19,9 @@ const binding = function (value: unknown): SQLInputValue {
   throw new TypeError("Unsupported SQLite binding");
 };
 
-const database = function (t: TestContext) {
+const database = function (testContext: TestContext) {
   const db = new DatabaseSync(":memory:");
-  t.after(() => db.close());
+  testContext.after(() => db.close());
   const layer = Layer.succeed(QueryExecutor, {
     dialect: "sqlite",
     execute: ({ text, values }) => Effect.try({

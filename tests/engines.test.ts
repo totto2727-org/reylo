@@ -111,27 +111,27 @@ test("an executable that exits or never answers is refused", { skip: noShell }, 
 
 // oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
 test("the installed SQLite engine reads project configuration and is reused", async (testContext) => {
-  const e = await engine("sqlite");
-  assert.equal(await engine("sqlite"), e);
-  assert.equal(await anyEngine(), e);
+  const currentEngine = await engine("sqlite");
+  assert.equal(await engine("sqlite"), currentEngine);
+  assert.equal(await anyEngine(), currentEngine);
   const root = await mkdtemp(join(tmpdir(), "reylo-native-project-"));
   testContext.after(() => rmSync(root, { force: true, recursive: true }));
   await writeFile(join(root, ".reylo.yaml"), "direct_url: file:./app.db\n");
-  const resolved = resolveProject(e, root, {});
+  const resolved = resolveProject(currentEngine, root, {});
   assert.deepEqual([resolved.dialect, resolved.error], ["sqlite", undefined]);
 });
 
 // oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
 test("a closed SQLite connection is refused and a new connection works", async () => {
-  const e = await engine("sqlite");
-  const c = await e.open(":memory:");
+  const currentEngine = await engine("sqlite");
+  const connection = await currentEngine.open(":memory:");
   try {
-    assert.deepEqual((await c.analyze("select 1 as x")).columns.map((col) => col.name), ["x"]);
+    assert.deepEqual((await connection.analyze("select 1 as x")).columns.map((col) => col.name), ["x"]);
   } finally {
-    await c.close();
+    await connection.close();
   }
-  await assert.rejects(c.analyze("select 1"), (err: Error) => err instanceof Unreachable && err.message === "the connection is closed");
-  const again = await e.open(":memory:");
+  await assert.rejects(connection.analyze("select 1"), (err: Error) => err instanceof Unreachable && err.message === "the connection is closed");
+  const again = await currentEngine.open(":memory:");
   try {
     assert.deepEqual(await again.query("select ? as y", [2]), [[2]]);
   } finally {

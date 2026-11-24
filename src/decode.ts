@@ -67,13 +67,13 @@ const builtin = function (oid: number): { kind: Kind; delim: string } | undefine
 
 const builtinDecoders = new Map<number, Decoder>();
 const builtinDecoder = function (oid: number): Decoder | undefined {
-  let d = builtinDecoders.get(oid);
-  if (matchesUndefined(d)) {
+  let decoder = builtinDecoders.get(oid);
+  if (matchesUndefined(decoder)) {
     const b = builtin(oid);
     if (!b) {return undefined;}
-    builtinDecoders.set(oid, (d = textDecoder(b.kind, b.delim)));
+    builtinDecoders.set(oid, (decoder = textDecoder(b.kind, b.delim)));
   }
-  return d;
+  return decoder;
 };
 
 // ---------------------------------------------------------------------------------------------
@@ -138,11 +138,11 @@ const fieldDecoders = async function (fields: Field[], columns: Columns | undefi
   const byColumn = columns && columns.length === fields.length ? columns : undefined;
   const created = fields.filter((field) => field.oid >= FIRST_USER_OID);
   const known = learnedOf(key);
-  if (byColumn) {created.forEach((f) => known.has(f.oid) || known.set(f.oid, { kind: byColumn[fields.indexOf(f)]![1], delim: byColumn[fields.indexOf(f)]![2] ?? "," }));}
-  else if (created.length) {await learn(key, created.map((f) => f.oid), load);}
+  if (byColumn) {created.forEach((field) => known.has(field.oid) || known.set(field.oid, { kind: byColumn[fields.indexOf(field)]![1], delim: byColumn[fields.indexOf(field)]![2] ?? "," }));}
+  else if (created.length) {await learn(key, created.map((field) => field.oid), load);}
   return fields.map((field) => {
-    const b = builtinDecoder(field.oid);
-    if (b) {return b;}
+    const decoder = builtinDecoder(field.oid);
+    if (decoder) {return decoder;}
     const k = known.get(field.oid) ?? { kind: "text", delim: "," };
     return textDecoder(k.kind, k.delim);
   });
@@ -174,8 +174,8 @@ const pgTypes = function (key: object) {
         binary = true;
         return () => BINARY;
       }
-      const b = builtinDecoder(oid);
-      if (b) {return b;}
+      const decoder = builtinDecoder(oid);
+      if (decoder) {return decoder;}
       const k = known.get(oid);
       if (k) {return textDecoder(k.kind, k.delim);}
       pending = true;
@@ -283,7 +283,7 @@ export function neonCallable(c: AnyClient & ((...args: unknown[]) => Promise<any
 // ---------------------------------------------------------------------------------------------
 // PGlite
 
-const isPglite = (c: AnyClient): boolean => hasFunctionType(c.query) && hasFunctionType(c.exec) && (hasFunctionType(c.refreshArrayTypes) || (hasFunctionType(c.rollback) && "closed" in c));
+const isPglite = (client: AnyClient): boolean => hasFunctionType(client.query) && hasFunctionType(client.exec) && (hasFunctionType(client.refreshArrayTypes) || (hasFunctionType(client.rollback) && "closed" in client));
 
 /** The oids each statement's result had on its earlier runs, by the statement's text: PGlite's per-query table names only those. */
 const pgliteOids = new Map<string, Set<number>>();
@@ -346,7 +346,7 @@ export async function postgresJs(c: AnyClient, text: string, params: unknown[], 
       throw new TypeError(`Reylo cannot read this postgres.js client's rows: its transform.row rewrites every row, Reylo's too, so they would not have the types the query declares. Run Reylo's queries on a postgres() instance without transform.row.`);
     }
   });
-  const load: Load = async (sql) => ((await c.unsafe(sql).raw()) as (BufferLike | null)[][]).map((r) => r.map((v) => (matchesNull(v) ? null : textOf(v))));
+  const load: Load = async (sql) => ((await c.unsafe(sql).raw()) as (BufferLike | null)[][]).map((r) => r.map((bytes) => (matchesNull(bytes) ? null : textOf(bytes))));
   const decoders = await fieldDecoders(fields, columns, c, load);
   // The module's names, which a `transform.column` of the app's does not rename; a query defined by
   // Hand has the server's.
@@ -357,8 +357,8 @@ export async function postgresJs(c: AnyClient, text: string, params: unknown[], 
     const values = raw[r] as (BufferLike | null)[];
     const row: Record<string, unknown> = {};
     for (let i = 0; i < n; i++) {
-      const v = values[i];
-      row[names[i]!] = matchesNull(v) || matchesUndefined(v) ? null : decoders[i]!(textOf(v));
+      const bytes = values[i];
+      row[names[i]!] = matchesNull(bytes) || matchesUndefined(bytes) ? null : decoders[i]!(textOf(bytes));
     }
     out[r] = row;
   }
@@ -464,11 +464,11 @@ const loadSlonik = function (): SlonikModule {
   throw new TypeError(`Reylo runs a query on Slonik with a sql tag from the app's own slonik package, which it could not load (a server that is bundled keeps slonik external, so that it loads from node_modules at run time): ${(failure as Error).message}`);
 };
 
-const slonikTag = function (c: AnyClient): SlonikTag {
+const slonikTag = function (client: AnyClient): SlonikTag {
   const { createSqlTag } = loadSlonik();
   // The parsers the app made its pool with, which a pool names on `configuration` and its
   // Connections, transactions and savepoints on `clientConfiguration` (not in Slonik's types).
-  const own = ((c.configuration ?? c.clientConfiguration)?.typeParsers as SlonikTypeParser[] | undefined)?.map((p) => p.name) ?? [];
+  const own = ((client.configuration ?? client.clientConfiguration)?.typeParsers as SlonikTypeParser[] | undefined)?.map((p) => p.name) ?? [];
   const names = [...new Set([...SLONIK_TEXT, ...own])];
   const key = names.join(",");
   let tag = slonikTags.get(key);

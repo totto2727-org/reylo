@@ -82,7 +82,7 @@ const wallClock = function (s: string, decimals: number, type: number): string {
 
 /** The app's settings, where mysql2 shows them: a promise Pool's, Connection's or PoolConnection's. */
 type Mysql2Config = { typeCast?: unknown; decimalNumbers?: boolean; jsonStrings?: boolean };
-const configOf = (m: AnyClient): Mysql2Config | undefined => m.pool?.config?.connectionConfig ?? m.connection?.config;
+const configOf = (client: AnyClient): Mysql2Config | undefined => client.pool?.config?.connectionConfig ?? client.connection?.config;
 
 /**
  * Whether the statement needs Reylo's typeCast, which mysql2 calls for every value of the binary
@@ -90,9 +90,9 @@ const configOf = (m: AnyClient): Mysql2Config | undefined => m.pool?.config?.con
  * and where the app's settings, which a query cannot turn off, would decide a DECIMAL or a JSON value
  * or replace mysql2's own reading (or cannot be read).
  */
-const needsCast = function (m: AnyClient, columns: Columns | undefined): boolean {
+const needsCast = function (client: AnyClient, columns: Columns | undefined): boolean {
   if (!columns || columns.some(([, kind]) => kind === "unknown" || kind.split("|").some((part) => part === "json" || part.startsWith("json")))) {return true;}
-  const config = configOf(m);
+  const config = configOf(client);
   return matchesUndefined(config) || hasFunctionType(config.typeCast) || config.decimalNumbers === true || config.jsonStrings === true;
 };
 

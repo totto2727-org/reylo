@@ -162,10 +162,10 @@ test("a column list that does not read is the type check's error at its place, a
   try {
     for (const [sql, at, message] of cases) {
       const a = await analysis(root, url, sql);
-      const d = a.diagnostics.find((diagnostic) => diagnostic.code === 20);
-      assert.ok(d, sql);
-      assert.match(d.message, message);
-      assert.equal(sql.slice(d.start, d.start + d.length), at, sql);
+      const currentDiagnostic = a.diagnostics.find((diagnostic) => diagnostic.code === 20);
+      assert.ok(currentDiagnostic, sql);
+      assert.match(currentDiagnostic.message, message);
+      assert.equal(sql.slice(currentDiagnostic.start, currentDiagnostic.start + currentDiagnostic.length), at, sql);
       const file = join(root, "bad.sql");
       await writeFile(file, sql);
       await writeFile(join(root, ".env"), `DATABASE_URL=${url}\n`);
@@ -286,10 +286,10 @@ select value ->> '$.title', value ->> '$.done' from json_each(:todos::json('{
     assert.deepEqual(limited.inputSchema.required, []);
     // What the profile refuses is the type check's error at the schema, and fails the build.
     const bad = `select * from json_each(:p::json('{ "$ref": "#/$defs/x" }'))`;
-    const d = (await analysis(root, url, bad)).diagnostics.find((diagnostic) => diagnostic.code === 20);
-    assert.ok(d);
-    assert.match(d.message, /breaks the schema's locality/u);
-    assert.equal(bad.slice(d.start, d.start + d.length), `'{ "$ref": "#/$defs/x" }'`);
+    const currentDiagnostic = (await analysis(root, url, bad)).diagnostics.find((diagnostic) => diagnostic.code === 20);
+    assert.ok(currentDiagnostic);
+    assert.match(currentDiagnostic.message, /breaks the schema's locality/u);
+    assert.equal(bad.slice(currentDiagnostic.start, currentDiagnostic.start + currentDiagnostic.length), `'{ "$ref": "#/$defs/x" }'`);
   } finally {
     db.close();
     await closeSessions();
@@ -344,10 +344,10 @@ test("an insert takes the table's alias before its rows, and refuses a column li
     const upsert = await built(root, url, "aliased", "insert into t as tt :p::rows(id integer not null, x text not null) on conflict (id) do update set x = excluded.x where tt.x <> excluded.x returning id, x");
     assert.deepEqual(plain(await upsert.run(db, { p: [{ id: 2, x: "B" }, { id: 3, x: "c" }] })), [{ id: 2, x: "B" }, { id: 3, x: "c" }]);
     const own = "insert into t (id, x) :p::rows(id integer not null, x text not null)";
-    const d = (await analysis(root, url, own)).diagnostics.find((diagnostic) => diagnostic.code === 20);
-    assert.ok(d);
-    assert.match(d.message, /writes the insert's column list itself/u);
-    assert.equal(own.slice(d.start, d.start + d.length), "(id, x)");
+    const currentDiagnostic = (await analysis(root, url, own)).diagnostics.find((diagnostic) => diagnostic.code === 20);
+    assert.ok(currentDiagnostic);
+    assert.match(currentDiagnostic.message, /writes the insert's column list itself/u);
+    assert.equal(own.slice(currentDiagnostic.start, currentDiagnostic.start + currentDiagnostic.length), "(id, x)");
     await writeFile(join(root, "own.sql"), own);
     await assert.rejects(sqlModule(join(root, "own.sql"), own), /writes the insert's column list itself/u);
   } finally {

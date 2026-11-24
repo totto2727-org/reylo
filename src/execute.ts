@@ -201,8 +201,8 @@ export type ParamsInput = Record<string, unknown>;
 
 // A SQLite-backed Durable Object's `ctx.storage.sql`: exec() and databaseSize, and no prepare().
 // Sqlite3's Database has exec() too, beside all().
-function isDurableObjectSql(c: AnyClient | null | undefined): boolean {
-  return !matchesNullish(c) && hasFunctionType(c.exec) && !hasFunctionType(c.prepare) && !hasFunctionType(c.all) && "databaseSize" in c;
+function isDurableObjectSql(client: AnyClient | null | undefined): boolean {
+  return !matchesNullish(client) && hasFunctionType(client.exec) && !hasFunctionType(client.prepare) && !hasFunctionType(client.all) && "databaseSize" in client;
 }
 
 /**
@@ -215,9 +215,9 @@ export function execute<D extends Dialect>(
   query: QueryModule<D>,
   params: ParamsInput = {},
 ): unknown[] | Promise<unknown[]> {
-  const c = underneath(client as AnyClient);
-  if (query.dialect === "sqlite" && (isSyncSqlite(c) || isDurableObjectSql(c))) {return executeSyncSqlite(c, query, params);}
-  return executeAsync(c, query, params);
+  const currentClient = underneath(client as AnyClient);
+  if (query.dialect === "sqlite" && (isSyncSqlite(currentClient) || isDurableObjectSql(currentClient))) {return executeSyncSqlite(currentClient, query, params);}
+  return executeAsync(currentClient, query, params);
 }
 
 /**
@@ -226,11 +226,11 @@ export function execute<D extends Dialect>(
  * one), or on `session.tx` inside a libSQL transaction, whose `client` stays the base client;
  * any other client as it is.
  */
-function underneath(c: AnyClient): AnyClient {
-  const o = c as unknown as { select?: unknown; session?: { client?: unknown; tx?: unknown; dialect?: unknown } } | null | undefined;
+function underneath(currentClient: AnyClient): AnyClient {
+  const o = currentClient as unknown as { select?: unknown; session?: { client?: unknown; tx?: unknown; dialect?: unknown } } | null | undefined;
   const session = !matchesNullish(o) && hasObjectType(o) && hasFunctionType(o.select) ? o.session : undefined;
-  if (matchesNullish(session) || !hasObjectType(session) || matchesNullish(session.dialect)) {return c;}
-  const client = ((session.tx ?? session.client) as AnyClient | undefined) ?? c;
+  if (matchesNullish(session) || !hasObjectType(session) || matchesNullish(session.dialect)) {return currentClient;}
+  const client = ((session.tx ?? session.client) as AnyClient | undefined) ?? currentClient;
   // Drizzle-orm/durable-sqlite keeps the Durable Object's storage, whose SQL storage is its sql.
   const {sql} = (client as { sql?: AnyClient });
   return isDurableObjectSql(sql) ? sql! : client;
@@ -238,30 +238,30 @@ function underneath(c: AnyClient): AnyClient {
 
 /** The synchronous path alone, for `runSync`: any other client is refused before anything runs. */
 export function executeSync<D extends Dialect>(client: SyncClientFor<D>, query: QueryModule<D>, params: ParamsInput = {}): unknown[] {
-  const c = underneath(client as unknown as AnyClient);
+  const currentClient = underneath(client as unknown as AnyClient);
   const refuse = (why: string) => new TypeError(`runSync takes a synchronous SQLite client (better-sqlite3, node:sqlite, bun:sqlite, the Database of @tursodatabase/database/compat or a Durable Object's ctx.storage.sql); ${why}. run takes every client.`);
   if (query.dialect !== "sqlite") {throw refuse(`a ${query.dialect} statement has none`);}
-  if (!isSyncSqlite(c) && !isDurableObjectSql(c)) {throw refuse("this client answers through a promise");}
-  const rows = executeSyncSqlite(c, query, params);
+  if (!isSyncSqlite(currentClient) && !isDurableObjectSql(currentClient)) {throw refuse("this client answers through a promise");}
+  const rows = executeSyncSqlite(currentClient, query, params);
   if (Array.isArray(rows)) {return rows;}
   rows.catch(() => {});
   throw refuse("this client's statement answered with a promise");
 }
 
-function executeSyncSqlite(c: AnyClient, query: QueryModule, params: ParamsInput): unknown[] | Promise<unknown[]> {
+function executeSyncSqlite(client: AnyClient, query: QueryModule, params: ParamsInput): unknown[] | Promise<unknown[]> {
   checkParams(query, params);
   if (query.fresh && due(query)) {
     let rows: unknown[] | undefined;
     try {
-      rows = isDurableObjectSql(c) ? c.exec(query.fresh.query).toArray() : c.prepare(query.fresh.query).all();
+      rows = isDurableObjectSql(client) ? client.exec(query.fresh.query).toArray() : client.prepare(query.fresh.query).all();
     } catch {}
     const lines = (rows && differences(query.fresh, rows, query.dialect)) ?? [];
     if (lines.length) {throw staleError(query.source, lines);}
     passed(query);
   }
   const { text, values, names } = statement(query, params);
-  if (isDurableObjectSql(c)) {return runDurableObject(c, text, durableObjectValues(query, names, values), query.columns);}
-  return runSyncSqlite(c, text, values, query.columns);
+  if (isDurableObjectSql(client)) {return runDurableObject(client, text, durableObjectValues(query, names, values), query.columns);}
+  return runSyncSqlite(client, text, values, query.columns);
 }
 
 // A Durable Object's exec() refuses a BigInt ("Cannot convert a BigInt value to a number").
@@ -274,16 +274,16 @@ function durableObjectValues(query: QueryModule, names: Readonly<string[]>, valu
 // Are asynchronous. Turso's compat Database has batch() as D1 does, and answers at once; its
 // MaxWriteReplicationIndex(), which every Database of Turso's has, tells it from D1's. A DuckDB
 // Connection has prepare() too, answering through a promise, and runAndReadAll() beside it.
-function isSyncSqlite(c: AnyClient | null | undefined): boolean {
+function isSyncSqlite(client: AnyClient | null | undefined): boolean {
   return (
-    !matchesNullish(c) &&
-    hasFunctionType(c.prepare) &&
-    !hasFunctionType(c.runAndReadAll) &&
-    (!hasFunctionType(c.batch) || hasFunctionType(c.maxWriteReplicationIndex)) &&
-    !hasFunctionType(c.all) &&
-    !hasFunctionType(c.execute) &&
-    !hasFunctionType(c.unsafe) &&
-    !isTurso(c)
+    !matchesNullish(client) &&
+    hasFunctionType(client.prepare) &&
+    !hasFunctionType(client.runAndReadAll) &&
+    (!hasFunctionType(client.batch) || hasFunctionType(client.maxWriteReplicationIndex)) &&
+    !hasFunctionType(client.all) &&
+    !hasFunctionType(client.execute) &&
+    !hasFunctionType(client.unsafe) &&
+    !isTurso(client)
   );
 }
 
@@ -292,14 +292,14 @@ function isSyncSqlite(c: AnyClient | null | undefined): boolean {
 // And from 0.6 its all() took it for sqlite3's, whose callback it never calls); the Transaction
 // That transactionAsync() hands its callback (0.7 and later) has all() beside batch(), which
 // Sqlite3's database lacks. The compat Database has no connect().
-function isTurso(c: AnyClient): boolean {
-  return hasFunctionType(c.prepare) && ((hasFunctionType(c.connect) && hasFunctionType(c.maxWriteReplicationIndex)) || (hasFunctionType(c.all) && hasFunctionType(c.batch)));
+function isTurso(client: AnyClient): boolean {
+  return hasFunctionType(client.prepare) && ((hasFunctionType(client.connect) && hasFunctionType(client.maxWriteReplicationIndex)) || (hasFunctionType(client.all) && hasFunctionType(client.batch)));
 }
 
 // Slonik's pool, connections, transactions and savepoints, which have query() as pg's do but take
 // Only the queries its sql tag builds (src/decode.ts, `slonik`).
-const isSlonik = function (c: AnyClient): boolean {
-  return hasFunctionType(c.maybeOneFirst) && hasFunctionType(c.anyFirst);
+const isSlonik = function (client: AnyClient): boolean {
+  return hasFunctionType(client.maybeOneFirst) && hasFunctionType(client.anyFirst);
 };
 
 function asByteaHex(v: unknown) {
@@ -320,17 +320,17 @@ const slonikParam = function (v: unknown): unknown {
   return hasObjectType(v) ? JSON.stringify(v) : v;
 };
 
-async function executeAsync(c: AnyClient | null | undefined, query: QueryModule, params: ParamsInput): Promise<unknown[]> {
-  if (matchesNullish(c) || (!hasObjectType(c) && !hasFunctionType(c))) {throw unsupported(c, query.dialect);}
+async function executeAsync(client: AnyClient | null | undefined, query: QueryModule, params: ParamsInput): Promise<unknown[]> {
+  if (matchesNullish(client) || (!hasObjectType(client) && !hasFunctionType(client))) {throw unsupported(client, query.dialect);}
   // A DuckDB connection has prepare() as SQLite's drivers do, and runs no other database's statement.
-  if (query.dialect !== "duckdb" && isDuckdb(c)) {throw unsupported(c, query.dialect);}
+  if (query.dialect !== "duckdb" && isDuckdb(client)) {throw unsupported(client, query.dialect);}
   checkParams(query, params);
   // The catalog facts the statement relied on, read again through the same client.
   if (query.fresh && due(query)) {
     const {fresh} = query;
     let rows: unknown[] | undefined;
     try {
-      rows = await executeAsync(c, { dialect: query.dialect, sql: fresh.query, params: [], text: fresh.query, order: [] }, {});
+      rows = await executeAsync(client, { dialect: query.dialect, sql: fresh.query, params: [], text: fresh.query, order: [] }, {});
     } catch {}
     const lines = (rows && differences(fresh, rows, query.dialect)) ?? [];
     if (lines.length) {throw staleError(query.source, lines);}
@@ -359,11 +359,11 @@ async function executeAsync(c: AnyClient | null | undefined, query: QueryModule,
       // Serializes to exactly its JSON text. So does an unsafe() client without typed().
       const json = () => bound.map((v, index) => (isJsonParam(v, index) ? jsonText(v) : v));
       // Slonik before every other query(): its query() takes only its sql tag's queries.
-      if (isSlonik(c)) {return slonik(c, text, json().map(slonikParam), query.columns);}
+      if (isSlonik(client)) {return slonik(client, text, json().map(slonikParam), query.columns);}
       // Query() before unsafe(): Neon's neon() has both, and its unsafe() builds a fragment
       // For a template instead of running anything. Reylo decodes every value itself (decode.ts).
-      if (hasFunctionType(c.query)) {return queryPostgres(c, text, json(), query.columns);}
-      if (hasFunctionType(c.unsafe)) {
+      if (hasFunctionType(client.query)) {return queryPostgres(client, text, json(), query.columns);}
+      if (hasFunctionType(client.unsafe)) {
         // Postgres.js reads a string for a date or time parameter through `new Date(x)` and binds
         // Its toISOString(), so a timestamp's wall-clock time moved by the app's offset, and
         // `infinity` or a zone name failed with "Invalid time value". Declared `unknown` (705), it
@@ -373,22 +373,22 @@ async function executeAsync(c: AnyClient | null | undefined, query: QueryModule,
         // Serializer would write a value as JSON, but a client Drizzle wraps has that serializer
         // Replaced by one that passes the value through (drizzle-orm/postgres-js), and a
         // Transaction shows neither. Bun.sql serializes the value itself.
-        const bun = hasFunctionType(c.commitDistributed);
-        const asText = hasFunctionType(c.typed) && !bun;
-        const mapped = bound.map((v, index) => (isJsonParam(v, index) ? (asText ? c.typed(jsonText(v), 705) : { toJSON: () => jsonValue(v) }) : (asText && matchesString(v) && isTime(type(index)) ? c.typed(v, 705) : v)));
-        return bun ? bunRows(await c.unsafe(text, mapped), query.columns) : postgresJs(c, text, mapped, query.columns);
+        const bun = hasFunctionType(client.commitDistributed);
+        const asText = hasFunctionType(client.typed) && !bun;
+        const mapped = bound.map((v, index) => (isJsonParam(v, index) ? (asText ? client.typed(jsonText(v), 705) : { toJSON: () => jsonValue(v) }) : (asText && matchesString(v) && isTime(type(index)) ? client.typed(v, 705) : v)));
+        return bun ? bunRows(await client.unsafe(text, mapped), query.columns) : postgresJs(client, text, mapped, query.columns);
       }
-      if (hasFunctionType(c)) {return neonCallable(c, text, json().map(asByteaHex), query.columns);}
+      if (hasFunctionType(client)) {return neonCallable(client, text, json().map(asByteaHex), query.columns);}
       break;
     }
     case "mysql": {
-      if (hasFunctionType(c.unsafe)) {return bunRows(await c.unsafe(text, values), query.columns);}
+      if (hasFunctionType(client.unsafe)) {return bunRows(await client.unsafe(text, values), query.columns);}
       // Mariadb, checked before execute() because it has one too (returning rows, not a pair).
       // Its callback API (mariadb/callback) answers through the callback and returns a command
       // Object; its promise API returns a promise and ignores the callback.
-      if (hasFunctionType(c.batch) && hasFunctionType(c.query)) {return mariadb(c, text, values.map(asBuffer), query.columns);}
+      if (hasFunctionType(client.batch) && hasFunctionType(client.query)) {return mariadb(client, text, values.map(asBuffer), query.columns);}
       // Mysql2's callback API: the promise() wrapper runs on the same connection.
-      const m = hasFunctionType(c.promise) ? c.promise() : c;
+      const m = hasFunctionType(client.promise) ? client.promise() : client;
       if (hasFunctionType(m.execute)) {
         // Mysql2 has query() beside execute(); PlanetScale's Connection, Client and transaction do not.
         return hasFunctionType(m.query) ? mysql2(m, text, values, query.columns) : planetscale(m, text, values, query.columns);
@@ -397,33 +397,33 @@ async function executeAsync(c: AnyClient | null | undefined, query: QueryModule,
     }
     case "duckdb": {
       // @duckdb/node-api's DuckDBConnection: each value given its kind by the result's own types (decode-duckdb.ts).
-      if (isDuckdb(c)) {return runDuckdb(c as unknown as DuckdbClient, text, values, names.map((currentName, index) => type(index)), query.columns);}
+      if (isDuckdb(client)) {return runDuckdb(client as unknown as DuckdbClient, text, values, names.map((currentName, index) => type(index)), query.columns);}
       break;
     }
     case "sqlite": {
       // The driver's rows, each value given its kind (decode-sqlite.ts).
       const {columns} = query;
-      if (hasFunctionType(c.unsafe)) {return normalize(await c.unsafe(text, values), columns);}
-      if (hasFunctionType(c.execute)) {return normalize((await c.execute({ sql: text, args: values })).rows, columns);}
-      if (isTurso(c)) {return runTurso(c, text, values, columns);}
+      if (hasFunctionType(client.unsafe)) {return normalize(await client.unsafe(text, values), columns);}
+      if (hasFunctionType(client.execute)) {return normalize((await client.execute({ sql: text, args: values })).rows, columns);}
+      if (isTurso(client)) {return runTurso(client, text, values, columns);}
       // The sqlite package wraps sqlite3, and sqlite3 binds a BigInt as NULL.
-      if (hasFunctionType(c.getDatabaseInstance)) {return normalize(await c.all(text, values.map((currentValue, index) => numberOrDigits(currentValue, type(index), "sqlite3"))), columns);}
-      if (hasFunctionType(c.all) && hasFunctionType(c.exec)) {
+      if (hasFunctionType(client.getDatabaseInstance)) {return normalize(await client.all(text, values.map((currentValue, index) => numberOrDigits(currentValue, type(index), "sqlite3"))), columns);}
+      if (hasFunctionType(client.all) && hasFunctionType(client.exec)) {
         const bound = values.map((currentValue, index) => numberOrDigits(currentValue, type(index), "sqlite3"));
         return normalize(
-          await new Promise<unknown[]>((resolve, reject) => c.all(text, bound, (error: Error | null, rows: unknown[]) => (error ? reject(error) : resolve(rows)))),
+          await new Promise<unknown[]>((resolve, reject) => client.all(text, bound, (error: Error | null, rows: unknown[]) => (error ? reject(error) : resolve(rows)))),
           columns,
         );
       }
-      if (hasFunctionType(c.prepare)) {
-        const prepared = c.prepare(text);
+      if (hasFunctionType(client.prepare)) {
+        const prepared = client.prepare(text);
         if (hasFunctionType(prepared.first)) {return normalize((await prepared.bind(...values).all()).results, columns, { d1: true });}
         return normalize(await prepared.all(...values), columns);
       }
       break;
     }
   }
-  throw unsupported(c, query.dialect);
+  throw unsupported(client, query.dialect);
 }
 
 // The parameters are an object, refused before anything reaches the database otherwise: an

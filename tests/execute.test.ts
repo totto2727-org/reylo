@@ -452,7 +452,7 @@ test("mysql: mariadb's callback API answers through the callback, and its errors
   const conn = {
     batch: () => ({}),
     // The callback query() returns a command object, not a promise.
-    query: (options: { sql: string }, values: unknown[], done: (e: Error | null, rows?: unknown) => void) => (setImmediate(() => (options.sql.startsWith("insert") ? done(failure) : done(null, [{ values }]))), { on() {} }),
+    query: (options: { sql: string }, values: unknown[], done: (error: Error | null, rows?: unknown) => void) => (setImmediate(() => (options.sql.startsWith("insert") ? done(failure) : done(null, [{ values }]))), { on() {} }),
   };
   assert.deepEqual(await execute(conn as never, my, { id: 1, name: "ada" }), [{ values: [1, "ada", 1] }]);
   await assert.rejects(() => execute(conn as never, { dialect: "mysql", sql: "insert into t values (:a)", params: ["a"] }, { a: 1 }) as Promise<unknown>, (error) => error === failure);
@@ -471,7 +471,7 @@ test("mysql: mariadb, which writes a value that is not a Buffer as JSON, gets a 
     const conn =
       api === "promise"
         ? { batch: promiseDriverStub(() => ({})), query: async (_: string, values: unknown[]) => (seen.push(values), []) }
-        : { batch: () => ({}), query: (_: string, values: unknown[], done: (e: Error | null, rows?: unknown) => void) => (seen.push(values), setImmediate(() => done(null, [])), { on() {} }) };
+        : { batch: () => ({}), query: (_: string, values: unknown[], done: (error: Error | null, rows?: unknown) => void) => (seen.push(values), setImmediate(() => done(null, [])), { on() {} }) };
     await execute(conn as never, bin, { plain, view, buf, n: 1 });
     const [a, b, c, n] = seen[0]!;
     assert.ok(Buffer.isBuffer(a) && Buffer.isBuffer(b), api);
@@ -661,11 +661,11 @@ test("sqlite: Turso's @tursodatabase/database, its Database in every release and
     exec: () => {},
     maxWriteReplicationIndex: () => {},
   };
-  const q = defineQuery<{ id: number; name: string }, unknown, "many", "sqlite">({ dialect: "sqlite", sql: lite.sql, params: lite.params });
+  const query = defineQuery<{ id: number; name: string }, unknown, "many", "sqlite">({ dialect: "sqlite", sql: lite.sql, params: lite.params });
   // oxlint-disable-next-line rules/no-effect-runtime-run -- This test exercises Reylo's native synchronous query API, which does not run Effect.
-  assert.deepEqual(q.runSync(compat, { id: 2, name: "bo" }), [row]);
+  assert.deepEqual(query.runSync(compat, { id: 2, name: "bo" }), [row]);
   // oxlint-disable-next-line rules/no-effect-runtime-run -- This test exercises Reylo's native synchronous query API, which does not run Effect.
-  assert.deepEqual(q.runSync(compat, { id: 2, name: "bo" }), [row]);
+  assert.deepEqual(query.runSync(compat, { id: 2, name: "bo" }), [row]);
   assert.deepEqual(calls.at(-1), { sql: "select ? as id, ? as name, ? as again", values: [2, "bo", 2] });
   assert.deepEqual([prepared, closed], [2, 2]);
 });
@@ -673,7 +673,7 @@ test("sqlite: Turso's @tursodatabase/database, its Database in every release and
 // oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
 test("sqlite: sqlite3 and the sqlite package, which bind a BigInt as NULL, get one a number holds as that number, a larger one its digits where the parameter is a BIGINT column's, and is refused elsewhere", async () => {
   const seen: unknown[][] = [];
-  const sqlite3 = { all: (_: string, v: unknown[], cb: (e: Error | null, rows: unknown[]) => void) => (seen.push(v), cb(null, [])), exec: () => {} };
+  const sqlite3 = { all: (_: string, v: unknown[], cb: (error: Error | null, rows: unknown[]) => void) => (seen.push(v), cb(null, [])), exec: () => {} };
   const sqlite = { all: async (_: string, v?: unknown[]) => (seen.push(v!), []), getDatabaseInstance: () => ({}) };
   await execute(sqlite3, lite, { id: BigInt(7), name: "ada" });
   await execute(sqlite, lite, { id: BigInt(-7), name: "ada" });
@@ -693,7 +693,7 @@ test("sqlite: sqlite3's callback all(), its errors, and the sqlite package's pro
   const sqlite3 = {
     prepare: () => ({}),
     exec: () => {},
-    all: (sql: string, values: unknown[], done: (e: Error | null, rows: unknown[]) => void) => setImmediate(() => (sql.includes("selec ") ? done(failure, []) : done(null, [{ values }]))),
+    all: (sql: string, values: unknown[], done: (error: Error | null, rows: unknown[]) => void) => setImmediate(() => (sql.includes("selec ") ? done(failure, []) : done(null, [{ values }]))),
   };
   assert.deepEqual(await execute(sqlite3, lite, { id: 1, name: "ada" }), [{ values: [1, "ada", 1] }]);
   await assert.rejects(() => execute(sqlite3, { dialect: "sqlite", sql: "selec 1", params: [] }) as Promise<unknown>, (error) => error === failure);
@@ -811,7 +811,7 @@ test("an array of parameters is refused before anything runs, with a TypeError t
   const calls: unknown[] = [];
   const client = { unsafe: async (...args: unknown[]) => (calls.push(args), []) };
   const named = /^TypeError: The parameters must be an object keyed by parameter name, or by number for positional placeholders \(\{ 1: \.\.\., 2: \.\.\. \}\); got an array\. This statement takes \{ id: \.\.\., name: \.\.\. \}\.$/u;
-  const refused = (re: RegExp) => (e: Error) => e instanceof TypeError && re.test(String(e));
+  const refused = (re: RegExp) => (error: Error) => error instanceof TypeError && re.test(String(error));
   // A freshness check would be a round trip: the array is refused before it too.
   await assert.rejects(() => execute(client, { ...pg, fresh: { query: "select 1", rows: [], inserts: [] } }, [1, "ada"] as never) as Promise<unknown>, refused(named));
   const positional: QueryModule<"postgres"> = { dialect: "postgres", sql: "select $1::int, $2::text", params: ["1", "2"] };
@@ -824,16 +824,16 @@ test("an array of parameters is refused before anything runs, with a TypeError t
   assert.throws(() => execute(db, lite, [1, "ada"] as never), refused(named));
   assert.throws(() => execute(db, { dialect: "sqlite", sql: "select 1", params: [] }, [] as never), refused(/got an array\. This statement takes none: leave them out\.$/u));
   // Through the query object: run and with reject, runSync throws, and the types refuse it too.
-  const q = defineQuery<{ id: number; name: string }, { id: number; name: string; again: number }, "one", "sqlite">({ dialect: "sqlite", sql: lite.sql, params: lite.params, cardinality: "one" });
+  const currentQuery = defineQuery<{ id: number; name: string }, { id: number; name: string; again: number }, "one", "sqlite">({ dialect: "sqlite", sql: lite.sql, params: lite.params, cardinality: "one" });
   // @ts-expect-error the parameters are an object, never an array
-  await assert.rejects(() => q.run(db, [1, "ada"]), refused(named));
+  await assert.rejects(() => currentQuery.run(db, [1, "ada"]), refused(named));
   // @ts-expect-error the parameters are an object, never an array
-  await assert.rejects(() => q.with(db)([1, "ada"]), refused(named));
+  await assert.rejects(() => currentQuery.with(db)([1, "ada"]), refused(named));
   // @ts-expect-error the parameters are an object, never an array
   // oxlint-disable-next-line rules/no-effect-runtime-run -- This test exercises Reylo's native synchronous query API, which does not run Effect.
-  assert.throws(() => q.runSync(db, [1, "ada"]), refused(named));
+  assert.throws(() => currentQuery.runSync(db, [1, "ada"]), refused(named));
   // oxlint-disable-next-line rules/no-effect-runtime-run -- This test exercises Reylo's native synchronous query API, which does not run Effect.
-  assert.deepEqual({ ...(q.runSync(db, { id: 1, name: "ada" }) as object) }, row);
+  assert.deepEqual({ ...(currentQuery.runSync(db, { id: 1, name: "ada" }) as object) }, row);
   const p = defineQuery<{ 1: number; 2: string }, { id: number }, "one", "postgres">({ dialect: "postgres", sql: positional.sql, params: positional.params, cardinality: "one" });
   // @ts-expect-error positional placeholders take an object keyed by number
   await assert.rejects(() => p.run(client, [1, "ada"]), refused(/This statement takes \{ 1: \.\.\., 2: \.\.\. \}\./u));
@@ -901,13 +901,13 @@ test("runSync: a client that answers through a promise, or a Postgres or MySQL s
 
 // oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
 test("run: on an asynchronous client every failure is a rejection, never a throw", async () => {
-  const q = defineQuery<{ id: number }, { id: number }, "maybeOne", "postgres">({ dialect: "postgres", sql: "select :id::int as id", params: ["id"], cardinality: "maybeOne" });
+  const currentQuery = defineQuery<{ id: number }, { id: number }, "maybeOne", "postgres">({ dialect: "postgres", sql: "select :id::int as id", params: ["id"], cardinality: "maybeOne" });
   const two = { query: promiseDriverStub(() => ({ rows: [{ id: 1 }, { id: 2 }] })) };
   let returned: unknown;
-  assert.doesNotThrow(() => void (returned = q.run(two, { id: 1 })));
+  assert.doesNotThrow(() => void (returned = currentQuery.run(two, { id: 1 })));
   await assert.rejects(returned as Promise<unknown>, /Expected at most one row, got 2/u);
-  await assert.rejects(q.run({} as never, { id: 1 }), TypeError);
-  assert.deepEqual(await q.with({ query: promiseDriverStub(() => ({ rows: [] })) })({ id: 1 }), null);
+  await assert.rejects(currentQuery.run({} as never, { id: 1 }), TypeError);
+  assert.deepEqual(await currentQuery.with({ query: promiseDriverStub(() => ({ rows: [] })) })({ id: 1 }), null);
 });
 
 // oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.

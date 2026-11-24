@@ -453,7 +453,7 @@ test("PlanetScale: Reylo's cast per query, the driver's own default with a DATET
 test("mariadb's callback API, whose rows carry no meta, and mariadb 2, whose columns have no isSet(): the module's kinds join a SET and give a DATETIME its T", async () => {
   const conn = {
     batch: () => ({}),
-    query: (_: unknown, __: unknown, done: (e: Error | null, rows?: unknown, meta?: unknown) => void) => (setImmediate(() => done(null, [{ tags: ["x", "z"], at: "2026-03-08 09:31:00.000", id: 1 }], [{ name: () => "tags", type: "SET" }])), { on() {} }),
+    query: (_: unknown, __: unknown, done: (error: Error | null, rows?: unknown, meta?: unknown) => void) => (setImmediate(() => done(null, [{ tags: ["x", "z"], at: "2026-03-08 09:31:00.000", id: 1 }], [{ name: () => "tags", type: "SET" }])), { on() {} }),
   };
   const q: QueryModule<"mysql"> = { dialect: "mysql", sql: "select 1", params: [], columns: [["tags", "text"], ["at", "timestamp"], ["id", "int"]] };
   assert.deepEqual(await execute(conn as never, q), [{ at: "2026-03-08T09:31:00.000", id: 1, tags: "x,z" }]);

@@ -87,30 +87,30 @@ const capture = () => {
 // oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
 test("run binds positional parameters by number", async () => {
   const { calls, client } = capture();
-  const q = defineQuery<{ 1: number; 2: string }, {}, "one", "postgres">({ dialect: "postgres", sql: "select $2::text, $1::int", params: ["1", "2"], cardinality: "one" });
-  await q.run(client, { 1: 7, 2: "z" });
+  const query = defineQuery<{ 1: number; 2: string }, {}, "one", "postgres">({ dialect: "postgres", sql: "select $2::text, $1::int", params: ["1", "2"], cardinality: "one" });
+  await query.run(client, { 1: 7, 2: "z" });
   assert.deepEqual(calls, [{ text: "select $2::text, $1::int", values: [7, "z"] }]);
 });
 
 // oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
 test("with binds a client; the parameters may be left out when the statement takes none", async () => {
   const { calls, client } = capture();
-  const q = defineQuery<{ id: number }, {}, "one", "postgres">({ dialect: "postgres", sql: "select :id::int", params: ["id"], cardinality: "one" });
-  const get = q.with(client);
+  const query = defineQuery<{ id: number }, {}, "one", "postgres">({ dialect: "postgres", sql: "select :id::int", params: ["id"], cardinality: "one" });
+  const get = query.with(client);
   assert.equal(calls.length, 0);
   await get({ id: 1 });
   const none = defineQuery<Record<never, never>, {}, "one", "postgres">({ dialect: "postgres", sql: "select 1", params: [], cardinality: "one" });
   await none.run(client);
   await none.with(client)();
   // @ts-expect-error a statement that takes parameters needs them
-  await q.run(client).catch(() => {});
+  await query.run(client).catch(() => {});
   assert.deepEqual(calls.slice(0, 3), [{ text: "select $1::int", values: [1] }, { text: "select 1", values: [] }, { text: "select 1", values: [] }]);
 });
 
 // oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
 test("a hand-built query whose params miss a placeholder is refused", async () => {
   const { calls, client } = capture();
-  const q = defineQuery<{ id: number }, {}, "one", "postgres">({ dialect: "postgres", sql: "select $1", params: ["id"], cardinality: "one" });
-  await assert.rejects(q.run(client, { id: 1 }), /placeholder \$1 is parameter "1"/u);
+  const query = defineQuery<{ id: number }, {}, "one", "postgres">({ dialect: "postgres", sql: "select $1", params: ["id"], cardinality: "one" });
+  await assert.rejects(query.run(client, { id: 1 }), /placeholder \$1 is parameter "1"/u);
   assert.equal(calls.length, 0);
 });

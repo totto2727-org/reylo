@@ -39,8 +39,8 @@ const assertNumericLexemes = function (value: unknown, source: Buffer, startByte
   if (Array.isArray(value)) { value.forEach(item => assertNumericLexemes(item, source, startByte)); return }
   const v = value as Record<string, unknown>;
   if (v.kind === 'literal' && typeof v.value === 'number') {
-    const r = v.range as Range;
-    assert.equal(v.numberText, source.subarray(r.start.byte - startByte, r.end.byte - startByte).toString('utf8'), 'numeric literal must preserve its exact source spelling');
+    const currentRange = v.range as Range;
+    assert.equal(v.numberText, source.subarray(currentRange.start.byte - startByte, currentRange.end.byte - startByte).toString('utf8'), 'numeric literal must preserve its exact source spelling');
   }
   Object.values(v).forEach((item) => {assertNumericLexemes(item, source, startByte);});
 };

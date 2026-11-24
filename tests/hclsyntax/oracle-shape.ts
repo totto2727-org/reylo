@@ -78,5 +78,5 @@ export function actualAST(value: unknown): unknown {
   if (typeof v.severity === 'string' && typeof v.summary === 'string') {return { ...v, context: v.context ?? null };}
   return Object.fromEntries(Object.entries(v).filter(([key, item]) => item !== undefined && key !== 'numberText' && key !== 'attributeOnly' && !(v.kind === 'traversal' && key === 'parts')).map(([key, item]) => [key, actualAST(item)]));
 }
-export function actualDiagnostics(value: Readonly<Diagnostic[]>): Diagnostic[] { return value.map(d => ({ ...d, context: d.context ?? null })) }
+export function actualDiagnostics(value: Readonly<Diagnostic[]>): Diagnostic[] { return value.map(diagnostic => ({ ...diagnostic, context: diagnostic.context ?? null })) }
 export function oracleTokens(value: unknown): unknown[] { return array(value).map(item => { const t = object(item); const r = t.range as { Filename: string; Start: Pos; End: Pos }; return { type: t.type, bytes: Buffer.from(t.bytes as string, 'base64'), range: { filename: r.Filename, start: position(r.Start), end: position(r.End) } } }) }

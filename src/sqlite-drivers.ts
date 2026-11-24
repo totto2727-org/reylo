@@ -94,24 +94,24 @@ const DRIVERS: [string, Open][] = [
     "sqlite3",
     async (require, path) => {
       type Db = {
-        get(sql: string, cb: (e: Error | null, row: { v: string }) => void): void;
-        prepare(sql: string, cb: (e: Error | null) => void): { finalize(): void };
+        get(sql: string, cb: (error: Error | null, row: { v: string }) => void): void;
+        prepare(sql: string, cb: (error: Error | null) => void): { finalize(): void };
         close(cb: () => void): void;
       };
-      const sqlite3 = require("sqlite3") as { Database: new (path: string, mode: number, cb: (e: Error | null) => void) => Db; OPEN_READONLY: number };
+      const sqlite3 = require("sqlite3") as { Database: new (path: string, mode: number, cb: (error: Error | null) => void) => Db; OPEN_READONLY: number };
       const db = await new Promise<Db>((done, fail) => {
-        const d: Db = new sqlite3.Database(path, sqlite3.OPEN_READONLY, (e) => (e ? fail(e) : done(d)));
+        const d: Db = new sqlite3.Database(path, sqlite3.OPEN_READONLY, (error) => (error ? fail(error) : done(d)));
       });
-      const version = await new Promise<string>((done, fail) => db.get("select sqlite_version() as v", (e, row) => (e ? fail(e) : done(row.v))));
+      const version = await new Promise<string>((done, fail) => db.get("select sqlite_version() as v", (error, row) => (error ? fail(error) : done(row.v))));
       return {
         name: "sqlite3",
         says: (refusal) => `sqlite3 runs SQLite ${version}, which refuses this statement: ${refusal}`,
         refuses: (sql) =>
           new Promise((done) => {
-            const statement = db.prepare(sql, (e) => {
-              if (!e) {statement.finalize();}
+            const statement = db.prepare(sql, (error) => {
+              if (!error) {statement.finalize();}
               // Node-sqlite3 writes the result code before SQLite's message.
-              done(e ? e.message.replace(/^SQLITE_\w+: /u, "") : undefined);
+              done(error ? error.message.replace(/^SQLITE_\w+: /u, "") : undefined);
             });
           }),
         close: () => new Promise<void>((done) => db.close(() => done())),

@@ -378,8 +378,8 @@ export class Session {
     if (dialect === "sqlite") {return sqlitePath(url, root);}
     if (dialect === "duckdb") {return duckdbPath(url, root);}
     try {
-      const u = new URL(url);
-      return `${u.protocol}//${u.username}@${u.host}${u.pathname}`;
+      const currentUrl = new URL(url);
+      return `${currentUrl.protocol}//${currentUrl.username}@${currentUrl.host}${currentUrl.pathname}`;
     } catch {
       return url;
     }
@@ -391,8 +391,8 @@ export class Session {
     if (dialect === "sqlite") {return sqlitePath(url ?? "", root);}
     if (dialect === "duckdb") {return duckdbPath(url ?? "", root);}
     try {
-      const u = new URL(url ?? "");
-      return `${u.hostname || u.searchParams.get("host") || "localhost"}${u.port ? `:${u.port}` : ""}${u.pathname}`;
+      const currentUrl = new URL(url ?? "");
+      return `${currentUrl.hostname || currentUrl.searchParams.get("host") || "localhost"}${currentUrl.port ? `:${currentUrl.port}` : ""}${currentUrl.pathname}`;
     } catch {
       return "the database";
     }
@@ -513,21 +513,21 @@ export class Session {
     // The engine opens the database itself: on SQLite the file the project names, and the statement
     // Is prepared on the app's own SQLite drivers too, which are the app's, not the engine's.
     const target = dialect === "sqlite" ? sqlitePath(url, root) : url;
-    const c = await this.#engine.open(target);
+    const connection = await this.#engine.open(target);
     let drivers: SqliteDriver[] | undefined;
     try {
       drivers = dialect === "sqlite" ? await (await import("./sqlite-drivers.ts")).openProjectDrivers(root, target) : undefined;
     } catch (error) {
-      await c.close();
+      await connection.close();
       throw error;
     }
     return {
-      analyze: (sql) => c.analyze(sql),
-      query: (text, params) => c.query(text, params),
-      forget: () => c.forget(),
+      analyze: (sql) => connection.analyze(sql),
+      query: (text, params) => connection.query(text, params),
+      forget: () => connection.forget(),
       close: async () => {
         await Promise.all((drivers ?? []).map((d) => d.close().catch(() => {})));
-        await c.close();
+        await connection.close();
       },
       ...(drivers && { drivers }),
     };

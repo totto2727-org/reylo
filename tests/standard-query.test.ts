@@ -42,28 +42,28 @@ const users = defineQuery<{ id: number; tags: number[]; doc: unknown; bytes: Uin
 
 // oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
 test("postgres: the statement, its database, and each value as the text the server reads", () => {
-  const q = users["~standard"].query;
-  assert.equal(q.dialect, "postgres");
-  assert.equal(q.text, users.sql);
-  assert.deepEqual(q.encode({ id: 7, tags: [1, 2], doc: { a: [1] }, bytes: new Uint8Array([0, 255]), flag: true }), ["7", '{"1","2"}', '{"a":[1]}', String.raw`\x00ff`, "t"]);
+  const currentQuery = users["~standard"].query;
+  assert.equal(currentQuery.dialect, "postgres");
+  assert.equal(currentQuery.text, users.sql);
+  assert.deepEqual(currentQuery.encode({ id: 7, tags: [1, 2], doc: { a: [1] }, bytes: new Uint8Array([0, 255]), flag: true }), ["7", '{"1","2"}', '{"a":[1]}', String.raw`\x00ff`, "t"]);
   // A key left out binds NULL, as `.run()` binds it; one the statement takes no null for is refused.
   assert.deepEqual(users["~standard"].query.encode({ id: 7 }), ["7", null, null, null, null]);
-  assert.throws(() => q.encode({ tags: [1] }), (error) => error instanceof ParameterError && /"id" is missing/u.test(error.message));
+  assert.throws(() => currentQuery.encode({ tags: [1] }), (error) => error instanceof ParameterError && /"id" is missing/u.test(error.message));
   // The input is an object, as `.run()` takes it.
-  assert.throws(() => q.encode([7]), ParameterError);
+  assert.throws(() => currentQuery.encode([7]), ParameterError);
   // A driver may take `encode` off the object.
-  const { encode } = q;
+  const { encode } = currentQuery;
   assert.deepEqual(encode({ id: 7 }), ["7", null, null, null, null]);
 });
 
 // oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
 test("postgres: decode gives each value its kind, and the output its cardinality, as .run() does", () => {
-  const q = users["~standard"].query;
-  assert.deepEqual(q.decode([["1", "2026-10-22 14:46:00.123456+02", "9007199254740993"], ["2", "2026-10-22 00:00:00+00", null]]), [
+  const currentQuery = users["~standard"].query;
+  assert.deepEqual(currentQuery.decode([["1", "2026-10-22 14:46:00.123456+02", "9007199254740993"], ["2", "2026-10-22 00:00:00+00", null]]), [
     { id: 1, at: "2026-10-22T12:46:00.123456Z", big: BigInt("9007199254740993") },
     { id: 2, at: "2026-10-22T00:00:00Z", big: null },
   ]);
-  assert.throws(() => q.decode([["1", "x"]]), /selects 3 columns, and a row has 2/u);
+  assert.throws(() => currentQuery.decode([["1", "x"]]), /selects 3 columns, and a row has 2/u);
   const one = defineQuery<{}, { n: bigint }, "maybeOne", "postgres">({ dialect: "postgres", sql: "select count(*) as n from users", params: [], columns: [["n", "int8"]], cardinality: "maybeOne" });
   assert.deepEqual(one["~standard"].query.decode([["3"]]), { n: BigInt("3") });
   assert.equal(one["~standard"].query.decode([]), null);

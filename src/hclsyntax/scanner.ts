@@ -30,8 +30,8 @@ const carriageReturn = 13;
 const lfLength = 1;
 const crlfLength = 2;
 
-function equalBytes(a: Uint8Array, b: Uint8Array): boolean {
-  return a.length === b.length && a.every((v, index) => v === b[index]);
+function equalBytes(leftBytes: Uint8Array, rightBytes: Uint8Array): boolean {
+  return leftBytes.length === rightBytes.length && leftBytes.every((v, index) => v === rightBytes[index]);
 }
 // Bytes.TrimSpace uses Unicode White_Space, which deliberately excludes BOM.
 function trimSpace(data: Uint8Array): Uint8Array {

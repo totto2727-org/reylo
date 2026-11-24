@@ -163,7 +163,7 @@ function mysqlSocket(pairs: string[]): { path: string; params: string[] } | unde
 async function openBridge(path: string, dialect: "postgres" | "mysql", token: string): Promise<{ port: number; close(): void; failure(): Error | undefined }> {
   const open = new Set<Socket>();
   let failure: Error | undefined;
-  const failed = (e: Error): undefined => void (failure = new Error(`cannot open the socket ${path}: ${e.message}`));
+  const failed = (error: Error): undefined => void (failure = new Error(`cannot open the socket ${path}: ${error.message}`));
   const track = (socket: Socket): void => {
     open.add(socket);
     socket.unref();
@@ -199,15 +199,15 @@ async function openBridge(path: string, dialect: "postgres" | "mysql", token: st
 }
 
 /** The connection to the socket for `client`, each closed with the other. */
-function openUpstream(path: string, client: Socket, track: (socket: Socket) => void, failed: (e: Error) => void): Socket {
+function openUpstream(path: string, client: Socket, track: (socket: Socket) => void, failed: (error: Error) => void): Socket {
   const upstream = connect(path);
   track(upstream);
   // Only a socket that never opened is the bridge's failure: an error after it opened (a reset once
   // The server refused the login) leaves the engine's own answer, which names the refusal.
   let opened = false;
   upstream.once("connect", () => (opened = true));
-  upstream.on("error", (e) => {
-    if (!opened) {failed(e);}
+  upstream.on("error", (error) => {
+    if (!opened) {failed(error);}
     upstream.destroy();
     client.destroy();
   });
