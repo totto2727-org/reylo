@@ -34,42 +34,82 @@ import { bigInteger, coerce, DecodeError, exactInteger, refuseTruth, truth } fro
 import type { Columns, Kind } from './values.ts';
 import { hasFunctionType, matchesBigInt, matchesNull, matchesNumber, matchesString, matchesUndefined } from "./native-predicates.ts";
 
-type AnyClient = Record<string, any>;
-type Statement = AnyClient;
+type SqliteClient = Record<string, unknown>;
+
+interface Statement {
+  all: (...bindings: unknown[]) => unknown[] | PromiseLike<unknown[]>;
+  close?: () => void;
+  columns?: () => { name: string }[];
+  reader?: boolean;
+  run: (...bindings: unknown[]) => unknown;
+  safeIntegers?: (enabled: boolean) => unknown;
+  setReadBigInts?: (enabled: boolean) => unknown;
+  setReturnArrays?: (enabled: boolean) => unknown;
+}
 
 /** Reylo's statement, whether it reads every INTEGER as a BigInt, and whether it is kept for the next call. */
-type Kept = { st: Statement; exact: boolean; kept: boolean };
+interface Kept {
+  exact: boolean;
+  kept: boolean;
+  statement: Statement;
+}
+
 const statements = new WeakMap<object, Map<string, Kept>>();
 /** How many statements Reylo keeps per database: more distinct texts than that drop the oldest. */
 const KEPT = 500;
+
+const prepare = <Result>(database: SqliteClient, text: string): Result =>
+  // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- SQLite dispatch selects the native prepare protocol and whether its statement is awaited.
+  (database.prepare as (sql: string) => Result)(text);
+
+const cacheFor = (database: SqliteClient, keep: boolean): Map<string, Kept> | undefined => {
+  const previous = statements.get(database);
+  if (previous || !keep) {return previous;}
+  const cache = new Map<string, Kept>();
+  statements.set(database, cache);
+  return cache;
+};
+
+const configureIntegerRead = (statement: Statement, typed: boolean): boolean => {
+  // Node:sqlite's StatementSync; better-sqlite3's and bun:sqlite's Statement.
+  if (hasFunctionType(statement.setReadBigInts)) {
+    statement.setReadBigInts(true);
+    if (hasFunctionType(statement.setReturnArrays)) {statement.setReturnArrays(false);}
+    return true;
+  }
+  if (hasFunctionType(statement.safeIntegers)) {
+    statement.safeIntegers(!typed);
+    return !typed;
+  }
+  return false;
+};
+
+const remember = (cache: Map<string, Kept>, key: string, entry: Kept): void => {
+  if (cache.size >= KEPT) {
+    const oldest = cache.keys().next();
+    if (!oldest.done) {cache.delete(oldest.value);}
+  }
+  cache.set(key, entry);
+};
 
 /**
  * Reylo's own statement for `text` on the app's database, with integers read as BigInts. Turso's
  * compat Database (maxWriteReplicationIndex()) gets a new statement per call, closed after it: on
  * 0.4 a statement with a subquery run a second time returned no rows.
+ * @param {SqliteClient} database - The driver's existing database instance.
+ * @param {string} text - The statement text.
+ * @param {boolean} typed - Whether every column can be decoded without reading integers as BigInts.
+ * @returns {Kept} The prepared statement and its read mode.
  */
-const statementFor = function (db: AnyClient, text: string, typed: boolean): Kept {
-  const keep = !hasFunctionType(db.maxWriteReplicationIndex);
-  let kept = statements.get(db);
-  if (!kept && keep) {statements.set(db, (kept = new Map()));}
+const statementFor = function (database: SqliteClient, text: string, typed: boolean): Kept {
+  const keep = !hasFunctionType(database.maxWriteReplicationIndex);
+  const cache = cacheFor(database, keep);
   const key = `${typed ? "n" : "b"}${text}`;
-  const found = kept?.get(key);
+  const found = cache?.get(key);
   if (found) {return found;}
-  const st = db.prepare(text) as Statement;
-  let exact = false;
-  // Node:sqlite's StatementSync; better-sqlite3's and bun:sqlite's Statement.
-  if (hasFunctionType(st.setReadBigInts)) {
-    st.setReadBigInts(true);
-    if (hasFunctionType(st.setReturnArrays)) {st.setReturnArrays(false);}
-    exact = true;
-  } else if (hasFunctionType(st.safeIntegers)) {
-    st.safeIntegers(!typed);
-    exact = !typed;
-  }
-  const entry = { st, exact, kept: keep };
-  if (!kept) {return entry;}
-  if (kept.size >= KEPT) {kept.delete(kept.keys().next().value!);}
-  kept.set(key, entry);
+  const statement = prepare<Statement>(database, text);
+  const entry = { exact: configureIntegerRead(statement, typed), kept: keep, statement };
+  if (cache) {remember(cache, key, entry);}
   return entry;
 };
 
@@ -84,28 +124,28 @@ const everyColumnTyped = function everyColumnTyped(columns: Columns | undefined)
  * compat Database) and returns its normalized rows; a statement that answers through a promise (no
  * such database) gives the promise, which `runSync` refuses.
  */
-export const runSyncSqlite = function runSyncSqlite(db: AnyClient, text: string, values: unknown[], columns: Columns | undefined): unknown[] | Promise<unknown[]> {
-  const entry = statementFor(db, text, everyColumnTyped(columns));
+export const runSyncSqlite = function runSyncSqlite(database: SqliteClient, text: string, values: unknown[], columns: Columns | undefined): unknown[] | Promise<unknown[]> {
+  const entry = statementFor(database, text, everyColumnTyped(columns));
   if (entry.kept) {return runStatement(entry, values, columns);}
   try {
     return runStatement(entry, values, columns);
   } finally {
-    entry.st.close?.();
+    entry.statement.close?.();
   }
 };
 
-function runStatement({ st, exact }: Kept, values: unknown[], columns: Columns | undefined): unknown[] | Promise<unknown[]> {
+function runStatement({ statement, exact }: Kept, values: unknown[], columns: Columns | undefined): unknown[] | Promise<unknown[]> {
   // Better-sqlite3 refuses all() on a statement that returns no rows.
-  if (reader(st) === false) {
-    st.run(...values);
+  if (reader(statement) === false) {
+    statement.run(...values);
     return [];
   }
-  const all = st.all(...values) as unknown[] | Promise<unknown[]>;
+  const all = statement.all(...values);
   if (!Array.isArray(all)) {return Promise.resolve(all).then((rows) => normalize(rows, columns));}
   let rows = all;
   // A database opened with returnArrays, on a Node whose statements cannot turn it off.
-  if (rows.length && Array.isArray(rows[0]) && hasFunctionType(st.columns)) {
-    const names = (st.columns() as { name: string }[]).map((c) => c.name);
+  if (rows.length && Array.isArray(rows[0]) && hasFunctionType(statement.columns)) {
+    const names = statement.columns().map(({ name }) => name);
     rows = (rows as unknown[][]).map((currentRow) => Object.fromEntries(names.map((currentName, index) => [currentName, currentRow[index]])));
   }
   return normalize(rows, columns, { exact });
@@ -113,9 +153,9 @@ function runStatement({ st, exact }: Kept, values: unknown[], columns: Columns |
 
 // Whether the statement returns rows: undefined where it cannot say, as Turso 0.4's compat statement,
 // Whose `reader` throws "not implemented" and whose all() runs any statement.
-function reader(st: Statement): boolean | undefined {
+function reader(statement: Statement): boolean | undefined {
   try {
-    return st.reader;
+    return statement.reader;
   } catch {
     return undefined;
   }
@@ -127,14 +167,14 @@ function reader(st: Statement): boolean | undefined {
  * the statement (its types say a promise of it from 0.6, so it is awaited), whose all() runs a
  * statement that returns no rows as well; the statement is closed after its one run.
  */
-export const runTurso = async function runTurso(db: AnyClient, text: string, values: unknown[], columns: Columns | undefined): Promise<unknown[]> {
+export const runTurso = async function runTurso(database: SqliteClient, text: string, values: unknown[], columns: Columns | undefined): Promise<unknown[]> {
   const typed = everyColumnTyped(columns);
-  const st = (await db.prepare(text)) as Statement;
+  const statement = await prepare<Statement | PromiseLike<Statement>>(database, text);
   try {
-    if (hasFunctionType(st.safeIntegers)) {st.safeIntegers(!typed);}
-    return normalize(await st.all(...values), columns, { exact: !typed });
+    if (hasFunctionType(statement.safeIntegers)) {statement.safeIntegers(!typed);}
+    return normalize(await statement.all(...values), columns, { exact: !typed });
   } finally {
-    if (hasFunctionType(st.close)) {st.close();}
+    if (hasFunctionType(statement.close)) {statement.close();}
   }
 };
 
@@ -143,8 +183,10 @@ export const runTurso = async function runTurso(db: AnyClient, text: string, val
  * answers at once with a cursor, and returns its normalized rows. Its integers are numbers, so one
  * past 2^53 in an INTEGER column can only be a rounded one, and is refused.
  */
-export const runDurableObject = function runDurableObject(sql: AnyClient, text: string, values: unknown[], columns: Columns | undefined): unknown[] {
-  return normalize(sql.exec(text, ...values).toArray(), columns);
+export const runDurableObject = function runDurableObject(sql: SqliteClient, text: string, values: unknown[], columns: Columns | undefined): unknown[] {
+  // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- A Durable Object's native exec method returns a cursor before this synchronous path returns.
+  const cursor = (sql.exec as (query: string, ...bindings: unknown[]) => { toArray: () => unknown[] })(text, ...values);
+  return normalize(cursor.toArray(), columns);
 };
 
 type Plan = {
