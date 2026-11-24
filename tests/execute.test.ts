@@ -11,7 +11,7 @@ import type { QueryModule } from '#reylo-source/execute.ts';
 import { checks, defineQuery } from "#reylo-source/index.ts";
 import type { EngineType, JsonSchema } from "#reylo-source/engine-type.ts";
 // oxlint-disable-next-line import/no-relative-parent-imports -- Match the native driver boundary in this direct Node integration test.
-import { matchesNullish } from "#reylo-source/native-predicates.ts";
+import { hasObjectType, matchesBigInt, matchesNull, matchesNullish } from "#reylo-source/native-predicates.ts";
 import { nativeDriverDate, promiseDriverStub, NO_DRIVER_ERROR, NO_ROW, SQL_NULL, requireFixtureValue } from "./helpers.ts";
 
 // Each fake client records what execute handed it and answers the way its driver does; the
@@ -145,14 +145,14 @@ test("postgres: a JSON parameter's value is a JavaScript value, which every driv
     return Promise.resolve([]);
   }, jsonQuery, jsonValues);
   const unsafe = async (_sql: string, values?: unknown[]): Promise<never[]> => {
-    seen.push(requireFixtureValue(values).map((currentValue) => (currentValue !== null && typeof currentValue === "object" ? JSON.stringify(currentValue) : currentValue)));
+    seen.push(requireFixtureValue(values).map((currentValue) => (!matchesNull(currentValue) && hasObjectType(currentValue) ? JSON.stringify(currentValue) : currentValue)));
     return [];
   };
   const bun = { unsafe, commitDistributed: async () => {} };
   await execute({ unsafe }, jsonQuery, jsonValues);
   await execute(bun, jsonQuery, jsonValues);
   // Postgres.js gets each JSON value as its text declared unknown (705), and null as null.
-  const unwrap = (v: unknown) => (v !== null && typeof v === "object" ? (assert.equal((v as { type: number }).type, 705), (v as { value: unknown }).value) : v);
+  const unwrap = (v: unknown) => (!matchesNull(v) && hasObjectType(v) ? (assert.equal((v as { type: number }).type, 705), (v as { value: unknown }).value) : v);
   const postgresJs = { unsafe: promiseDriverStub((_sql: string, values?: unknown[]) => {
     seen.push(requireFixtureValue(values).map(unwrap));
     return [];
@@ -684,7 +684,7 @@ test("mysql: PlanetScale 2.0, which binds no parameters, runs a statement withou
   const conn = {
     execute: promiseDriverStub((...args: unknown[]) => {
       calls.push(args);
-      if (args.length > 2 || (!matchesNullish(args[1]) && (typeof args[1] !== "object" || Array.isArray(args[1])))) {throw new Error("Query parameters are not supported: pass a complete SQL string and options to execute(query, options)");}
+      if (args.length > 2 || (!matchesNullish(args[1]) && (!hasObjectType(args[1]) || Array.isArray(args[1])))) {throw new Error("Query parameters are not supported: pass a complete SQL string and options to execute(query, options)");}
       return { rows: [row], statement: String(args[0]), headers: [] };
     }),
   };
@@ -918,11 +918,11 @@ test("an unsupported client rejects, naming what it has and what reylo takes", a
 const durableObjectSql = function durableObjectSql(db: DatabaseSync) {
   return {
     exec(sql: string, ...bindings: unknown[]) {
-      if (bindings.some((binding) => typeof binding === "bigint")) {throw new TypeError("Cannot convert a BigInt value to a number");}
+      if (bindings.some((binding) => matchesBigInt(binding))) {throw new TypeError("Cannot convert a BigInt value to a number");}
       const st = db.prepare(sql);
       st.setReadBigInts(true);
       const rows = st.all(...(bindings as never[])).map((row) =>
-        Object.fromEntries(Object.entries(row).map(([key, value]) => [key, typeof value === "bigint" ? Number(value) : (value instanceof Uint8Array ? value.slice().buffer : value)])),
+        Object.fromEntries(Object.entries(row).map(([key, value]) => [key, matchesBigInt(value) ? Number(value) : (value instanceof Uint8Array ? value.slice().buffer : value)])),
       );
       return { toArray: () => rows, columnNames: rows.length ? Object.keys(rows[0]!) : [] };
     },

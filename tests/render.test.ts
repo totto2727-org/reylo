@@ -5,6 +5,7 @@ import assert from "node:assert/strict";
 import type { EngineType } from "#reylo-source/engine.ts";
 import { orNull, renderParamType, renderType } from "#reylo-source/render.ts";
 import { typeSchema } from "#reylo-source/schema.ts";
+import { matchesUndefined } from "#reylo-source/native-predicates.ts";
 
 const scalar = (name: string): EngineType => ({ kind: "scalar", name });
 const field = (name: string, type: EngineType, nullable: boolean) => ({ name, type, nullable });
@@ -202,7 +203,7 @@ const admits = function (column: EngineType, param: EngineType, dialect: "postgr
   const taken = renderParamType(param, dialect);
   const members = (ts: string): string[] => ts.split(" | ");
   const [returnedElement, takenElement] = [element(returned), element(taken)];
-  if (returnedElement !== undefined && takenElement !== undefined) {return members(returnedElement).filter((m) => m !== "null").every((m) => members(takenElement).includes(m) || members(takenElement).includes("unknown"));}
+  if (!matchesUndefined(returnedElement) && !matchesUndefined(takenElement)) {return members(returnedElement).filter((m) => m !== "null").every((m) => members(takenElement).includes(m) || members(takenElement).includes("unknown"));}
   return members(taken).includes("unknown") || members(returned).every((member) => members(taken).includes(member));
 };
 
@@ -258,7 +259,7 @@ test("a returned array's elements may be NULL unless the statement shows they ar
   // Postgres lets any array hold NULL elements, whatever a column's NOT NULL says: a table's array
   // Column is `(T | null)[]`, and so is `array_agg(u.email)` over a LEFT JOIN, `{NULL}` for a team
   // With no users. An array the statement builds from values it shows are not NULL is `T[]`.
-  const texts = (nullable_items?: boolean): EngineType => (nullable_items === undefined ? { kind: "array", of: scalar("text") } : { kind: "array", of: scalar("text"), nullable_items });
+  const texts = (nullable_items?: boolean): EngineType => (matchesUndefined(nullable_items) ? { kind: "array", of: scalar("text") } : { kind: "array", of: scalar("text"), nullable_items });
   assert.equal(renderType(texts()), "(string | null)[]");
   assert.equal(renderType(texts(false)), "string[]");
   assert.equal(renderType(texts(true)), "(string | null)[]");

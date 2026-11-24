@@ -11,6 +11,8 @@ import * as stringTables from './string-literal-tables.ts';
 import { RagelState, runRagel } from './scanner-ragel.ts';
 import { graphemeClusters } from './scanner-grapheme.ts';
 import { matchesWhitespace } from './whitespace.ts';
+// oxlint-disable-next-line import/no-relative-parent-imports -- Reuse the package's native guards without loading Effect.
+import { matchesString, matchesUndefined } from "../native-predicates.ts";
 
 export { graphemeClusters } from './scanner-grapheme.ts';
 
@@ -109,7 +111,7 @@ const scanTokens = function (input: Uint8Array, filename: string, start: Pos, mo
   const call = (cs: number): boolean => { stack.push(s.cs); s.cs = cs; return true; };
   const ret = (): boolean => {
     const cs = stack.pop();
-    if (cs === undefined) {throw new Error('HCL scanner return stack underflow');}
+    if (matchesUndefined(cs)) {throw new Error('HCL scanner return stack underflow');}
     s.cs = cs;
     return true;
   };
@@ -280,7 +282,7 @@ export const lexTemplate = function lexTemplate(input: Uint8Array, filename: str
   return { tokens, diagnostics: checkInvalidTokens(tokens) };
 };
 export const validIdentifier = function validIdentifier(value: string | Uint8Array): boolean {
-  const tokens = scanTokens(typeof value === 'string' ? new TextEncoder().encode(value) : value, '', { line: 0, column: 0, byte: 0 }, 'ident');
+  const tokens = scanTokens(matchesString(value) ? new TextEncoder().encode(value) : value, '', { line: 0, column: 0, byte: 0 }, 'ident');
   return tokens.length === identifierTokenCount && tokens[0]?.type === 'TokenIdent' && tokens[1]?.type === 'TokenEOF';
 };
 

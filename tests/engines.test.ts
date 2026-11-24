@@ -2,10 +2,8 @@
 import { test } from "node:test";
 // oxlint-disable-next-line rules/no-node-imports -- Nub's Node suite uses native assertions for driver, CLI, and protocol results.
 import assert from "node:assert/strict";
-// oxlint-disable-next-line rules/no-node-imports -- The Nub integration fixtures use this built-in to inspect or write files through the host filesystem.
-import { chmodSync, readFileSync, rmSync } from "node:fs";
 // oxlint-disable-next-line rules/no-node-imports -- The Nub integration fixtures use this built-in to await writes and reads through the host filesystem.
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 // oxlint-disable-next-line rules/no-node-imports -- The Nub integration fixtures use this built-in to select the host's real temporary directory.
 import { tmpdir } from "node:os";
 // oxlint-disable-next-line rules/no-node-imports -- The Nub integration fixtures use this built-in to resolve paths using the host platform's filesystem conventions.
@@ -14,8 +12,11 @@ import { anyEngine, engine, MissingEngine, Unreachable } from "#reylo-source/eng
 import { nativeBinary, PLATFORM_PACKAGES, platformPackage } from "#reylo-source/native.ts";
 import { resolveProject } from "#reylo-source/project.ts";
 import { ENGINE_VERSION } from "#reylo-source/engine-version.ts";
+import { isRecord, matchesString, matchesUndefined } from "#reylo-source/native-predicates.ts";
 
-const VERSION: string = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")).version;
+const manifest: unknown = JSON.parse(await readFile(new URL("../package.json", import.meta.url), "utf8"));
+assert.ok(isRecord(manifest) && matchesString(manifest.version) && isRecord(manifest.optionalDependencies));
+const { optionalDependencies, version: VERSION } = manifest;
 const noShell = process.platform === "win32" && "stand-in executables require a POSIX shell";
 
 /** Isolate the executable override and remove the stand-in after its child has stopped. */
@@ -23,13 +24,13 @@ const withEngine = async function <T>(body: string, run: (path: string) => Promi
   const root = await mkdtemp(join(tmpdir(), "reylo-native-test-"));
   const path = join(root, "reylo");
   await writeFile(path, `#!/bin/sh\n${body}\n`);
-  chmodSync(path, 0o755);
+  await chmod(path, 0o755);
   const before = process.env.REYLO_ENGINE_PATH;
   process.env.REYLO_ENGINE_PATH = path;
   try {
     return await run(path);
   } finally {
-    if (before === undefined) {delete process.env.REYLO_ENGINE_PATH;}
+    if (matchesUndefined(before)) {delete process.env.REYLO_ENGINE_PATH;}
     else {process.env.REYLO_ENGINE_PATH = before;}
     await rm(root, { force: true, recursive: true });
   }
@@ -42,11 +43,10 @@ const ping = function (version: string = ENGINE_VERSION, database = "sqlite"): s
 
 // oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
 test("native packages cover supported platforms at the exact upstream engine version", () => {
-  const manifest = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
   assert.equal(Object.keys(PLATFORM_PACKAGES).length, 8);
   Object.entries(PLATFORM_PACKAGES).forEach(([key, pkg]) => {
     assert.equal(pkg, `@reylosql/engine-${key}`);
-    assert.equal(manifest.optionalDependencies[pkg], ENGINE_VERSION);
+    assert.equal(optionalDependencies[pkg], ENGINE_VERSION);
   });
   const { key, pkg } = platformPackage();
   assert.equal(pkg, PLATFORM_PACKAGES[key]);
@@ -119,7 +119,7 @@ test("the installed SQLite engine reads project configuration and is reused", as
   assert.equal(await engine("sqlite"), currentEngine);
   assert.equal(await anyEngine(), currentEngine);
   const root = await mkdtemp(join(tmpdir(), "reylo-native-project-"));
-  testContext.after(() => rmSync(root, { force: true, recursive: true }));
+  testContext.after(async () => {await rm(root, { force: true, recursive: true });});
   await writeFile(join(root, ".reylo.yaml"), "direct_url: file:./app.db\n");
   const resolved = resolveProject(currentEngine, root, {});
   assert.deepEqual([resolved.dialect, resolved.error], ["sqlite", undefined]);

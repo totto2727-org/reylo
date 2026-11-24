@@ -12,6 +12,7 @@ import { copyFile, cp, mkdir, readdir, readFile, rm, stat, writeFile } from "nod
 // oxlint-disable-next-line rules/no-node-imports -- Package staging uses the host's filesystem paths.
 import path from "node:path";
 import { build as bundle, transform } from "esbuild";
+import { hasFunctionType, isRecord } from "#reylo-source/native-predicates.ts";
 // oxlint-disable-next-line import/no-relative-parent-imports -- Use the same pinned upstream version as the runtime and generated manifests.
 import { ENGINE_VERSION } from "../src/engine-version.ts";
 
@@ -114,7 +115,9 @@ await Promise.all(DATABASES.map(async (db) => {
   const half = await bundle({ ...bundled, entryPoints: [join(root, "src/tooling.ts")], outfile: join(to, "tooling.js") });
   // Reylo's entry points load it with a `require` (src/engine-package.ts), which refuses an ES
   // Module with a top-level await.
-  if (typeof (createRequire(import.meta.url)(join(to, "tooling.js")) as { default?: { sqlModule?: unknown } }).default?.sqlModule !== "function") {throw new Error(`dist/${db}/tooling.js does not load with a require`);}
+  const toolingModule: unknown = createRequire(import.meta.url)(join(to, "tooling.js"));
+  const tool = isRecord(toolingModule) ? toolingModule.default : undefined;
+  if (!isRecord(tool) || !hasFunctionType(tool.sqlModule)) {throw new Error(`dist/${db}/tooling.js does not load with a require`);}
   // The engine connects to its database itself, or DuckDB's through the app's own driver: no
   // Driver, and nothing native, is bundled.
   const native = Object.keys(half.metafile.inputs).filter((input) => /node_modules\/(?:postgres|mysql2|@duckdb|@bytecodealliance\/jco-node-fs)\//u.test(input));

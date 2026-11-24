@@ -12,6 +12,8 @@ import { parseStringLiteralToken } from './string-literal.ts';
 import { trimLeadingWhitespace as trimLeft, trimTrailingWhitespace as trimRight } from './whitespace.ts';
 import { rangeBetween as between, emptyRangeAt, rangeString, isStringLiteral } from './types.ts';
 import type { Attribute, Block, Body, Diagnostic, Expression, ForExpression, Literal, ObjectKey, Pos, Range, Token, TraversalStep } from './types.ts';
+// oxlint-disable-next-line import/no-relative-parent-imports -- Reuse the package's native guards without loading Effect.
+import { matchesNumber, matchesString } from "../native-predicates.ts";
 
 export * from './types.ts';
 export { parseStringLiteralToken } from './string-literal.ts';
@@ -22,7 +24,7 @@ const text = (token: Token): string => decoder.decode(token.bytes);
 const keyword = (token: Token, word: string): boolean => token.type === 'TokenIdent' && text(token) === word;
 const error = (summary: string, detail: string, subject: Range, context?: Range): Diagnostic => ({ severity: 'error', summary, detail, subject, ...(context ? { context } : {}) });
 const dynamic = (range: Range, diagnostics?: Diagnostic[]): Expression => ({ kind: 'dynamic', range, ...(diagnostics ? { diagnostics } : {}) });
-const literal = (value: Literal['value'], range: Range): Literal => ({ kind: 'literal', value: typeof value === 'string' ? value.normalize('NFC') : value, range });
+const literal = (value: Literal['value'], range: Range): Literal => ({ kind: 'literal', value: matchesString(value) ? value.normalize('NFC') : value, range });
 const pairs: Record<string, string> = { TokenOBrace: 'TokenCBrace', TokenOBrack: 'TokenCBrack', TokenOParen: 'TokenCParen', TokenOQuote: 'TokenCQuote', TokenOHeredoc: 'TokenCHeredoc', TokenCBrace: 'TokenOBrace', TokenCBrack: 'TokenOBrack', TokenCParen: 'TokenOParen', TokenCQuote: 'TokenOQuote', TokenCHeredoc: 'TokenOHeredoc', TokenTemplateInterp: 'TokenTemplateSeqEnd', TokenTemplateControl: 'TokenTemplateSeqEnd', TokenTemplateSeqEnd: 'TokenTemplateInterp' };
 const opposite = (type: string): string => pairs[type] ?? 'TokenNil';
 const binaryOps: Record<string, string>[] = [
@@ -33,14 +35,14 @@ const binaryOps: Record<string, string>[] = [
 const emptyBody = (range: Range, endRange = range): Body => ({ kind: 'body', attributes: Object.create(null) as Record<string, Attribute>, blocks: [], range, endRange });
 
 export const parseConfig = function parseConfig(source: string | Uint8Array, filename = '', start: Pos = { line: 1, column: 1, byte: 0 }): { body: Body; diagnostics: Diagnostic[] } {
-  const result = lexConfig(typeof source === 'string' ? encoder.encode(source) : source, filename, start);
+  const result = lexConfig(matchesString(source) ? encoder.encode(source) : source, filename, start);
   const parser = new Parser(result.tokens);
   const body = parser.parseBody('TokenEOF');
   parser.assertEmptyIncludeNewlinesStack();
   return { body, diagnostics: [...result.diagnostics, ...parser.diagnostics] };
 };
 export const parseExpression = function parseExpression(source: string | Uint8Array, filename = '', start: Pos = { line: 1, column: 1, byte: 0 }): { expression: Expression; diagnostics: Diagnostic[] } {
-  const result = lexExpression(typeof source === 'string' ? encoder.encode(source) : source, filename, start);
+  const result = lexExpression(matchesString(source) ? encoder.encode(source) : source, filename, start);
   const parser = new Parser(result.tokens);
   parser.pushIncludeNewlines(false);
   const expression = parser.parseExpression();
@@ -51,7 +53,7 @@ export const parseExpression = function parseExpression(source: string | Uint8Ar
   return { expression, diagnostics: [...result.diagnostics, ...parser.diagnostics] };
 };
 export const parseTemplate = function parseTemplate(source: string | Uint8Array, filename = '', start: Pos = { line: 1, column: 1, byte: 0 }): { expression: Expression; diagnostics: Diagnostic[] } {
-  const result = lexTemplate(typeof source === 'string' ? encoder.encode(source) : source, filename, start);
+  const result = lexTemplate(matchesString(source) ? encoder.encode(source) : source, filename, start);
   const parser = new Parser(result.tokens);
   const expression = parser.parseTemplate('TokenEOF', false);
   parser.assertEmptyIncludeNewlinesStack();
@@ -64,7 +66,7 @@ const relativeTraversal = function relativeTraversal(expression: Expression, ste
     if (expression.kind === 'traversal') {
       // Parts is the ergonomic adapter view. steps retains non-string/number
       // Index keys and unknown placeholders without discarding AST information.
-      if (typeof step.value === 'string' || typeof step.value === 'number') {expression.parts.push(step.value);}
+      if (matchesString(step.value) || matchesNumber(step.value)) {expression.parts.push(step.value);}
     }
     expression.range = between(expression.range, step.range); return expression;
   }

@@ -6,6 +6,9 @@
 // Parser-reachable AST translated from hashicorp/hcl at
 // 00057cf06d7b38a3f89e6e54d622eee98322b314. Evaluation is intentionally excluded.
 
+// oxlint-disable-next-line import/no-relative-parent-imports -- Reuse the package's native guards without loading Effect.
+import { matchesNumber, matchesString } from "../native-predicates.ts";
+
 export interface Pos { line: number; column: number; byte: number }
 export interface Range { filename: string; start: Pos; end: Pos }
 export interface Token { type: string; bytes: Uint8Array; range: Range }
@@ -47,12 +50,12 @@ export const isStringLiteral = function isStringLiteral(expression: Expression):
   return expression.kind === 'template' && expression.parts.length === 1 && (expression.parts[0]!.kind === 'literal' || expression.parts[0]!.kind === 'dynamic' && !expression.parts[0].diagnostics);
 };
 export const staticString = function staticString(expression: Expression): string | undefined {
-  if (expression.kind === 'literal' && typeof expression.value === 'string') {return expression.value;}
-  if (isStringLiteral(expression) && expression.parts[0].kind === 'literal' && typeof expression.parts[0].value === 'string') {return expression.parts[0].value;}
+  if (expression.kind === 'literal' && matchesString(expression.value)) {return expression.value;}
+  if (isStringLiteral(expression) && expression.parts[0].kind === 'literal' && matchesString(expression.parts[0].value)) {return expression.parts[0].value;}
   return undefined;
 };
 export const staticTraversal = function staticTraversal(expression: Expression): Readonly<(string | number)[]> | undefined {
-  return expression.kind === 'traversal' && !expression.steps.some(step => step.dynamic || typeof step.value !== 'string' && typeof step.value !== 'number') ? expression.parts : undefined;
+  return expression.kind === 'traversal' && !expression.steps.some(step => step.dynamic || !matchesString(step.value) && !matchesNumber(step.value)) ? expression.parts : undefined;
 };
 
 /** Data-only equivalent of the upstream expression StartRange methods. */

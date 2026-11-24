@@ -225,8 +225,8 @@ export function languageServer(root: string) {
       const message = JSON.parse(buffer.subarray(end + 4, end + 4 + length).toString("utf8"));
       buffer = buffer.subarray(end + 4 + length);
       // A request from the server (registerCapability, workspace/configuration) is answered as a client that has nothing to add.
-      if (message.method && message.id !== undefined) {write({ id: message.id, result: message.method === "workspace/configuration" ? message.params.items.map(() => null) : null });}
-      else if (message.id !== undefined) {pending.get(message.id)?.(message.result);}
+      if (message.method && !matchesUndefined(message.id)) {write({ id: message.id, result: message.method === "workspace/configuration" ? message.params.items.map(() => null) : null });}
+      else if (!matchesUndefined(message.id)) {pending.get(message.id)?.(message.result);}
     }
   });
   let id = 0;

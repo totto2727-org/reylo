@@ -13,6 +13,7 @@ import { tmpdir } from "node:os";
 // oxlint-disable-next-line rules/no-node-imports -- The Nub integration fixtures use this built-in to resolve paths using the host platform's filesystem conventions.
 import { join } from "node:path";
 import { transform, DRIVERS, requireFixtureValue } from "./helpers.ts";
+import { matchesUndefined } from "#reylo-source/native-predicates.ts";
 
 // A parameter nothing in the statement types is error reylo12 in the type check unless the project
 // File says `strict_params: false`. The content
@@ -22,7 +23,7 @@ const project = function (url: string, reylo: string | undefined, driver?: strin
   const root = mkdtempSync(join(tmpdir(), "reylo-strict-"));
   writeFileSync(join(root, "package.json"), "{}");
   writeFileSync(join(root, ".env"), `DATABASE_URL=${url}\n`);
-  if (reylo !== undefined) {writeFileSync(join(root, name), reylo);}
+  if (!matchesUndefined(reylo)) {writeFileSync(join(root, name), reylo);}
   if (driver) {
     mkdirSync(join(root, "node_modules"));
     symlinkSync(join(DRIVERS, driver), join(root, "node_modules", driver));

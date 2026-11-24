@@ -15,6 +15,7 @@ import { dirname, join } from "node:path";
 // oxlint-disable-next-line rules/no-node-imports -- The Nub integration fixtures use this built-in to convert local module URLs with the host platform's path rules.
 import { pathToFileURL } from "node:url";
 import { nativeBinary, platformPackage, PLATFORM_PACKAGES } from "#reylo-source/native.ts";
+import { matchesUndefined } from "#reylo-source/native-predicates.ts";
 
 const withoutOverride = function (run: () => void): void {
   const before = process.env.REYLO_ENGINE_PATH;
@@ -22,7 +23,7 @@ const withoutOverride = function (run: () => void): void {
   try {
     run();
   } finally {
-    if (before === undefined) {delete process.env.REYLO_ENGINE_PATH;}
+    if (matchesUndefined(before)) {delete process.env.REYLO_ENGINE_PATH;}
     else {process.env.REYLO_ENGINE_PATH = before;}
   }
 };

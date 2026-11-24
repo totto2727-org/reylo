@@ -7,6 +7,7 @@ import { renderParamType } from "#reylo-source/render.ts";
 import { prepareRows, variant } from '#reylo-source/rows.ts';
 import type { RowsType } from '#reylo-source/rows.ts';
 import { nativeDriverDate } from "./helpers.ts";
+import { matchesBigInt } from "#reylo-source/native-predicates.ts";
 
 // What the engine gives for `:events::rows(id int8 not null, ts timestamptz not null, status? text
 // Not null, amount numeric(12,2), tags text[], meta jsonb('{"type": "object", …}'))`.
@@ -54,7 +55,7 @@ test("a value is checked against its column list, and written as the JSON the st
     [{ id: 1, ts: "2026-10-20T10:00:00Z", tags: ["a", 1] }, /"tags" element 2 is text, a string; got 1/u],
     [{ id: 1, ts: "2026-10-20T10:00:00Z", meta: { n: BigInt("1") } }, /holds a JSON value/u],
   ];
-  Iterator.from(refused).forEach(([value, message]) => {assert.throws(() => prepareRows("events", events, [value], "postgres", true), message, JSON.stringify(value, (_, v) => (typeof v === "bigint" ? `${v}n` : v)));});
+  Iterator.from(refused).forEach(([value, message]) => {assert.throws(() => prepareRows("events", events, [value], "postgres", true), message, JSON.stringify(value, (_, v) => (matchesBigInt(v) ? `${v}n` : v)));});
   assert.throws(() => prepareRows("events", events, { id: 1 }, "postgres", true), /pass an array of objects, one per row; got an object/u);
   assert.throws(() => prepareRows("user", { ...events, one: true }, [], "postgres", true), /each row is an object/u);
 });

@@ -11,6 +11,7 @@ import { DatabaseSync } from "node:sqlite";
 import { defineQuery } from '#reylo-source/index.ts';
 import type { QueryTrace } from '#reylo-source/index.ts';
 import { listening } from "#reylo-source/trace.ts";
+import { hasFunctionType } from "#reylo-source/native-predicates.ts";
 
 // Every query Reylo runs is published on the tracing channel "reylo:query" (src/trace.ts): one
 // Call per `.run()`, `.runSync()`, `.try()`, `.trySync()` and call of the function `.with()`
@@ -132,7 +133,7 @@ test("a store bound to start is the current one while the driver runs, so its sp
     const watched = new Proxy(db, {
       get(target, key) {
         const value = Reflect.get(target, key);
-        if (typeof value !== "function") {return value;}
+        if (!hasFunctionType(value)) {return value;}
         return key === "prepare" ? (sql: string) => {
           seen.push(store.getStore());
           return target.prepare(sql);

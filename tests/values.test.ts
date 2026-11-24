@@ -12,6 +12,7 @@ import { coerce, columnKind, DecodeError, duration, hstore, hstoreText, instant,
 import type { EngineType } from "#reylo-source/engine-type.ts";
 import type { Columns } from "#reylo-source/values.ts";
 import { nativeDriverDate, promiseDriverStub, NO_DRIVER_ERROR, NO_ROW, SQL_NULL, requireFixtureValue } from "./helpers.ts";
+import { hasFunctionType, matchesBigInt, matchesNull, matchesNumber, matchesUndefined } from "#reylo-source/native-predicates.ts";
 
 // The one table (src/values.ts): the kind of each SQL type, the TypeScript type the module declares
 // For it, the JSON Schema of its JSON form, and the value the run time gives it, which must agree.
@@ -19,11 +20,11 @@ import { nativeDriverDate, promiseDriverStub, NO_DRIVER_ERROR, NO_ROW, SQL_NULL,
 const scalar = (name: string): EngineType => ({ kind: "scalar", name });
 /** The TypeScript type a value is, as the declared type names it. */
 const typeOf = function (v: unknown): string {
-  if (v === null) {return "null";}
+  if (matchesNull(v)) {return "null";}
   // No value Reylo returns is one.
   if (v instanceof Date) {return "Date";}
   if (v instanceof Uint8Array) {return "Uint8Array";}
-  if (Array.isArray(v)) {return `${typeOf(v.find((x) => x !== null))}[]`;}
+  if (Array.isArray(v)) {return `${typeOf(v.find((x) => !matchesNull(x)))}[]`;}
   return typeof v;
 };
 
@@ -53,11 +54,11 @@ test("every Postgres type's decoded value is the type the module declares for it
     else if (declared !== "unknown") {assert.equal(`(${typeOf(values[0])} | null)[]`, renderType(array, false, "postgres"), name);}
     // The value written as JSON, a BigInt as the integer it is, has the schema's JSON type.
     const schema = typeSchema(t, "postgres") as { type?: string | string[] };
-    if (schema.type !== undefined) {
-      const written = JSON.stringify(value instanceof Uint8Array ? Buffer.from(value).toString("base64") : value, (_, x) => (typeof x === "bigint" ? (JSON as unknown as { rawJSON(text: string): unknown }).rawJSON(String(x)) : x));
-      assert.equal(written, typeof value === "bigint" ? String(value) : written, name);
+    if (!matchesUndefined(schema.type)) {
+      const written = JSON.stringify(value instanceof Uint8Array ? Buffer.from(value).toString("base64") : value, (_, x) => (matchesBigInt(x) ? (JSON as unknown as { rawJSON(text: string): unknown }).rawJSON(String(x)) : x));
+      assert.equal(written, matchesBigInt(value) ? String(value) : written, name);
       const json = JSON.parse(written);
-      const jsonType = typeof json === "number" ? (Number.isInteger(json) ? ["integer", "number"] : ["number"]) : [typeof json];
+      const jsonType = matchesNumber(json) ? (Number.isInteger(json) ? ["integer", "number"] : ["number"]) : [typeof json];
       assert.ok([schema.type].flat().some((t) => jsonType.includes(t)), `${name}: ${JSON.stringify(json)} against ${JSON.stringify(schema)}`);
     }
   });
@@ -395,7 +396,7 @@ test("SQLite: a value its column's type does not allow, which a table that is no
 // oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
 test("mysql2: per-query options and Reylo's typeCast, never decimalNumbers; a DECIMAL and JSON as their text, a date's dropped fraction and its T, TIME's digits", async () => {
   let sent: Record<string, any> = {};
-  const field = (type: string, text: string | null) => ({ type, string: () => text, buffer: () => (text === null ? SQL_NULL : Buffer.from(text)) });
+  const field = (type: string, text: string | null) => ({ type, string: () => text, buffer: () => (matchesNull(text) ? SQL_NULL : Buffer.from(text)) });
   const pool = {
     query: promiseDriverStub(() => [[], []]),
     // Mysql2 calls the typeCast once per value with the field and its own reading, and resolves to [rows, fields].
@@ -477,7 +478,7 @@ test("runSync refuses a client whose prepared statement answers through a promis
 test("mysql2: Reylo's typeCast only where it is needed, since mysql2 calls it for every value: a JSON or unknown column, unknown columns, or the app's typeCast, decimalNumbers or jsonStrings", async () => {
   const sent: unknown[] = [];
   const pool = (connectionConfig: Record<string, unknown> | undefined) => ({ pool: connectionConfig && { config: { connectionConfig } }, query: promiseDriverStub(() => [[], []]), execute: async (options: { typeCast: unknown }) => {
-    sent.push(typeof options.typeCast === "function" ? "cast" : options.typeCast);
+    sent.push(hasFunctionType(options.typeCast) ? "cast" : options.typeCast);
     return [[], []];
   } });
   const q = (columns?: [string, string][]): QueryModule<"mysql"> => ({ dialect: "mysql", sql: "select 1", params: [], ...(columns ? { columns } : {}) });

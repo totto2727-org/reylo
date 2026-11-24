@@ -10,7 +10,7 @@ import { defineQuery } from '#reylo-source/index.ts';
 import type { MysqlClient, MysqlCode, MysqlQueryError, PostgresClient, PostgresCondition, PostgresQueryError, Query, SqliteCode, SqliteQueryError } from '#reylo-source/index.ts';
 import { readQueryError, readQueryErrorSync } from "#reylo-source/query-error.ts";
 import { promiseDriverStub, requireFixtureValue } from "./helpers.ts";
-
+import { matchesUndefined } from "#reylo-source/native-predicates.ts";
 // `.try()` and the database's error it reads from each driver's own (src/query-error.ts). The
 // Drivers' errors below are the ones each throws, measured on the real package (lab/driver-matrix
 // Checks them through `.try()` on every driver).
@@ -72,7 +72,7 @@ test("Postgres: the error each driver throws reads as one, with the server's fie
   ];
   for (const [label, error, expected] of cases) {
     const read = await readQueryError("postgres", error);
-    if (expected === undefined) {
+    if (matchesUndefined(expected)) {
       assert.equal(read, undefined, label);
       continue;
     }
@@ -139,7 +139,7 @@ test("MySQL: the error each driver throws reads as one, named from MySQL's own l
   ];
   for (const [label, error, expected] of cases) {
     const read = await readQueryError("mysql", error);
-    if (expected === undefined) {
+    if (matchesUndefined(expected)) {
       assert.equal(read, undefined, label);
       continue;
     }
@@ -182,7 +182,7 @@ test("SQLite: the error each driver throws reads as one, its most specific code 
   ];
   Iterator.from(cases).forEach(([label, error, expected]) => {
     const read = readQueryErrorSync("sqlite", error);
-    if (expected === undefined) {
+    if (matchesUndefined(expected)) {
       assert.equal(read, undefined, label);
       return;
     }

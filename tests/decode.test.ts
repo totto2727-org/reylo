@@ -9,6 +9,7 @@ import type { QueryModule } from '#reylo-source/execute.ts';
 import { parseArray } from "#reylo-source/decode.ts";
 import type { Columns } from "#reylo-source/values.ts";
 import { nativeDriverDate, promiseDriverStub, SQL_NULL, requireFixtureValue } from "./helpers.ts";
+import { hasObjectType, matchesNull, matchesString } from "#reylo-source/native-predicates.ts";
 
 // Fakes of the Postgres drivers that decode as the real ones do (checked against
 // Lab/drivers/node_modules and wiki/driver-decoding/spike/postgres.md): a result asks a types
@@ -129,7 +130,7 @@ const database = function () {
 type Db = ReturnType<typeof database>;
 
 /** Rows compared by value, binary data by its bytes (a Buffer is a Uint8Array, with its own prototype). */
-const bytes = (v: unknown): unknown => (v instanceof Uint8Array ? { bytes: [...v] } : Array.isArray(v) ? v.map(bytes) : v !== null && typeof v === "object" && !(v instanceof Date) ? Object.fromEntries(Object.entries(v).map(([key, value]) => [key, bytes(value)])) : v);
+const bytes = (v: unknown): unknown => (v instanceof Uint8Array ? { bytes: [...v] } : Array.isArray(v) ? v.map(bytes) : !matchesNull(v) && hasObjectType(v) && !(v instanceof Date) ? Object.fromEntries(Object.entries(v).map(([key, value]) => [key, bytes(value)])) : v);
 const same = (actual: unknown, expected: unknown): void => assert.deepEqual(bytes(actual), bytes(expected));
 
 interface Config { text: string; values?: unknown[]; types?: { getTypeParser(oid: number, format?: string): Parser }; rowMode?: string }
@@ -144,12 +145,12 @@ const pgClient = function (db: Db, options: { binary?: boolean } = {}) {
     getTypeParser: (oid: number, _format?: string) => overrides[oid] ?? appTypes.getTypeParser(oid),
     async query(config: string | Config, values?: unknown[]) {
       client.calls.push(config);
-      const c: Config = typeof config === "string" ? { text: config, ...(values ? { values } : {}) } : config;
+      const c: Config = matchesString(config) ? { text: config, ...(values ? { values } : {}) } : config;
       const types = c.types ?? client;
       const answer = db.answer(c.text);
       const parsers = answer.fields.map((field) => types.getTypeParser(field.dataTypeID, client.binary ? "binary" : "text"));
       const rows = answer.raw.map((raw) => {
-        const values = raw.map((v, index) => (v === null ? SQL_NULL : parsers[index]!(v)));
+        const values = raw.map((v, index) => (matchesNull(v) ? SQL_NULL : parsers[index]!(v)));
         return c.rowMode === "array" ? values : Object.fromEntries(answer.fields.map((field, index) => [field.name, values[index]]));
       });
       return { fields: answer.fields, rows };
@@ -193,7 +194,7 @@ test("pg Client: Reylo's table answers every oid, so no parser of the app's appl
   await execute(client, probe, { id: 1 });
   assert.equal(db.catalogQueries.length, 1, "what the catalog said is kept per client");
   assert.deepEqual((await client.query("select * from probe")).rows[0], control, "the app's own queries keep its parsers");
-  const sent = client.calls.find((c) => typeof c === "object" && (c as Config).text === "select * from probe where id = $1") as Config;
+  const sent = client.calls.find((c) => hasObjectType(c) && (c as Config).text === "select * from probe where id = $1") as Config;
   assert.deepEqual(sent.values, [1]);
 });
 
@@ -233,7 +234,7 @@ test("pg: a client set up with binary: true is refused, before the query and if 
   const asked: string[] = [];
   const original = sneaky.query;
   sneaky.query = async (config: string | Config, values?: unknown[]) => {
-    if (typeof config === "object" && config.types) {
+    if (hasObjectType(config) && config.types) {
       const {types} = config;
       config = { ...config, types: { getTypeParser: (oid: number) => {
         asked.push("binary");
@@ -324,7 +325,7 @@ const pglite = function (db: Db, instance: Record<number, Parser> | undefined) {
       const answer = db.answer(text);
       const parsers = { ...instance, ...options?.parsers };
       const rows = answer.raw.map((raw) => {
-        const values = raw.map((v, index) => (v === null ? SQL_NULL : (parsers[requireFixtureValue(answer.fields[index]).dataTypeID] ? parsers[requireFixtureValue(answer.fields[index]).dataTypeID]!(v) : v)));
+        const values = raw.map((v, index) => (matchesNull(v) ? SQL_NULL : (parsers[requireFixtureValue(answer.fields[index]).dataTypeID] ? parsers[requireFixtureValue(answer.fields[index]).dataTypeID]!(v) : v)));
         return options?.rowMode === "array" ? values : Object.fromEntries(answer.fields.map((field, index) => [field.name, values[index]]));
       });
       return { fields: answer.fields, rows };
@@ -377,7 +378,7 @@ const postgresJs = function (db: Db, rowTransform?: (row: unknown[]) => unknown)
     unsafe: (text: string) => ({
       raw: async () => {
         const answer = db.answer(text);
-        const rows = answer.raw.map((r) => r.map((v) => (v === null ? SQL_NULL : Buffer.from(v))));
+        const rows = answer.raw.map((r) => r.map((v) => (matchesNull(v) ? SQL_NULL : Buffer.from(v))));
         return Object.assign(rowTransform ? rows.map(rowTransform) : rows, { columns: answer.fields.map((field) => ({ name: field.name.toUpperCase(), type: field.dataTypeID })) });
       },
     }),

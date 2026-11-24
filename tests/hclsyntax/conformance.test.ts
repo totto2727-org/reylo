@@ -13,6 +13,7 @@ import { isStringLiteral } from '#reylo-source/hclsyntax/types.ts';
 import type { Range, Token } from '#reylo-source/hclsyntax/types.ts';
 import { actualAST, actualDiagnostics, diagnostics, oracleAST, oracleTokens, position } from './oracle-shape.ts';
 import type { Fixture } from './oracle-shape.ts';
+import { hasObjectType, matchesNull, matchesNumber } from "#reylo-source/native-predicates.ts";
 
 const fixtures = readFileSync(new URL('fixtures.jsonl', import.meta.url), 'utf8').trimEnd().split('\n').map(line => JSON.parse(line) as Fixture);
 const manifest = JSON.parse(readFileSync(new URL('manifest.json', import.meta.url), 'utf8')) as { fixtures: number; functions: Record<string, { name: string; calls: number; cases: number }[]> };
@@ -36,10 +37,10 @@ test('HCL string tokens retain UTF-8 byte ranges and grapheme columns through In
 });
 
 const assertNumericLexemes = function (value: unknown, source: Buffer, startByte: number): void {
-  if (value === null || typeof value !== 'object') {return;}
+  if (matchesNull(value) || !hasObjectType(value)) {return;}
   if (Array.isArray(value)) { value.forEach(item => assertNumericLexemes(item, source, startByte)); return }
   const v = value as Record<string, unknown>;
-  if (v.kind === 'literal' && typeof v.value === 'number') {
+  if (v.kind === 'literal' && matchesNumber(v.value)) {
     const currentRange = v.range as Range;
     assert.equal(v.numberText, source.subarray(currentRange.start.byte - startByte, currentRange.end.byte - startByte).toString('utf8'), 'numeric literal must preserve its exact source spelling');
   }
