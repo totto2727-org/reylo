@@ -28,7 +28,6 @@ import type { Columns, Decoder, Kind, ScalarKind } from './values.ts';
 import { lexPlaceholders } from "./lex.ts";
 import { hasFunctionType, isEmptyString, matchesNull, matchesString, matchesUndefined } from "./native-predicates.ts";
 
-type AnyClient = Record<string, any>;
 interface Field {
   name: string;
   oid: number;
@@ -537,8 +536,21 @@ export function bunRows(rows: unknown[], columns: Columns | undefined): unknown[
 // Tag's template as it stands: its text between the placeholders, and the values in their order.
 
 type SlonikTypeParser = { name: string; parse(value: string): unknown };
-type SlonikTag = { unsafe(strings: TemplateStringsArray, ...values: unknown[]): { typeParsers?: unknown } };
+type SlonikQuery = { typeParsers?: unknown };
+type SlonikTag = { unsafe(strings: TemplateStringsArray, ...values: unknown[]): SlonikQuery };
 type SlonikModule = { createSqlTag(configuration: { typeParsers: SlonikTypeParser[] }): SlonikTag };
+type SlonikConfiguration = {
+  interceptors?: { transformRow?: unknown; transformRowAsync?: unknown }[];
+  typeParsers?: SlonikTypeParser[];
+};
+type SlonikProtocol = {
+  clientConfiguration?: SlonikConfiguration;
+  configuration?: SlonikConfiguration;
+  query: (query: SlonikQuery) => PromiseLike<{
+    fields: { dataTypeId: number; name: string }[];
+    rows: Record<string, unknown>[];
+  }>;
+};
 
 /**
  * The built-in types pg's parsers (pg-types 4) or Slonik's own convert, each passed through as its
@@ -584,11 +596,11 @@ const loadSlonik = function (): SlonikModule {
   throw new TypeError(`Reylo runs a query on Slonik with a sql tag from the app's own slonik package, which it could not load (a server that is bundled keeps slonik external, so that it loads from node_modules at run time): ${(failure as Error).message}`);
 };
 
-const slonikTag = function (client: AnyClient): SlonikTag {
+const slonikTag = function (client: SlonikProtocol): SlonikTag {
   const { createSqlTag } = loadSlonik();
   // The parsers the app made its pool with, which a pool names on `configuration` and its
   // Connections, transactions and savepoints on `clientConfiguration` (not in Slonik's types).
-  const own = ((client.configuration ?? client.clientConfiguration)?.typeParsers as SlonikTypeParser[] | undefined)?.map((p) => p.name) ?? [];
+  const own = (client.configuration ?? client.clientConfiguration)?.typeParsers?.map((parser) => parser.name) ?? [];
   const names = [...new Set([...SLONIK_TEXT, ...own])];
   const key = names.join(",");
   let tag = slonikTags.get(key);
@@ -616,20 +628,22 @@ const slonikTemplate = function (text: string, values: Readonly<unknown[]>): [Te
   return [template, placeholders.map((placeholder) => values[Number(placeholder.name) - FIRST_PARAMETER_POSITION])];
 };
 
-export const slonik = async function slonik(c: AnyClient, text: string, values: Readonly<unknown[]>, columns: Columns | undefined): Promise<unknown[]> {
+export const slonik = async function slonik(client: Record<string, unknown>, text: string, values: Readonly<unknown[]>, columns: Columns | undefined): Promise<unknown[]> {
+  // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- The caller has selected the Slonik driver using its connection methods.
+  const driver = client as SlonikProtocol;
   // An interceptor's transformRow or transformRowAsync renames the columns
   // (slonik-interceptor-field-name-transformation) or rewrites each row, which Reylo's types would
   // No longer describe. It is refused before the statement runs, since a write that committed and
   // Then reported an error invites a retry.
-  const interceptors = (c.configuration ?? c.clientConfiguration)?.interceptors as { transformRow?: unknown; transformRowAsync?: unknown }[] | undefined;
-  if (interceptors?.some((i) => hasFunctionType(i?.transformRow) || hasFunctionType(i?.transformRowAsync))) {throw refuseSlonikRows();}
-  const tag = slonikTag(c);
+  const interceptors = (driver.configuration ?? driver.clientConfiguration)?.interceptors;
+  if (interceptors?.some((interceptor) => hasFunctionType(interceptor?.transformRow) || hasFunctionType(interceptor?.transformRowAsync))) {throw refuseSlonikRows();}
+  const tag = slonikTag(driver);
   const [template, ordered] = slonikTemplate(text, values);
   const query = tag.unsafe(template, ...ordered);
   if (matchesUndefined(query.typeParsers)) {
     throw new TypeError(`Reylo cannot run on this Slonik: its sql tag takes no type parsers per query (createSqlTag's typeParsers option), so its pool's parsers would turn numeric, timestamp and interval values into lossy numbers. Upgrade slonik to 49.12.0 or later.`);
   }
-  const result = (await c.query(query)) as { rows: Record<string, unknown>[]; fields: { name: string; dataTypeId: number }[] };
+  const result = await driver.query(query);
   return slonikRows(result.rows, result.fields, columns);
 };
 
