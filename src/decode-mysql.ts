@@ -27,7 +27,10 @@ import { bigInteger, coerce, truth, utf8 } from './values.ts';
 import type { Columns, Kind } from './values.ts';
 import { hasFunctionType, hasObjectType, matchesBigInt, matchesNull, matchesNumber, matchesString, matchesUndefined } from "./native-predicates.ts";
 
-type AnyClient = Record<string, any>;
+type DriverRow = Record<string, unknown>;
+const driverProtocol = <Protocol>(client: DriverRow): Protocol =>
+  // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- Runtime dispatch identifies the native driver before entering its query adapter.
+  client as Protocol;
 
 // ---------------------------------------------------------------------------------------------
 // Mysql2
@@ -82,7 +85,15 @@ const wallClock = function (s: string, decimals: number, type: number): string {
 
 /** The app's settings, where mysql2 shows them: a promise Pool's, Connection's or PoolConnection's. */
 type Mysql2Config = { typeCast?: unknown; decimalNumbers?: boolean; jsonStrings?: boolean };
-const configOf = (client: AnyClient): Mysql2Config | undefined => client.pool?.config?.connectionConfig ?? client.connection?.config;
+type Mysql2Protocol = {
+  connection?: { config?: Mysql2Config };
+  execute: (
+    options: typeof MYSQL2_OPTIONS & { sql: string; typeCast: true | typeof mysql2Cast },
+    values: unknown[],
+  ) => PromiseLike<[DriverRow[] | object, Mysql2Column[] | null | undefined]>;
+  pool?: { config?: { connectionConfig?: Mysql2Config } };
+};
+const configOf = (client: Mysql2Protocol): Mysql2Config | undefined => client.pool?.config?.connectionConfig ?? client.connection?.config;
 
 /**
  * Whether the statement needs Reylo's typeCast, which mysql2 calls for every value of the binary
@@ -90,7 +101,7 @@ const configOf = (client: AnyClient): Mysql2Config | undefined => client.pool?.c
  * and where the app's settings, which a query cannot turn off, would decide a DECIMAL or a JSON value
  * or replace mysql2's own reading (or cannot be read).
  */
-const needsCast = function (client: AnyClient, columns: Columns | undefined): boolean {
+const needsCast = function (client: Mysql2Protocol, columns: Columns | undefined): boolean {
   if (!columns || columns.some(([, kind]) => kind === "unknown" || kind.split("|").some((part) => part === "json" || part.startsWith("json")))) {return true;}
   const config = configOf(client);
   return matchesUndefined(config) || hasFunctionType(config.typeCast) || config.decimalNumbers === true || config.jsonStrings === true;
@@ -132,10 +143,11 @@ const fixRows = function (rows: Record<string, unknown>[], fixes: (Readonly<[str
 };
 
 /** Mysql2's execute(), resolving to [rows, fields]. */
-export const mysql2 = async function mysql2(m: AnyClient, text: string, values: unknown[], columns: Columns | undefined): Promise<unknown[]> {
-  const [rows, fields] = await m.execute({ sql: text, ...MYSQL2_OPTIONS, typeCast: needsCast(m, columns) ? mysql2Cast : true }, values);
+export const mysql2 = async function mysql2(client: DriverRow, text: string, values: unknown[], columns: Columns | undefined): Promise<unknown[]> {
+  const driver = driverProtocol<Mysql2Protocol>(client);
+  const [rows, fields] = await driver.execute({ sql: text, ...MYSQL2_OPTIONS, typeCast: needsCast(driver, columns) ? mysql2Cast : true }, values);
   if (!Array.isArray(rows)) {return [];}
-  const described = (fields ?? []) as Mysql2Column[];
+  const described = fields ?? [];
   // The module's kinds where its columns are the result's; a BIGINT by the result's own type, which
   // Says it of an either too (`:n + 1`, a BIGINT or a DOUBLE by what is bound).
   const kinds = columns && columns.length === described.length ? columns : undefined;
@@ -187,6 +199,14 @@ const MARIADB_OPTIONS = {
 const mariadbGeometry = (column: { type: string; buffer(): unknown }, next: () => unknown) => (column.type === "GEOMETRY" ? column.buffer() : next());
 
 type MariadbColumn = { type?: string; columnType?: number; name?: string | (() => string); isSet?: () => boolean };
+type MariadbResult = (DriverRow[] | object) & { meta?: MariadbColumn[] };
+type MariadbProtocol = {
+  query: (
+    options: Omit<typeof MARIADB_OPTIONS, "typeCast"> & { sql: string; typeCast: typeof mariadbGeometry | undefined },
+    values: unknown[],
+    callback: (error: Error | null, rows: MariadbResult, meta?: MariadbColumn[]) => void,
+  ) => { then?: (resolve: (rows: MariadbResult) => void, reject: (error: unknown) => void) => unknown } | null | undefined;
+};
 
 /** The fixes the module's kinds call for, for a driver that tells each type by its value. */
 const columnFixes = function columnFixes(columns: Columns | undefined): (Readonly<[string, Fix]>)[] {
@@ -199,12 +219,20 @@ const columnFixes = function columnFixes(columns: Columns | undefined): (Readonl
 };
 
 /** Mariadb's query(), on its promise or its callback API, with Reylo's options. */
-export const mariadb = async function mariadb(c: AnyClient, text: string, values: unknown[], columns: Columns | undefined): Promise<unknown[]> {
+export const mariadb = async function mariadb(client: DriverRow, text: string, values: unknown[], columns: Columns | undefined): Promise<unknown[]> {
   const options = { sql: text, ...MARIADB_OPTIONS, ...(columns?.some(([, kind]) => kind === "unknown") ? { typeCast: mariadbGeometry } : {}) };
+  const driver = driverProtocol<MariadbProtocol>(client);
   // The promise API resolves to the rows with their `meta`; the callback API hands the meta over as a third argument.
   let callbackMeta: MariadbColumn[] | undefined;
-  const result = await new Promise((resolve, reject) => {
-    const returned = c.query(options, values, (error: Error | null, rows: unknown, meta?: MariadbColumn[]) => (error ? reject(error) : ((callbackMeta = meta), resolve(rows))));
+  const result = await new Promise<MariadbResult>((resolve, reject) => {
+    const returned = driver.query(options, values, (error, rows, meta) => {
+      const failed = Boolean(error);
+      if (failed) {reject(error);}
+      else {
+        callbackMeta = meta;
+        resolve(rows);
+      }
+    });
     if (hasFunctionType(returned?.then)) {returned.then(resolve, reject);}
   });
   if (!Array.isArray(result)) {return [];}
@@ -212,7 +240,7 @@ export const mariadb = async function mariadb(c: AnyClient, text: string, values
   // Module's kinds, else by the columns' metadata (mariadb 2 has no isSet()).
   const work: { name: string; date: boolean }[] = columns
     ? columns.filter(([, kind]) => kind === "text" || kind.split("|").includes("timestamp")).map(([name, kind]) => ({ name, date: kind !== "text" }))
-    : (((result as { meta?: MariadbColumn[] }).meta ?? callbackMeta ?? []))
+    : (result.meta ?? callbackMeta ?? [])
         .map((m) => ({ name: hasFunctionType(m.name) ? m.name() : m.name, type: m.type, set: (hasFunctionType(m.isSet) && m.isSet()) || m.type === "SET" }))
         .filter((m): m is { name: string; type: string | undefined; set: boolean } => !matchesUndefined(m.name) && (m.set || m.type === "DATETIME" || m.type === "TIMESTAMP"))
         .map((m) => ({ name: m.name, date: !m.set }));
@@ -282,15 +310,20 @@ const planetscaleCast = function (field: PlanetscaleField, value: string | null)
 };
 
 /** PlanetScale's execute(): 1.x binds parameters; 2.0 takes none, and its options come second. */
-export const planetscale = async function planetscale(m: AnyClient, text: string, values: unknown[], columns: Columns | undefined): Promise<unknown[]> {
+export const planetscale = async function planetscale(client: DriverRow, text: string, values: unknown[], columns: Columns | undefined): Promise<unknown[]> {
   const options = { as: "object", cast: planetscaleCast };
+  type Result = { rows?: DriverRow[] } | null | undefined;
+  type PlanetscaleProtocol = {
+    execute: (text: string, values: unknown[] | null | typeof options, queryOptions?: typeof options) => PromiseLike<Result>;
+  };
+  const driver = driverProtocol<PlanetscaleProtocol>(client);
   let result;
   try {
-    result = await m.execute(text, values.length ? values : null, options);
+    result = await driver.execute(text, values.length ? values : null, options);
   } catch (error) {
     if (!/^Query parameters are not supported/u.test((error as Error)?.message)) {throw error;}
     if (values.length) {throw new TypeError(`@planetscale/database 2.0 binds no parameters, so reylo cannot pass this statement's values to it; use its 1.x line, or mysql2 on PlanetScale's MySQL endpoint.`, { cause: error });}
-    result = await m.execute(text, options);
+    result = await driver.execute(text, options);
   }
   // PlanetScale's result always carries its rows, an empty array for a statement that returns
   // None. Another driver's execute() (TiDB Cloud's answers with the rows themselves) would read
