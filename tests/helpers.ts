@@ -1,4 +1,6 @@
 // Shared SQLite driver fixtures and the content mapper run over its JSON-RPC protocol.
+// oxlint-disable-next-line rules/no-node-imports -- Assert the presence of fixture data with Nub's native test runner.
+import { fail } from "node:assert/strict";
 // oxlint-disable-next-line rules/no-node-imports -- Exercise Node CLI entry points and streaming protocols in native subprocesses.
 import { execFile, spawn } from "node:child_process";
 // oxlint-disable-next-line rules/no-node-imports -- The Nub integration fixtures use this built-in to use the host resolver for the installed driver or fixture package.
@@ -21,6 +23,9 @@ export const SQL_NULL = null;
 export const NO_DRIVER_ERROR = null;
 // oxlint-disable-next-line unicorn/no-null -- Query and driver APIs use null for an absent row.
 export const NO_ROW = null;
+
+export const requireFixtureValue = <Value>(value: Value): NonNullable<Value> =>
+  value ?? fail("Expected the database fixture to contain this value");
 
 /** Construct the same native date shape that driver and application inputs provide. */
 export const nativeDriverDate = (value?: string | number): Date =>

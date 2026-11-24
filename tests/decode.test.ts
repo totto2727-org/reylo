@@ -8,7 +8,7 @@ import { execute } from '#reylo-source/execute.ts';
 import type { QueryModule } from '#reylo-source/execute.ts';
 import { parseArray } from "#reylo-source/decode.ts";
 import type { Columns } from "#reylo-source/values.ts";
-import { nativeDriverDate, promiseDriverStub, SQL_NULL } from "./helpers.ts";
+import { nativeDriverDate, promiseDriverStub, SQL_NULL, requireFixtureValue } from "./helpers.ts";
 
 // Fakes of the Postgres drivers that decode as the real ones do (checked against
 // Lab/drivers/node_modules and wiki/driver-decoding/spike/postgres.md): a result asks a types
@@ -108,7 +108,7 @@ const database = function () {
     answer(text: string): { fields: { name: string; dataTypeID: number }[]; raw: (string | null)[][] } {
       if (text.includes("pg_catalog.pg_type")) {
         db.catalogQueries.push(text);
-        const wanted = /any\('\{([\d,]+)\}'/u.exec(text)![1]!.split(",").map(Number);
+        const wanted = requireFixtureValue(requireFixtureValue(/any\('\{([\d,]+)\}'/u.exec(text))[1]).split(",").map(Number);
         // An array oid asked about also brings the array type's own row after its element's, as a
         // Query matching every requested oid would return it.
         const rows = db.types
@@ -216,7 +216,7 @@ test("pg Client: a type created after Reylo read the catalog comes back decoded,
   await execute(client, probe, { id: 1 });
   db.late();
   const [row] = (await execute(client, lateProbe, { id: 1 })) as Record<string, unknown>[];
-  assert.deepEqual([row!.lates, row!.late], [["x", "y"], "x"]);
+  assert.deepEqual([requireFixtureValue(row).lates, requireFixtureValue(row).late], [["x", "y"], "x"]);
   assert.equal(db.catalogQueries.length, 2);
   assert.match(db.catalogQueries[1]!, /any\('\{70030,70031\}'::pg_catalog\.oid\[\]\)/u);
   await execute(client, lateProbe, { id: 1 });
@@ -272,7 +272,7 @@ test("pg Pool: pool.query with Reylo's table, so a connect listener's parsers do
   pool.on("connect", (c: ReturnType<typeof pgClient>) => c.setTypeParser(1184, (x) => `conn:${x}`));
   const [row] = (await execute(pool, built, { id: 1 })) as Record<string, unknown>[];
   same(row, declared);
-  assert.ok((pool.clients[0]!.calls[0] as Config).types, "the statement went through pool.query with types");
+  assert.ok((requireFixtureValue(pool.clients[0]).calls[0] as Config).types, "the statement went through pool.query with types");
   pool.options.binary = true;
   await assert.rejects(execute(pool, built, { id: 1 }) as Promise<unknown>, /binary: true/u);
 });
@@ -318,7 +318,7 @@ const pglite = function (db: Db, instance: Record<number, Parser> | undefined) {
       const answer = db.answer(text);
       const parsers = { ...instance, ...options?.parsers };
       const rows = answer.raw.map((raw) => {
-        const values = raw.map((v, index) => (v === null ? SQL_NULL : (parsers[answer.fields[index]!.dataTypeID] ? parsers[answer.fields[index]!.dataTypeID]!(v) : v)));
+        const values = raw.map((v, index) => (v === null ? SQL_NULL : (parsers[requireFixtureValue(answer.fields[index]).dataTypeID] ? parsers[requireFixtureValue(answer.fields[index]).dataTypeID]!(v) : v)));
         return options?.rowMode === "array" ? values : Object.fromEntries(answer.fields.map((field, index) => [field.name, values[index]]));
       });
       return { fields: answer.fields, rows };
@@ -361,7 +361,7 @@ test("Neon's neon(): query(text, params, { fullResults, types }), which replaces
   });
   const [row] = (await execute(neon as never, probe, { id: 1 })) as Record<string, unknown>[];
   same(row, declared);
-  assert.deepEqual(Object.keys(calls[0]![2] as object), ["fullResults", "arrayMode", "types"]);
+  assert.deepEqual(Object.keys(requireFixtureValue(calls[0])[2] as object), ["fullResults", "arrayMode", "types"]);
 });
 
 /** Postgres.js: `.raw()` gives each value's bytes and the result's columns; a row transform runs on raw rows too. */
@@ -386,7 +386,7 @@ test("postgres.js: .raw() and Reylo's text parsers, the rows built with the modu
   same(row, declared);
   // A query defined by hand has the server's names, and the catalog for the created types.
   const [bare] = (await execute(postgresJs(db) as never, probe, { id: 1 })) as Record<string, unknown>[];
-  assert.deepEqual(bare!.ROLES, declared.roles);
+  assert.deepEqual(requireFixtureValue(bare).ROLES, declared.roles);
   await assert.rejects(execute(postgresJs(db, (r) => [...r, "ROW-TRANSFORMED"]) as never, built, { id: 1 }) as Promise<unknown>, /transform\.row rewrites every row/u);
 });
 

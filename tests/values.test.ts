@@ -11,7 +11,7 @@ import { typeSchema } from "#reylo-source/schema.ts";
 import { coerce, columnKind, DecodeError, duration, hstore, hstoreText, instant, kindType, postgresInterval, postgresYear, scalarKind, textDecoder } from "#reylo-source/values.ts";
 import type { EngineType } from "#reylo-source/engine-type.ts";
 import type { Columns } from "#reylo-source/values.ts";
-import { nativeDriverDate, promiseDriverStub, NO_DRIVER_ERROR, NO_ROW, SQL_NULL } from "./helpers.ts";
+import { nativeDriverDate, promiseDriverStub, NO_DRIVER_ERROR, NO_ROW, SQL_NULL, requireFixtureValue } from "./helpers.ts";
 
 // The one table (src/values.ts): the kind of each SQL type, the TypeScript type the module declares
 // For it, the JSON Schema of its JSON form, and the value the run time gives it, which must agree.
@@ -440,7 +440,7 @@ test("mariadb: every option per query, metaAsArray off, a SET joined and a DATET
 // oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
 test("PlanetScale: Reylo's cast per query, the driver's own default with a DATETIME's T, over the app's", async () => {
   let cast: (field: { type: string; charset?: number }, value: string | null) => unknown = () => null;
-  const conn = { execute: async (_sql: string, __?: unknown, options?: { cast: typeof cast }) => ((cast = options!.cast), { rows: [], statement: "" }) };
+  const conn = { execute: async (_sql: string, __?: unknown, options?: { cast: typeof cast }) => ((cast = requireFixtureValue(options).cast), { rows: [], statement: "" }) };
   await execute(conn, { dialect: "mysql", sql: "select 1", params: [] });
   const bytes = (s: string): string => String.fromCharCode(...Buffer.from(s, "utf8"));
   assert.deepEqual(

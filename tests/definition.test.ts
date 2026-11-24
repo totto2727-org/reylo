@@ -12,7 +12,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 // oxlint-disable-next-line rules/no-node-imports -- The Nub integration fixtures use this built-in to convert local module URLs with the host platform's path rules.
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { ROOT, languageServer } from "./helpers.ts";
+import { ROOT, languageServer, requireFixtureValue } from "./helpers.ts";
 
 // Go-to-definition from what a `.sql` module declares opens the `.sql` file at its statement, through
 // The span map the content mapper returns (src/mapper.ts), and a hover shows the file's comment and
@@ -51,7 +51,7 @@ test("go-to-definition on a query, its import's path, its Row and a column opens
   const text = await readFile(main, "utf8");
   const at = (needle: string, offset: number): Position => {
     const before = text.slice(0, text.indexOf(needle) + offset).split("\n");
-    return { line: before.length - 1, character: before.at(-1)!.length };
+    return { line: before.length - 1, character: requireFixtureValue(before.at(-1)).length };
   };
   const lsp = languageServer(root);
   try {

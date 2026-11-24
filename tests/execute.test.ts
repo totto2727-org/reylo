@@ -12,7 +12,7 @@ import { checks, defineQuery } from "#reylo-source/index.ts";
 import type { EngineType, JsonSchema } from "#reylo-source/engine-type.ts";
 // oxlint-disable-next-line import/no-relative-parent-imports -- Match the native driver boundary in this direct Node integration test.
 import { matchesNullish } from "#reylo-source/native-predicates.ts";
-import { nativeDriverDate, promiseDriverStub, NO_DRIVER_ERROR, NO_ROW, SQL_NULL } from "./helpers.ts";
+import { nativeDriverDate, promiseDriverStub, NO_DRIVER_ERROR, NO_ROW, SQL_NULL, requireFixtureValue } from "./helpers.ts";
 
 // Each fake client records what execute handed it and answers the way its driver does; the
 // Driver behaviour each one copies was checked against the real package (lab/driver-matrix).
@@ -59,7 +59,7 @@ test("postgres: pg-promise gets a { text, values } object, so it binds instead o
   const fixtureQuery: QueryModule<"postgres"> = { dialect: "postgres", sql: "select '$2' as literal, :id::int as id", params: ["id"] };
   assert.deepEqual(await execute(db, fixtureQuery, { id: 1 }), [row]);
   // With Reylo's decoder table, which answers every oid itself.
-  const { types, ...bound } = calls[0]!.args[0] as { text: string; values: unknown[]; types: { getTypeParser(oid: number): (text: string) => unknown } };
+  const { types, ...bound } = requireFixtureValue(calls[0]).args[0] as { text: string; values: unknown[]; types: { getTypeParser(oid: number): (text: string) => unknown } };
   assert.deepEqual(bound, { text: "select '$2' as literal, $1::int as id", values: [1] });
   assert.equal(types.getTypeParser(20)("9007199254740993"), BigInt("9007199254740993"));
 });
@@ -145,7 +145,7 @@ test("postgres: a JSON parameter's value is a JavaScript value, which every driv
     return Promise.resolve([]);
   }, jsonQuery, jsonValues);
   const unsafe = async (_sql: string, values?: unknown[]): Promise<never[]> => {
-    seen.push(values!.map((currentValue) => (currentValue !== null && typeof currentValue === "object" ? JSON.stringify(currentValue) : currentValue)));
+    seen.push(requireFixtureValue(values).map((currentValue) => (currentValue !== null && typeof currentValue === "object" ? JSON.stringify(currentValue) : currentValue)));
     return [];
   };
   const bun = { unsafe, commitDistributed: async () => {} };
@@ -154,7 +154,7 @@ test("postgres: a JSON parameter's value is a JavaScript value, which every driv
   // Postgres.js gets each JSON value as its text declared unknown (705), and null as null.
   const unwrap = (v: unknown) => (v !== null && typeof v === "object" ? (assert.equal((v as { type: number }).type, 705), (v as { value: unknown }).value) : v);
   const postgresJs = { unsafe: promiseDriverStub((_sql: string, values?: unknown[]) => {
-    seen.push(values!.map(unwrap));
+    seen.push(requireFixtureValue(values).map(unwrap));
     return [];
   }), typed: (value: unknown, type: number) => ({ value, type }) };
   await execute(postgresJs, jsonQuery, jsonValues);
@@ -498,9 +498,9 @@ test("postgres: Neon's neon() before 1.0 is called with (text, values)", async (
     return Promise.resolve([row]);
   };
   assert.deepEqual(await execute(sql, pg, { id: 1, name: "ada" }), [row]);
-  assert.deepEqual(calls[0]!.args.slice(0, 2), ["select $1::int as id, $2 as name, $1 as again", [1, "ada"]]);
+  assert.deepEqual(requireFixtureValue(calls[0]).args.slice(0, 2), ["select $1::int as id, $2 as name, $1 as again", [1, "ada"]]);
   // Its options take a decoder table, 0.9 too, and the fields with fullResults.
-  assert.deepEqual(Object.keys(calls[0]!.args[2] as object), ["fullResults", "arrayMode", "types"]);
+  assert.deepEqual(Object.keys(requireFixtureValue(calls[0]).args[2] as object), ["fullResults", "arrayMode", "types"]);
 });
 
 // oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
@@ -525,7 +525,7 @@ test("mysql: execute() → [rows, fields] on mysql2, a repeated name repeated in
   }) };
   assert.deepEqual(await execute(pool, my, { id: 1, name: "ada" }), [row]);
   // The statement with Reylo's per-query options and typeCast (src/decode-mysql.ts), never decimalNumbers.
-  const [options, values] = calls[0]!.args as [Record<string, unknown>, unknown[]];
+  const [options, values] = requireFixtureValue(calls[0]).args as [Record<string, unknown>, unknown[]];
   assert.deepEqual(values, [1, "ada", 1]);
   assert.deepEqual({ ...options, typeCast: typeof options.typeCast }, { bigNumberStrings: true, dateStrings: true, nestTables: false, rowsAsArray: false, sql: "select ? as id, ? as name, ? as again", supportBigNumbers: true, typeCast: "function" });
   assert.deepEqual(await execute(pool, my, { id: 1, name: "ada" }), []);
@@ -633,15 +633,15 @@ test("every other driver gets a binary value as it is, pg-promise included, sinc
   } };
   await execute(pgp, pgq, { b: plain });
   await execute({ query: promiseDriverStub((_sql: string, values?: unknown[]) => {
-    seen.push(values![0]);
+    seen.push(requireFixtureValue(values)[0]);
     return { rows: [] };
   }) }, pgq, { b: plain });
   await execute({ unsafe: promiseDriverStub((_sql: string, values?: unknown[]) => {
-    seen.push(values![0]);
+    seen.push(requireFixtureValue(values)[0]);
     return [];
   }) }, pgq, { b: plain });
   await execute({ query: promiseDriverStub(() => [[], []] as [unknown, unknown]), execute: promiseDriverStub((_statement: unknown, values?: unknown[]) => {
-    seen.push(values![0]);
+    seen.push(requireFixtureValue(values)[0]);
     return [[], []] as [unknown, unknown];
   }) }, { ...bin, sql: "select hex(:b)", params: ["b"] }, { b: plain });
   await execute({ prepare: () => ({ all: (...values: unknown[]) => {
@@ -691,8 +691,8 @@ test("mysql: PlanetScale 2.0, which binds no parameters, runs a statement withou
   assert.deepEqual(await execute(conn, { dialect: "mysql", sql: "select 1", params: [] }), [row]);
   await assert.rejects(() => queryPromise(execute(conn, my, { id: 1, name: "ada" })), (error: TypeError) => error instanceof TypeError && /2\.0 binds no parameters/u.test(error.message) && /not supported/u.test((error.cause as Error).message));
   // 1.x's form first, then 2.0's, with Reylo's cast either way.
-  assert.deepEqual(calls[0]!.slice(0, 2), ["select 1", null]);
-  assert.deepEqual([calls[1]![0], Object.keys(calls[1]![1] as object)], ["select 1", ["as", "cast"]]);
+  assert.deepEqual(requireFixtureValue(calls[0]).slice(0, 2), ["select 1", null]);
+  assert.deepEqual([requireFixtureValue(calls[1])[0], Object.keys(requireFixtureValue(calls[1])[1] as object)], ["select 1", ["as", "cast"]]);
 });
 
 // oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
@@ -1132,7 +1132,7 @@ test("a query's source names its file, and Reylo's own errors about the query st
   assert.match(rejected.message, /^at\.sql: Parameter "at" is a timestamptz/u);
   assert.match(rejected.stack!, /^TypeError: at\.sql: Parameter "at"/u);
   const viaWith = await at.with({ query: promiseDriverStub(() => ({ rows: [] })) })({ at: nativeDriverDate() as never }).then(() => undefined, (error: Error) => error);
-  assert.match(viaWith!.stack!, /^TypeError: at\.sql: Parameter "at" is a timestamptz, which takes the instant as a string/u);
+  assert.match(requireFixtureValue(viaWith).stack!, /^TypeError: at\.sql: Parameter "at" is a timestamptz, which takes the instant as a string/u);
   // A column's value Reylo cannot give its kind.
   const truth = defineQuery<{}, unknown, "many", "sqlite">({ dialect: "sqlite", sql: "select 2 as b", params: [], columns: [["b", "bool"]], source: "truth.sql" });
   // oxlint-disable-next-line rules/no-effect-runtime-run -- This test exercises Reylo's native synchronous query API, which does not run Effect.

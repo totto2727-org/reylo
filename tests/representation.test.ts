@@ -22,7 +22,7 @@ import { renderType } from "#reylo-source/render.ts";
 import { hasFunctionType, isRecord } from "#reylo-source/native-predicates.ts";
 import type { LibsqlClient, Sqlite3Client, SqlitePromiseClient, SyncSqliteClient, TursoClient } from "#reylo-source/execute.ts";
 import type { Cardinality, Query } from "#reylo-source/index.ts";
-import { DRIVERS, forEachFixtureInOrder, INDEX, SQL_NULL } from "./helpers.ts";
+import { DRIVERS, forEachFixtureInOrder, INDEX, SQL_NULL, requireFixtureValue } from "./helpers.ts";
 
 // Real SQLite drivers must return the same public value representation.
 const drivers = existsSync(join(DRIVERS, "better-sqlite3")) || "lab/drivers is not installed";
@@ -286,8 +286,9 @@ test("SQLite: a column declared BIGINT or INT8 is a BigInt on every driver, exac
     const own = db.prepare("select n, v from acct where id = 1").get();
     assert.deepEqual(own, safe ? { n: BigInt("5"), v: BigInt("9007199254740993") } : { n: 5, v: 9_007_199_254_740_992 }, "the control: the app's own statement keeps its setting, and rounds v without safeIntegers");
     // What `run` returns goes back in.
+    const row = requireFixtureValue(exactRows[0]);
     // oxlint-disable-next-line rules/no-effect-runtime-run -- This test exercises Reylo's native synchronous query API, which does not run Effect.
-    assert.deepEqual(plain(byV.runSync(db, { v: exactRows[0]!.v })), [{ id: 1, v: BigInt("9007199254740993") }], "better-sqlite3: the BIGINT's value as a parameter");
+    assert.deepEqual(plain(byV.runSync(db, { v: row.v })), [{ id: 1, v: BigInt("9007199254740993") }], "better-sqlite3: the BIGINT's value as a parameter");
     db.close();
   });
   await forEachFixtureInOrder([false, true], async (readBigInts) => {

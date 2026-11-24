@@ -19,7 +19,7 @@ import { pathToFileURL } from "node:url";
 import { differences, sqliteDefault } from '#reylo-source/fresh.ts';
 import type { Fresh } from '#reylo-source/fresh.ts';
 import { sqlModule } from "#reylo-source/loader.ts";
-import { DRIVERS, INDEX, closeSessions } from "./helpers.ts";
+import { DRIVERS, INDEX, closeSessions, requireFixtureValue } from "./helpers.ts";
 
 // The schema freshness check compares the facts a built SQLite query read against the current schema.
 const tursoLive = existsSync(join(DRIVERS, "@tursodatabase", "database")) ? false : "lab/drivers is not installed";
@@ -125,7 +125,9 @@ test("SQLite on Turso's engine: a query built on node:sqlite runs, whose types T
   const db = await connect(file);
   try {
     const read = await built(root, url, "read", "select id, email, n, ok from users order by id");
-    const facts = JSON.parse(/"rows":(\[\[.*?\]\]),"inserts"/.exec(readFileSync(join(root, "read.mjs"), "utf8"))![1]!) as string[][];
+    const builtSource = readFileSync(join(root, "read.mjs"), "utf8");
+    const rowShape = requireFixtureValue(/"rows":(\[\[.*?\]\]),"inserts"/.exec(builtSource));
+    const facts = JSON.parse(requireFixtureValue(rowShape[1])) as string[][];
     assert.deepEqual(facts.map((r) => r[2]), ["TEXT", "INTEGER", "bigInt", "boolean"], "the facts node:sqlite gave the build, the names it knows upper-cased");
     assert.deepEqual((await db.prepare("select type from pragma_table_xinfo('users')").all()).map((r: { type: string }) => r.type), ["integer", "text", "bigInt", "boolean"], "the control: Turso's engine gives each type as declared");
     // A column declared BIGINT, in any case, is a BigInt.

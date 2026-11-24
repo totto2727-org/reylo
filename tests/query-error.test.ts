@@ -9,7 +9,7 @@ import { join } from "node:path";
 import { defineQuery } from '#reylo-source/index.ts';
 import type { MysqlClient, MysqlCode, MysqlQueryError, PostgresClient, PostgresCondition, PostgresQueryError, Query, SqliteCode, SqliteQueryError } from '#reylo-source/index.ts';
 import { readQueryError, readQueryErrorSync } from "#reylo-source/query-error.ts";
-import { promiseDriverStub } from "./helpers.ts";
+import { promiseDriverStub, requireFixtureValue } from "./helpers.ts";
 
 // `.try()` and the database's error it reads from each driver's own (src/query-error.ts). The
 // Drivers' errors below are the ones each throws, measured on the real package (lab/driver-matrix
@@ -77,7 +77,7 @@ test("Postgres: the error each driver throws reads as one, with the server's fie
       continue;
     }
     assert.deepEqual(fields(read), expected, label);
-    assert.equal(read!.cause, error, label);
+    assert.equal(requireFixtureValue(read).cause, error, label);
   }
 });
 
@@ -144,7 +144,7 @@ test("MySQL: the error each driver throws reads as one, named from MySQL's own l
       continue;
     }
     assert.deepEqual(fields(read), expected, label);
-    assert.equal(read!.cause, error, label);
+    assert.equal(requireFixtureValue(read).cause, error, label);
   }
 });
 
@@ -187,7 +187,7 @@ test("SQLite: the error each driver throws reads as one, its most specific code 
       return;
     }
     assert.deepEqual(fields(read), expected, label);
-    assert.equal(read!.cause, error, label);
+    assert.equal(requireFixtureValue(read).cause, error, label);
   });
 });
 

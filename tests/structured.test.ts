@@ -16,7 +16,7 @@ import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { Session } from "#reylo-source/analyze.ts";
 import { sqlModule } from "#reylo-source/loader.ts";
-import { DRIVERS, INDEX, closeSessions, plain } from "./helpers.ts";
+import { DRIVERS, INDEX, closeSessions, plain, requireFixtureValue } from "./helpers.ts";
 
 // Structured parameters (wiki/structured-params.md): a parameter cast to `rows(…)` or `row(…)` is
 // Typed by its column list and written for its position; the run time checks each value, and a key
@@ -66,7 +66,7 @@ test("SQLite: an insert's rows are checked and written in their order, a key lef
   try {
     const a = await analysis(root, url, insert);
     assert.deepEqual(a.params.map((parameter) => [parameter.name, parameter.type_name]), [["events", "rows"]]);
-    const events = a.params[0]!.type;
+    const events = requireFixtureValue(a.params[0]).type;
     assert.ok(events.kind === "rows");
     assert.deepEqual(events.fields.map((field) => [field.name, field.type.kind === "scalar" ? field.type.name : field.type.kind, field.nullable, field.optional]), [["id", "integer", false, false], ["ts", "text", false, false], ["status", "text", false, true], ["amount", "real", true, true], ["meta", "json", true, true]]);
     const q = await built(root, url, "insert_events", insert);
@@ -114,12 +114,12 @@ test("SQLite: rows that leave out different keys go in one insert, each such row
     // A key left out takes the default; a key given as null is NULL; the bare identifier `member` is the string SQLite stores.
     assert.deepEqual(stored.map((r) => [r.id, r.email, r.role, r.nick, r.n, r.tn]), [[1, null, "member", "member", 7, "integer"], [100, null, "admin", "g", 1, "integer"], [101, null, "member", null, null, "null"]]);
     // An expression default runs per row, current_timestamp once per statement, as the database's own.
-    assert.equal(stored[1]!.token, "given");
-    assert.match(String(stored[0]!.token), /^[0-9a-f]{16}$/u);
-    assert.match(String(stored[2]!.token), /^[0-9a-f]{16}$/u);
-    assert.notEqual(stored[0]!.token, stored[2]!.token);
-    assert.equal(stored[0]!.at, stored[2]!.at);
-    assert.match(String(stored[0]!.at), /^\d{4}-\d\d-\d\d \d\d:\d\d:\d\d$/u);
+    assert.equal(requireFixtureValue(stored[1]).token, "given");
+    assert.match(String(requireFixtureValue(stored[0]).token), /^[0-9a-f]{16}$/u);
+    assert.match(String(requireFixtureValue(stored[2]).token), /^[0-9a-f]{16}$/u);
+    assert.notEqual(requireFixtureValue(stored[0]).token, requireFixtureValue(stored[2]).token);
+    assert.equal(requireFixtureValue(stored[0]).at, requireFixtureValue(stored[2]).at);
+    assert.match(String(requireFixtureValue(stored[0]).at), /^\d{4}-\d\d-\d\d \d\d:\d\d:\d\d$/u);
     // One row: the same.
     const one = await built(root, url, "insert_account", "insert into accounts :a::row(name text not null, role? text not null) returning role");
     assert.deepEqual(plain(await one.run(db, { a: { name: "Mary" } })), [{ role: "member" }]);
@@ -201,8 +201,8 @@ test("SQLite: the column list is checked against the table its insert writes, an
       const a = await analysis(root, url, sql);
       const d = a.diagnostics.filter((diagnostic) => diagnostic.code === 21);
       assert.equal(d.length, 1, `${sql}: ${JSON.stringify(a.diagnostics)}`);
-      assert.match(d[0]!.message, message);
-      assert.equal(sql.slice(d[0]!.start, d[0]!.start + d[0]!.length), at, sql);
+      assert.match(requireFixtureValue(d[0]).message, message);
+      assert.equal(sql.slice(requireFixtureValue(d[0]).start, requireFixtureValue(d[0]).start + requireFixtureValue(d[0]).length), at, sql);
       const file = join(root, "bad.sql");
       await writeFile(file, sql);
       await writeFile(join(root, ".env"), `DATABASE_URL=${url}\n`);

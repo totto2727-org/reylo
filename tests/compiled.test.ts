@@ -16,7 +16,7 @@ import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { sqlModule } from "#reylo-source/loader.ts";
 import { defineQuery } from "#reylo-source/index.ts";
-import { declarations, DRIVERS, INDEX, closeSessions } from "./helpers.ts";
+import { declarations, DRIVERS, INDEX, closeSessions, requireFixtureValue } from "./helpers.ts";
 
 // A query's `sql` is the statement as Reylo sends it to the database, the engine's compiled text,
 // And `raw` the file as written. Both are the module's exports too,
@@ -101,10 +101,10 @@ test("SQLite: `sql` is the compiled statement and `raw` the file, at run time an
     ]);
     // The query's doc comment is the statement as written; `sql` and `raw` carry none, so a hover
     // Over either shows its text once, as its type.
-    assert.ok(declared["get_user.sql"]!.includes("/**\n * ```sql\n * select id, name, email from users where id = :id\n * ```\n */\ndeclare const query:"), declared["get_user.sql"]!);
-    assert.equal(declared["get_user.sql"]!.split("/**").length, 2, declared["get_user.sql"]!);
+    assert.ok(requireFixtureValue(declared["get_user.sql"]).includes("/**\n * ```sql\n * select id, name, email from users where id = :id\n * ```\n */\ndeclare const query:"), declared["get_user.sql"]!);
+    assert.equal(requireFixtureValue(declared["get_user.sql"]).split("/**").length, 2, declared["get_user.sql"]!);
     // The parameters are one object type, with no tuple beside it.
-    const lines = declared["get_user.sql"]!.split("\n");
+    const lines = requireFixtureValue(declared["get_user.sql"]).split("\n");
     assert.ok(lines.includes("export type Params = { id: number };"), declared["get_user.sql"]!);
     assert.ok(!lines.some((line) => line.startsWith("export type Values")), declared["get_user.sql"]!);
     assert.match(lines.find((line) => line.startsWith("declare const query:"))!, /^declare const query: Query<\{ id: number \}, \{ id: number; name: string; email: string \| null \}, "maybeOne", "sqlite", QueryError> & /u);
@@ -129,7 +129,7 @@ test("SQLite: a statement that fires no trigger declares its QueryError narrowed
   const audited = "insert into audited (id) values (:id)\n";
   try {
     const declared = await declarations(root, { "insert_user.sql": insert, "insert_audited.sql": audited });
-    const queryError = (file: string): string | undefined => /^export type QueryError = ([\s\S]*?>);$/m.exec(declared[file]!)![1];
+    const queryError = (file: string): string | undefined => requireFixtureValue(/^export type QueryError = ([\s\S]*?>);$/m.exec(declared[file]!))[1];
     assert.equal(queryError("insert_user.sql"), [
       `import("@totto2727/reylo").SqliteQueryError<{`,
       `  "SQLITE_CONSTRAINT": { columns: readonly ["email"] | readonly ["id"] | readonly ["rowid"]; table: "users" };`,

@@ -18,7 +18,7 @@ import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { sqlModule } from "#reylo-source/loader.ts";
 import { reyloImport } from "#reylo-source/module-types.ts";
-import { closeSessions, declarations, INDEX, ROOT } from "./helpers.ts";
+import { closeSessions, declarations, INDEX, ROOT, requireFixtureValue } from "./helpers.ts";
 
 // A value nothing types inside JSON a statement builds is Json, exported by the runtime.
 const TSC = join(ROOT, "node_modules", "typescript", "bin", "tsc");
@@ -55,8 +55,8 @@ test("SQLite: untyped JSON values use Json through the content mapper, and JSON 
   };
   Object.entries(files).forEach(([name, text]) => {writeFileSync(join(root, name), text);});
   const declared = await declarations(root, files);
-  assert.deepEqual(declared["built.sql"]!.split("\n").slice(0, 3), [WITH_JSON, "export type Params = Record<never, never>;", "export type Row = { f: { k: Json; n: number } };"]);
-  assert.deepEqual(declared["plain.sql"]!.split("\n").slice(0, 3), [QUERY_ONLY, "export type Params = Record<never, never>;", "export type Row = { Json: { Json: number } };"]);
+  assert.deepEqual(requireFixtureValue(declared["built.sql"]).split("\n").slice(0, 3), [WITH_JSON, "export type Params = Record<never, never>;", "export type Row = { f: { k: Json; n: number } };"]);
+  assert.deepEqual(requireFixtureValue(declared["plain.sql"]).split("\n").slice(0, 3), [QUERY_ONLY, "export type Params = Record<never, never>;", "export type Row = { Json: { Json: number } };"]);
   await writeFile(join(root, "main.ts"), [
     `import type { Json } from "@totto2727/reylo";`,
     `import type { Row } from "./built.sql";`,

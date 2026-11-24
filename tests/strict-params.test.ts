@@ -12,7 +12,7 @@ import { DatabaseSync } from "node:sqlite";
 import { tmpdir } from "node:os";
 // oxlint-disable-next-line rules/no-node-imports -- The Nub integration fixtures use this built-in to resolve paths using the host platform's filesystem conventions.
 import { join } from "node:path";
-import { transform, DRIVERS } from "./helpers.ts";
+import { transform, DRIVERS, requireFixtureValue } from "./helpers.ts";
 
 // A parameter nothing in the statement types is error reylo12 in the type check unless the project
 // File says `strict_params: false`. The content
@@ -42,8 +42,8 @@ const CAST_TYPES = /export type Params = \{ a: number; b: number; c: string; d: 
 /** A JSON cast without a schema types its parameter as JSON, which is no `unknown`, so it is never flagged; the TypeScript type of any JSON value is `unknown` all the same. */
 const jsonCast = async function (url: string, json: string, driver?: string): Promise<void> {
   const out = await transform(project(url, undefined, driver), { "json.sql": json, "cast.sql": "select :x::text as x\n" });
-  assert.deepEqual(out["json.sql"]!.diagnostics, []);
-  assert.deepEqual(out["cast.sql"]!.diagnostics, []);
+  assert.deepEqual(requireFixtureValue(out["json.sql"]).diagnostics, []);
+  assert.deepEqual(requireFixtureValue(out["cast.sql"]).diagnostics, []);
 };
 
 // oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
@@ -56,27 +56,30 @@ test("SQLite: a parameter nothing types is an error by default, and strict_param
   // SQLite types no bare parameter in a select list: by default each is an error at its first use.
   const sql = { "bare.sql": "select :x as x, :y as y\n" };
   const strict = await transform(project(url, undefined), sql);
-  assert.deepEqual(strict["bare.sql"]!.diagnostics, [
+  assert.deepEqual(requireFixtureValue(strict["bare.sql"]).diagnostics, [
     { messageText: message(":x"), start: 7, length: 2, code: 12 },
     { messageText: message(":y"), start: 16, length: 2, code: 12 },
   ]);
   // A project file without the key takes the default too, and so does `strict_params: true`.
   for (const file of ["env: [.env]\n", "strict_params: true\n"]) {
-    assert.deepEqual((await transform(project(url, file), sql))["bare.sql"]!.diagnostics.map((diagnostic) => diagnostic.code), [12, 12], file);
+    const output = await transform(project(url, file), sql);
+    const { diagnostics } = requireFixtureValue(output["bare.sql"]);
+    assert.deepEqual(diagnostics.map((diagnostic) => diagnostic.code), [12, 12], file);
   }
   // A project whose file is `.reylo.yml` is told to set the key there, not in a `.reylo.yaml` it lacks.
   const yml = await transform(project(url, "strict_params: true\n", undefined, ".reylo.yml"), sql);
-  assert.deepEqual(yml["bare.sql"]!.diagnostics.map((diagnostic) => diagnostic.messageText), [message(":x", ".reylo.yml"), message(":y", ".reylo.yml")]);
+  assert.deepEqual(requireFixtureValue(yml["bare.sql"]).diagnostics.map((diagnostic) => diagnostic.messageText), [message(":x", ".reylo.yml"), message(":y", ".reylo.yml")]);
   // `strict_params: false` keeps such a parameter `unknown`, with no error.
   const loose = await transform(project(url, "strict_params: false\n"), sql);
-  assert.deepEqual(loose["bare.sql"]!.diagnostics, []);
-  assert.match(loose["bare.sql"]!.text, /export type Params = \{ x: unknown; y: unknown \}/u);
+  assert.deepEqual(requireFixtureValue(loose["bare.sql"]).diagnostics, []);
+  assert.match(requireFixtureValue(loose["bare.sql"]).text, /export type Params = \{ x: unknown; y: unknown \}/u);
   // A statement the engine refused keeps its own error alone: a parameter written twice is untyped
   // Because the analysis stopped there.
   const repeated = await transform(project(url, undefined), { "repeated.sql": "select :q as a, :q as b\n" });
-  assert.deepEqual(repeated["repeated.sql"]!.diagnostics.map((diagnostic) => diagnostic.code), [3]);
+  assert.deepEqual(requireFixtureValue(repeated["repeated.sql"]).diagnostics.map((diagnostic) => diagnostic.code), [3]);
   // The cast the message suggests types it.
-  assert.deepEqual((await transform(project(url, undefined), { "cast.sql": "select :x::text as x\n" }))["cast.sql"]!.diagnostics, []);
+  const cast = await transform(project(url, undefined), { "cast.sql": "select :x::text as x\n" });
+  assert.deepEqual(requireFixtureValue(cast["cast.sql"]).diagnostics, []);
   await jsonCast(url, "select json_extract(:doc::json, '$.a') as a\n");
 });
 
@@ -92,12 +95,12 @@ test("SQLite: a parameter as a whole sort or group key is error reylo17 at the p
   const chosen = "select id, name from users order by case :sort::text when 'name' then name end, id\n";
   const out = await transform(project(url, undefined), { "sorted.sql": sorted, "grouped.sql": grouped, "chosen.sql": chosen });
   const why = "since a parameter is a value and not a column's name; choose the column with";
-  assert.deepEqual(out["sorted.sql"]!.diagnostics, [{ messageText: `order by :sort sorts every row by the same value, ${why} case :sort when 'name' then name end`, start: sorted.indexOf(":sort"), length: ":sort::text".length, code: 17 }]);
-  assert.match(out["sorted.sql"]!.text, /export type Params = \{ sort: string \}/u);
-  assert.match(out["sorted.sql"]!.text, /export type Row = \{ id: number; name: string \}/u);
+  assert.deepEqual(requireFixtureValue(out["sorted.sql"]).diagnostics, [{ messageText: `order by :sort sorts every row by the same value, ${why} case :sort when 'name' then name end`, start: sorted.indexOf(":sort"), length: ":sort::text".length, code: 17 }]);
+  assert.match(requireFixtureValue(out["sorted.sql"]).text, /export type Params = \{ sort: string \}/u);
+  assert.match(requireFixtureValue(out["sorted.sql"]).text, /export type Row = \{ id: number; name: string \}/u);
   // A parameter nothing else types stays unknown with no second error: the key is the one to fix.
-  assert.deepEqual(out["grouped.sql"]!.diagnostics.map((diagnostic) => [diagnostic.code, diagnostic.start, diagnostic.messageText]), [[17, grouped.indexOf(":g"), `group by :g puts every row in one group, ${why} case :g when 'name' then name end`]]);
-  assert.match(out["grouped.sql"]!.text, /export type Row = \{ n: number \}/u);
+  assert.deepEqual(requireFixtureValue(out["grouped.sql"]).diagnostics.map((diagnostic) => [diagnostic.code, diagnostic.start, diagnostic.messageText]), [[17, grouped.indexOf(":g"), `group by :g puts every row in one group, ${why} case :g when 'name' then name end`]]);
+  assert.match(requireFixtureValue(out["grouped.sql"]).text, /export type Row = \{ n: number \}/u);
   // The case the message suggests chooses the column with the parameter.
-  assert.deepEqual(out["chosen.sql"]!.diagnostics, []);
+  assert.deepEqual(requireFixtureValue(out["chosen.sql"]).diagnostics, []);
 });
