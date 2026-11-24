@@ -2,8 +2,7 @@
 import { test } from "node:test";
 // oxlint-disable-next-line rules/no-node-imports -- Nub's Node suite uses native assertions for driver, CLI, and protocol results.
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { access, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 // oxlint-disable-next-line rules/no-node-imports -- Exercise the native SQLite driver used by Reylo's Node runtime.
 import { DatabaseSync } from "node:sqlite";
 import { tmpdir } from "node:os";
@@ -67,18 +66,22 @@ test("withReylo turns Next's type check off for its own, and leaves both off whe
   assert.equal(off.compiler, undefined);
 });
 
-/** A Next.js app's directory with a SQLite database, a query and the TypeScript 7.1 of this repository. */
-const app = function (main: string): string {
-  const root = mkdtempSync(join(tmpdir(), "reylo-next-"));
-  writeFileSync(join(root, "package.json"), `{ "private": true, "type": "module" }`);
-  writeFileSync(join(root, ".env"), "DATABASE_URL=file:./app.db\n");
+/**
+ * Prepare a Next.js app with a SQLite query and this repository's TypeScript.
+ * @param {string} main - Source for the app's entry file.
+ * @returns {Promise<string>} The prepared project directory.
+ */
+const app = async function (main: string): Promise<string> {
+  const root = await mkdtemp(join(tmpdir(), "reylo-next-"));
+  await writeFile(join(root, "package.json"), `{ "private": true, "type": "module" }`);
+  await writeFile(join(root, ".env"), "DATABASE_URL=file:./app.db\n");
   const db = new DatabaseSync(join(root, "app.db"));
   db.exec("create table users (id integer primary key, name text not null)");
   db.close();
-  writeFileSync(join(root, "get_user.sql"), "select id, name from users where id = :id\n");
-  writeFileSync(join(root, "main.ts"), main);
-  writeFileSync(join(root, "next-env.d.ts"), "");
-  writeFileSync(
+  await writeFile(join(root, "get_user.sql"), "select id, name from users where id = :id\n");
+  await writeFile(join(root, "main.ts"), main);
+  await writeFile(join(root, "next-env.d.ts"), "");
+  await writeFile(
     join(root, "tsconfig.json"),
     JSON.stringify({
       compilerOptions: { target: "esnext", module: "nodenext", types: [], strict: true, noEmit: true, skipLibCheck: true, allowImportingTsExtensions: true },
@@ -86,9 +89,9 @@ const app = function (main: string): string {
       include: ["*.ts"],
     }),
   );
-  mkdirSync(join(root, "node_modules", "@totto2727"), { recursive: true });
-  symlinkSync(REPO, join(root, "node_modules", "@totto2727/reylo"));
-  symlinkSync(join(REPO, "node_modules", "typescript"), join(root, "node_modules", "typescript"));
+  await mkdir(join(root, "node_modules", "@totto2727"), { recursive: true });
+  await symlink(REPO, join(root, "node_modules", "@totto2727/reylo"));
+  await symlink(join(REPO, "node_modules", "typescript"), join(root, "node_modules", "typescript"));
   return root;
 };
 
@@ -107,12 +110,12 @@ test("the type check runs the content mapper after the project's own hook, and f
   });
 
   // Without --runExternalCode, `User` would be an error: the .sql import is TS2307.
-  const good = app(`${ROW}export const name: User["name"] = "ada";\n`);
+  const good = await app(`${ROW}export const name: User["name"] = "ada";\n`);
   await hook({ projectDir: good, distDir: join(good, ".next") });
   assert.deepEqual(order, ["project"]);
   assert.equal(printed.mock.callCount(), 0);
 
-  const bad = app(`${ROW}export const id: User["id"] = "one";\n`);
+  const bad = await app(`${ROW}export const id: User["id"] = "one";\n`);
   await assert.rejects(hook({ projectDir: bad, distDir: join(bad, ".next") }), /Failed to type check/u);
   const output = printed.mock.calls.map((call) => String(call.arguments[0])).join("\n");
   assert.match(output, /main\.ts\(3,14\): error TS2322: Type 'string' is not assignable to type 'number'\./u);
@@ -121,7 +124,7 @@ test("the type check runs the content mapper after the project's own hook, and f
 // oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
 test("on a first build the type check runs next typegen, which writes next-env.d.ts", async (testContext) => {
   testContext.mock.method(console, "log", () => {});
-  const root = app(`${ROW}export const name: User["name"] = "ada";\n`);
+  const root = await app(`${ROW}export const name: User["name"] = "ada";\n`);
   const next = join(root, "node_modules", "next");
   await mkdir(join(next, "dist", "bin"), { recursive: true });
   await writeFile(join(next, "package.json"), JSON.stringify({ name: "next", bin: { next: "./dist/bin/next" } }));
@@ -131,7 +134,7 @@ test("on a first build the type check runs next typegen, which writes next-env.d
   );
   await rm(join(root, "next-env.d.ts"));
   await afterCompile({})({ projectDir: root, distDir: join(root, ".next") });
-  assert.equal(readFileSync(join(root, "next-env.d.ts"), "utf8"), `// typegen ${root}\n`);
+  assert.equal(await readFile(join(root, "next-env.d.ts"), "utf8"), `// typegen ${root}\n`);
 });
 
 // oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
@@ -144,5 +147,5 @@ test("the type check refuses a TypeScript older than 7.1, which has no content m
     afterCompile({})({ projectDir: root, distDir: join(root, ".next") }),
     /needs TypeScript 7\.1 or later, whose content mappers type \.sql imports; the project has TypeScript 6\.0\.3/u,
   );
-  assert.equal(existsSync(join(root, "next-env.d.ts")), false);
+  await assert.rejects(access(join(root, "next-env.d.ts")), { code: "ENOENT" });
 });

@@ -2,8 +2,7 @@
 import { test } from "node:test";
 // oxlint-disable-next-line rules/no-node-imports -- Nub's Node suite uses native assertions for driver, CLI, and protocol results.
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, realpathSync, symlinkSync, writeFileSync } from "node:fs";
-import { readFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, realpath, symlink, writeFile } from "node:fs/promises";
 // oxlint-disable-next-line rules/no-node-imports -- Exercise the native SQLite driver used by Reylo's Node runtime.
 import { DatabaseSync } from "node:sqlite";
 import { tmpdir } from "node:os";
@@ -20,29 +19,30 @@ import { ROOT, languageServer } from "./helpers.ts";
 type Position = { line: number; character: number };
 type Range = { start: Position; end: Position };
 
-const project = function (): string {
-  const root = realpathSync(mkdtempSync(join(tmpdir(), "reylo-definition-")));
-  writeFileSync(join(root, "package.json"), `{ "type": "module" }`);
-  writeFileSync(join(root, ".env"), "DATABASE_URL=file:./app.db\n");
+const project = async function (): Promise<string> {
+  const temporary = await mkdtemp(join(tmpdir(), "reylo-definition-"));
+  const root = await realpath(temporary);
+  await writeFile(join(root, "package.json"), `{ "type": "module" }`);
+  await writeFile(join(root, ".env"), "DATABASE_URL=file:./app.db\n");
   const db = new DatabaseSync(join(root, "app.db"));
   db.exec("create table posts (id integer primary key, title text not null, body text)");
   db.close();
-  mkdirSync(join(root, "node_modules", "@totto2727"), { recursive: true });
-  symlinkSync(ROOT, join(root, "node_modules", "@totto2727/reylo"));
-  symlinkSync(join(ROOT, "packages", "sqlite"), join(root, "node_modules", "@totto2727", "reylo-sqlite"));
+  await mkdir(join(root, "node_modules", "@totto2727"), { recursive: true });
+  await symlink(ROOT, join(root, "node_modules", "@totto2727/reylo"));
+  await symlink(join(ROOT, "packages", "sqlite"), join(root, "node_modules", "@totto2727", "reylo-sqlite"));
   const compilerOptions = { target: "esnext", module: "nodenext", lib: ["esnext"], types: [], strict: true, noEmit: true, skipLibCheck: true, allowImportingTsExtensions: true, paths: { "@/*": ["./*"] } };
-  writeFileSync(join(root, "tsconfig.json"), JSON.stringify({ compilerOptions, contentMappers: [{ package: "@totto2727/reylo", extensions: [".sql"] }], include: ["main.ts"] }));
-  mkdirSync(join(root, "queries"));
-  writeFileSync(join(root, "queries", "posts.sql"), "\n-- every post after one\nselect id, title, body\nfrom posts\nwhere id > :after\n");
+  await writeFile(join(root, "tsconfig.json"), JSON.stringify({ compilerOptions, contentMappers: [{ package: "@totto2727/reylo", extensions: [".sql"] }], include: ["main.ts"] }));
+  await mkdir(join(root, "queries"));
+  await writeFile(join(root, "queries", "posts.sql"), "\n-- every post after one\nselect id, title, body\nfrom posts\nwhere id > :after\n");
   // SQLite's `@name` at the start of a line, which outside a code block TypeScript reads as a tag.
-  writeFileSync(join(root, "queries", "add_post.sql"), "insert into posts (title, body)\nvalues (\n  @title,\n  @body\n)\n");
-  writeFileSync(join(root, "main.ts"), `import posts from "@/queries/posts.sql";\nimport type { Row } from "@/queries/posts.sql";\nexport const query = posts;\nexport type Title = Row["title"];\nexport const sent = posts.sql;\nimport addPost from "@/queries/add_post.sql";\nexport const add = addPost;\n`);
+  await writeFile(join(root, "queries", "add_post.sql"), "insert into posts (title, body)\nvalues (\n  @title,\n  @body\n)\n");
+  await writeFile(join(root, "main.ts"), `import posts from "@/queries/posts.sql";\nimport type { Row } from "@/queries/posts.sql";\nexport const query = posts;\nexport type Title = Row["title"];\nexport const sent = posts.sql;\nimport addPost from "@/queries/add_post.sql";\nexport const add = addPost;\n`);
   return root;
 };
 
 // oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
 test("go-to-definition on a query, its import's path, its Row and a column opens the .sql file at its statement, and a hover shows its comment and statement", async () => {
-  const root = project();
+  const root = await project();
   const main = join(root, "main.ts");
   const text = await readFile(main, "utf8");
   const at = (needle: string, offset: number): Position => {
