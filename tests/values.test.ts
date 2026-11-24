@@ -1,7 +1,9 @@
+// oxlint-disable-next-line rules/no-node-imports, vitest/no-import-node-test -- Nub runs this suite with Node's test runner and provides the runtime used by the SQLite integration tests.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { DatabaseSync } from "node:sqlite";
-import { execute, type QueryModule } from "../src/execute.ts";
+import { execute } from '../src/execute.ts';
+import type { QueryModule } from '../src/execute.ts';
 import { renderParamType, renderType } from "../src/render.ts";
 import { typeSchema } from "../src/schema.ts";
 import { coerce, columnKind, DecodeError, duration, hstore, hstoreText, instant, kindType, postgresInterval, postgresYear, scalarKind, textDecoder } from "../src/values.ts";
@@ -9,18 +11,18 @@ import type { EngineType } from "../src/engine-type.ts";
 import type { Columns } from "../src/values.ts";
 
 // The one table (src/values.ts): the kind of each SQL type, the TypeScript type the module declares
-// for it, the JSON Schema of its JSON form, and the value the run time gives it, which must agree.
+// For it, the JSON Schema of its JSON form, and the value the run time gives it, which must agree.
 
 const scalar = (name: string): EngineType => ({ kind: "scalar", name });
 /** The TypeScript type a value is, as the declared type names it. */
-function typeOf(v: unknown): string {
-  if (v === null) return "null";
+const typeOf = function (v: unknown): string {
+  if (v === null) {return "null";}
   // No value Reylo returns is one.
-  if (v instanceof Date) return "Date";
-  if (v instanceof Uint8Array) return "Uint8Array";
-  if (Array.isArray(v)) return `${typeOf(v.find((x) => x !== null))}[]`;
+  if (v instanceof Date) {return "Date";}
+  if (v instanceof Uint8Array) {return "Uint8Array";}
+  if (Array.isArray(v)) {return `${typeOf(v.find((x) => x !== null))}[]`;}
   return typeof v;
-}
+};
 
 // A Postgres value's text, as the server writes it, for every type whose kind is not its text.
 const TEXTS: Record<string, string> = {
@@ -30,21 +32,22 @@ const TEXTS: Record<string, string> = {
   text: "hi", point: "(1,2)", int4range: "[1,5)", xid: "7", void: "",
 };
 
+// oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
 test("every Postgres type's decoded value is the type the module declares for it, and its JSON form is its schema's", () => {
-  for (const [name, text] of Object.entries(TEXTS)) {
+  Object.entries(TEXTS).forEach(([name, text]) => {
     const t = scalar(name);
     const kind = columnKind(t, "postgres");
     const value = textDecoder(kind)(text);
     const declared = renderType(t, false, "postgres");
     // A JSON value is any JSON, `Json`: what JSON.parse gives back.
-    if (declared === "Json") assert.deepEqual(JSON.parse(JSON.stringify(value)), value, name);
-    else if (declared !== "unknown") assert.equal(typeOf(value), declared, name);
+    if (declared === "Json") {assert.deepEqual(JSON.parse(JSON.stringify(value)), value, name);}
+    else if (declared !== "unknown") {assert.equal(typeOf(value), declared, name);}
     // The array of it, NULL elements null.
     const array: EngineType = { kind: "array", of: t };
     const values = textDecoder(columnKind(array, "postgres"))(`{${JSON.stringify(text)},NULL}`) as unknown[];
     assert.equal(values[1], null, name);
-    if (declared === "Json") assert.equal(renderType(array, false, "postgres"), "Json[]", name);
-    else if (declared !== "unknown") assert.equal(`(${typeOf(values[0])} | null)[]`, renderType(array, false, "postgres"), name);
+    if (declared === "Json") {assert.equal(renderType(array, false, "postgres"), "Json[]", name);}
+    else if (declared !== "unknown") {assert.equal(`(${typeOf(values[0])} | null)[]`, renderType(array, false, "postgres"), name);}
     // The value written as JSON, a BigInt as the integer it is, has the schema's JSON type.
     const schema = typeSchema(t, "postgres") as { type?: string | string[] };
     if (schema.type !== undefined) {
@@ -54,14 +57,15 @@ test("every Postgres type's decoded value is the type the module declares for it
       const jsonType = typeof json === "number" ? (Number.isInteger(json) ? ["integer", "number"] : ["number"]) : [typeof json];
       assert.ok([schema.type].flat().some((t) => jsonType.includes(t)), `${name}: ${JSON.stringify(json)} against ${JSON.stringify(schema)}`);
     }
-  }
+  });
 });
 
+// oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
 test("the representation, value by value", () => {
   const d = (name: string, text: string) => textDecoder(scalarKind(name, "postgres"))(text);
-  assert.equal(d("int8", "9007199254740993"), 9007199254740993n);
-  assert.equal(d("int8", "-9223372036854775808"), -9223372036854775808n);
-  assert.deepEqual(textDecoder(scalarKind("int8", "postgres") + "[]")("{1,NULL,9223372036854775807}"), [1n, null, 9223372036854775807n]);
+  assert.equal(d("int8", "9007199254740993"), BigInt("9007199254740993"));
+  assert.equal(d("int8", "-9223372036854775808"), -BigInt("9223372036854775808"));
+  assert.deepEqual(textDecoder(`${scalarKind("int8", "postgres")  }[]`)("{1,NULL,9223372036854775807}"), [BigInt("1"), null, BigInt("9223372036854775807")]);
   assert.equal(d("timestamptz", "2026-10-20 10:00:00.123456+02"), "2026-10-20T08:00:00.123456Z");
   assert.equal(d("numeric", "12345678901234567890.123456789"), "12345678901234567890.123456789");
   assert.equal(d("date", "2026-10-20"), "2026-10-20");
@@ -71,12 +75,13 @@ test("the representation, value by value", () => {
   assert.equal(d("interval", "1 year 2 mons"), "P1Y2M");
   assert.deepEqual(d("bytea", "\\x0102ff"), Buffer.from([1, 2, 255]));
   assert.deepEqual([...(d("bytea", "\\001\\\\x") as Uint8Array)], [1, 92, 120], "the escape format too");
-  assert.deepEqual(d("jsonb", '{"big":9007199254740993}'), { big: 9007199254740992 });
+  assert.deepEqual(d("jsonb", '{"big":9007199254740993}'), { big: 9_007_199_254_740_992 });
   assert.equal(d("bool", "f"), false);
   assert.ok(Number.isNaN(d("float8", "NaN") as number));
   assert.equal(d("float8", "-Infinity"), -Infinity);
 });
 
+// oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
 test("interval: an ISO 8601 duration with its sign in front, which Temporal reads, and each part signed where the parts' signs differ", () => {
   const Temporal = (globalThis as unknown as { Temporal: { Duration: { from(text: string): { toString(): string } } } }).Temporal;
   // Postgres's text in IntervalStyle postgres, Reylo's value, and Postgres's own in iso_8601, as Postgres 18 writes them.
@@ -113,6 +118,7 @@ test("interval: an ISO 8601 duration with its sign in front, which Temporal read
   assert.equal(coerce("interval", "-1 days", "span"), "-P1D", "a driver's text, as Bun.sql gives it");
 });
 
+// oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
 test("date and timestamp: a year outside 0000 to 9999 in ISO 8601's extended form, as timestamptz's, which Temporal reads and a parameter takes back", () => {
   type PlainFrom = { from(text: string): { toString(): string } };
   const Temporal = (globalThis as unknown as { Temporal: { PlainDate: PlainFrom; PlainDateTime: PlainFrom } }).Temporal;
@@ -148,7 +154,7 @@ test("date and timestamp: a year outside 0000 to 9999 in ISO 8601's extended for
     assert.equal(postgresYear(iso), text.replace(" ", "T"), iso);
   }
   // A date past 999999 AD, which only Postgres's date reaches (5874897), keeps a sign before the
-  // digits it needs; Temporal holds no such date, and the parameter still reads it back.
+  // Digits it needs; Temporal holds no such date, and the parameter still reads it back.
   assert.equal(date("5874897-12-31"), "+5874897-12-31");
   assert.equal(date("1000000-01-01"), "+1000000-01-01");
   assert.equal(postgresYear("+5874897-12-31"), "5874897-12-31");
@@ -166,6 +172,7 @@ test("date and timestamp: a year outside 0000 to 9999 in ISO 8601's extended for
   assert.equal(coerce("timestamp", new Date("-000001-06-01T12:00:00Z"), "t"), "-000001-06-01T12:00:00");
 });
 
+// oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
 test("timestamptz: the instant's ISO 8601 text in UTC, the server's fraction kept, which new Date(text) gets wrong for BC, year 1 and offsets with seconds", () => {
   const Temporal = (globalThis as unknown as { Temporal: { Instant: { from(text: string): { toString(): string; epochNanoseconds: bigint } } } }).Temporal;
   for (const [text, iso] of [
@@ -202,64 +209,68 @@ test("timestamptz: the instant's ISO 8601 text in UTC, the server's fraction kep
   assert.equal(new Date("2026-10-20T03:03:00.123456-07:00").toISOString(), "2026-10-20T10:03:00.123Z");
 });
 
+// oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
 test("SQLite: the kinds, and a NUMERIC column of either", () => {
   assert.deepEqual(["integer", "real", "text", "blob", "numeric", "bool", "mystery"].map((n) => scalarKind(n, "sqlite")), ["int", "float", "text", "bytes", "int|float|text", "bool", "unknown"]);
   assert.deepEqual(["int", "int|float|text", "unknown", "bytes"].map(kindType), ["number", "number | string", "unknown", "Uint8Array"]);
 });
 
+// oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
 test("SQLite: a column declared BIGINT, INT8 or UNSIGNED BIG INT (the engine's int8) is a BigInt, as on Postgres and MySQL, and its parameter takes one back", () => {
   assert.equal(scalarKind("int8", "sqlite"), "int8");
   assert.equal(renderType(scalar("int8"), false, "sqlite"), "bigint");
   assert.equal(renderType(scalar("int8"), true, "sqlite"), "number", "inside a JSON document, the number SQLite writes");
   assert.equal(renderParamType(scalar("int8"), "sqlite"), "number | bigint");
-  assert.deepEqual(typeSchema(scalar("int8"), "sqlite"), { type: "integer", format: "int64" }, "the BigInt, as the JSON integer it is");
+  assert.deepEqual(typeSchema(scalar("int8"), "sqlite"), { format: "int64", type: "integer" }, "the BigInt, as the JSON integer it is");
   assert.deepEqual(typeSchema(scalar("int8"), "sqlite"), typeSchema(scalar("int8"), "postgres"));
   // Inside a document a non-finite float or decimal is the text Postgres writes; MySQL stores none.
-  assert.deepEqual(typeSchema(scalar("float8"), "postgres", false, true), { anyOf: [{ type: "number", format: "double" }, { enum: ["NaN", "Infinity", "-Infinity"] }] });
-  assert.deepEqual(typeSchema(scalar("numeric"), "mysql", false, true), { type: "number", format: "decimal" });
-  assert.deepEqual(typeSchema(scalar("interval"), "postgres", false, true), { type: "string", description: "pg type interval" }, "inside a document, Postgres's own text");
-  assert.deepEqual(typeSchema(scalar("int8"), "sqlite", true), { type: "integer", format: "int64" }, "a parameter");
+  assert.deepEqual(typeSchema(scalar("float8"), "postgres", false, true), { anyOf: [{ format: "double", type: "number" }, { enum: ["NaN", "Infinity", "-Infinity"] }] });
+  assert.deepEqual(typeSchema(scalar("numeric"), "mysql", false, true), { format: "decimal", type: "number" });
+  assert.deepEqual(typeSchema(scalar("interval"), "postgres", false, true), { description: "pg type interval", type: "string" }, "inside a document, Postgres's own text");
+  assert.deepEqual(typeSchema(scalar("int8"), "sqlite", true), { format: "int64", type: "integer" }, "a parameter");
 });
 
+// oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
 test("SQLite: a BIGINT column on node:sqlite exact past 2^53 beside an INTEGER read as a number, whatever the database's setting; on the drivers that round, a BigInt within 2^53 and a rounded value refused", async () => {
   for (const readBigInts of [false, true]) {
     const db = new DatabaseSync(":memory:", { readBigInts });
     db.exec("create table t (id integer primary key, n integer, big bigint); insert into t values (1, 5, 9007199254740993), (2, 6, -9007199254740993), (3, 7, null)");
     const q: QueryModule<"sqlite"> = { dialect: "sqlite", sql: "select id, n, big from t order by id", params: [], columns: [["id", "int"], ["n", "int"], ["big", "int8"]] };
-    assert.deepEqual(execute(db, q), [{ id: 1, n: 5, big: 9007199254740993n }, { id: 2, n: 6, big: -9007199254740993n }, { id: 3, n: 7, big: null }]);
+    assert.deepEqual(execute(db, q), [{ id: 1, n: 5, big: BigInt("9007199254740993") }, { id: 2, n: 6, big: -BigInt("9007199254740993") }, { id: 3, n: 7, big: null }]);
     // The failing control: the app's own statement at the database's setting, which without
-    // readBigInts refuses the value with an error that names no column.
+    // ReadBigInts refuses the value with an error that names no column.
     const own = () => ({ ...(db.prepare("select n, big from t where id = 1").get() as object) });
-    if (readBigInts) assert.deepEqual(own(), { n: 5n, big: 9007199254740993n });
-    else assert.throws(own, /^RangeError: Value is too large to be represented as a JavaScript number: 9007199254740993/);
+    if (readBigInts) {assert.deepEqual(own(), { n: BigInt("5"), big: BigInt("9007199254740993") });}
+    else {assert.throws(own, /^RangeError: Value is too large to be represented as a JavaScript number: 9007199254740993/);}
     db.close();
   }
   const q: QueryModule<"sqlite"> = { dialect: "sqlite", sql: "select n, big from t", params: [], columns: [["n", "int"], ["big", "int8"]] };
   const d1 = (results: unknown[]) => ({ batch: async () => [], prepare: () => ({ first: async () => null, bind: () => ({ all: async () => ({ results }) }) }) });
-  assert.deepEqual(await execute(d1([{ n: 5, big: 9007199254740991 }, { n: 6, big: -3 }]), q), [{ n: 5, big: 9007199254740991n }, { n: 6, big: -3n }]);
-  await assert.rejects(execute(d1([{ n: 5, big: 9007199254740992 }]), q) as Promise<unknown>, (e: Error) => e instanceof DecodeError && /^Column "big" is a 64-bit integer, and the driver already rounded its value to 9007199254740992/.test(e.message));
-  // libSQL under each intMode: a number, a BigInt or the digits.
+  assert.deepEqual(await execute(d1([{ n: 5, big: 9_007_199_254_740_991 }, { n: 6, big: -3 }]), q), [{ n: 5, big: BigInt("9007199254740991") }, { n: 6, big: -BigInt("3") }]);
+  await assert.rejects(execute(d1([{ n: 5, big: 9_007_199_254_740_992 }]), q) as Promise<unknown>, (e: Error) => e instanceof DecodeError && /^Column "big" is a 64-bit integer, and the driver already rounded its value to 9007199254740992/u.test(e.message));
+  // LibSQL under each intMode: a number, a BigInt or the digits.
   const libsql = (rows: unknown[]) => ({ execute: async () => ({ rows }), executeMultiple: async () => {} });
-  for (const big of [7, 7n, "7"]) assert.deepEqual(await execute(libsql([{ n: 5, big }]), q), [{ n: 5, big: 7n }], typeof big);
-  assert.deepEqual(await execute(libsql([{ n: 5, big: "9007199254740993" }]), q), [{ n: 5, big: 9007199254740993n }]);
+  for (const big of [7, BigInt("7"), "7"]) {assert.deepEqual(await execute(libsql([{ n: 5, big }]), q), [{ n: 5, big: BigInt("7") }], typeof big);}
+  assert.deepEqual(await execute(libsql([{ n: 5, big: "9007199254740993" }]), q), [{ n: 5, big: BigInt("9007199254740993") }]);
   // Bun.sql's SQLite, with safeIntegers or without.
   const bun = (rows: unknown[]) => ({ unsafe: async () => rows, commitDistributed: async () => {} });
-  assert.deepEqual(await execute(bun([{ n: 5, big: 9007199254740993n }]), q), [{ n: 5, big: 9007199254740993n }]);
-  await assert.rejects(execute(bun([{ n: 5, big: 9007199254740992 }]), q) as Promise<unknown>, /Column "big" is a 64-bit integer, and the driver already rounded/);
+  assert.deepEqual(await execute(bun([{ n: 5, big: BigInt("9007199254740993") }]), q), [{ n: 5, big: BigInt("9007199254740993") }]);
+  await assert.rejects(execute(bun([{ n: 5, big: 9_007_199_254_740_992 }]), q) as Promise<unknown>, /Column "big" is a 64-bit integer, and the driver already rounded/);
 });
 
+// oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
 test("coerce: a value a driver decoded, given its kind; an integer a number cannot hold is refused, naming the column", () => {
-  assert.equal(coerce("int8", 9007199254740993n, "c"), 9007199254740993n);
-  assert.equal(coerce("int8", "9007199254740993", "c"), 9007199254740993n, "a driver's exact text");
-  assert.equal(coerce("int8", 42, "c"), 42n);
-  assert.throws(() => coerce("int8", 9007199254740992, "big_id"), (e: Error) => e instanceof DecodeError && /^Column "big_id" is a 64-bit integer, and the driver already rounded its value to 9007199254740992/.test(e.message));
-  assert.deepEqual(coerce("int8[]", ["1", 2n], "c"), [1n, 2n]);
+  assert.equal(coerce("int8", BigInt("9007199254740993"), "c"), BigInt("9007199254740993"));
+  assert.equal(coerce("int8", "9007199254740993", "c"), BigInt("9007199254740993"), "a driver's exact text");
+  assert.equal(coerce("int8", 42, "c"), BigInt("42"));
+  assert.throws(() => coerce("int8", 9_007_199_254_740_992, "big_id"), (e: Error) => e instanceof DecodeError && /^Column "big_id" is a 64-bit integer, and the driver already rounded its value to 9007199254740992/u.test(e.message));
+  assert.deepEqual(coerce("int8[]", ["1", BigInt("2")], "c"), [BigInt("1"), BigInt("2")]);
   assert.equal(coerce("decimal", 1.5, "c"), "1.5");
   assert.equal(coerce("date", new Date("2026-10-20T00:00:00Z"), "c"), "2026-10-20");
   // Bun.sql decodes a date or timestamp before 1 AD as an Invalid Date (its infinities are ±Infinity):
-  // refused, never read as infinity.
+  // Refused, never read as infinity.
   for (const kind of ["date", "timestamp", "timestamptz", "timestamp|timestamptz"]) {
-    assert.throws(() => coerce(kind, new Date(Number.NaN), "born"), (e: Error) => e instanceof DecodeError && /^Column "born": the driver returned an Invalid Date/.test(e.message), kind);
+    assert.throws(() => coerce(kind, new Date(Number.NaN), "born"), (e: Error) => e instanceof DecodeError && /^Column "born": the driver returned an Invalid Date/u.test(e.message), kind);
   }
   assert.equal(coerce("timestamptz", Infinity, "c"), "infinity");
   assert.equal(coerce("timestamptz", -Infinity, "c"), "-infinity");
@@ -275,44 +286,47 @@ test("coerce: a value a driver decoded, given its kind; an integer a number cann
   assert.deepEqual(coerce("bytes", [1, 2], "c"), Uint8Array.of(1, 2), "D1's BLOB");
   assert.deepEqual(coerce("bytes", Uint8Array.of(3).buffer, "c"), Uint8Array.of(3), "libSQL's BLOB");
   assert.deepEqual(coerce("json", '{"a":1}', "c"), { a: 1 });
-  assert.equal(coerce("int", 9007199254740991n, "c"), 9007199254740991);
+  assert.equal(coerce("int", BigInt("9007199254740991"), "c"), 9_007_199_254_740_991);
   // The bounds, exactly: ±(2^53 - 1) is a number, ±2^53 refused.
-  assert.deepEqual([9007199254740991n, -9007199254740991n, 0n].map((v) => coerce("int", v, "n")), [9007199254740991, -9007199254740991, 0]);
-  for (const v of [9007199254740992n, -9007199254740992n, 2n ** 63n - 1n, -(2n ** 63n)]) assert.throws(() => coerce("int", v, "n"), DecodeError, String(v));
-  assert.throws(() => coerce("int", 9007199254740993n, "big_id"), (e: Error) => e instanceof DecodeError && /^Column "big_id" holds 9007199254740993, an integer past ±\(2\^53 - 1\)/.test(e.message));
-  assert.throws(() => coerce("int", 9007199254740992, "big_id"), /Column "big_id" holds an integer past ±\(2\^53 - 1\), which the driver already rounded to 9007199254740992/);
+  assert.deepEqual([BigInt("9007199254740991"), -BigInt("9007199254740991"), BigInt("0")].map((v) => coerce("int", v, "n")), [9_007_199_254_740_991, -9_007_199_254_740_991, 0]);
+  for (const v of [BigInt("9007199254740992"), -BigInt("9007199254740992"), BigInt("2") ** BigInt("63") - BigInt("1"), -(BigInt("2") ** BigInt("63"))]) {assert.throws(() => coerce("int", v, "n"), DecodeError, String(v));}
+  assert.throws(() => coerce("int", BigInt("9007199254740993"), "big_id"), (e: Error) => e instanceof DecodeError && /^Column "big_id" holds 9007199254740993, an integer past ±\(2\^53 - 1\)/.test(e.message));
+  assert.throws(() => coerce("int", 9_007_199_254_740_992, "big_id"), /Column "big_id" holds an integer past ±\(2\^53 - 1\), which the driver already rounded to 9007199254740992/);
   // A NUMERIC may hold a REAL past 2^53, which is no rounded integer.
   assert.equal(coerce("int|float|text", 1e20, "c"), 1e20);
   // A MySQL either: a BIGINT a BigInt, a DOUBLE a number, a DECIMAL its text.
-  assert.equal(coerce("int8|float|decimal", 1n, "c"), 1n);
+  assert.equal(coerce("int8|float|decimal", BigInt("1"), "c"), BigInt("1"));
   assert.equal(coerce("int8|float|decimal", 2.5, "c"), 2.5);
   assert.equal(coerce("int8|float|decimal", "1.10", "c"), "1.10");
 });
 
+// oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
 test("a truth value: 0 or 1 in every form a driver gives it, and any other value refused, naming the column", () => {
-  for (const v of [true, 1, 1n, "1", "t", "true", Uint8Array.of(1)]) assert.equal(coerce("bool", v, "c"), true, String(v));
-  for (const v of [false, 0, 0n, "0", "f", "false", Uint8Array.of(0)]) assert.equal(coerce("bool", v, "c"), false, String(v));
+  for (const v of [true, 1, BigInt("1"), "1", "t", "true", Uint8Array.of(1)]) {assert.equal(coerce("bool", v, "c"), true, String(v));}
+  for (const v of [false, 0, BigInt("0"), "0", "f", "false", Uint8Array.of(0)]) {assert.equal(coerce("bool", v, "c"), false, String(v));}
   // The failing control: a MySQL TINYINT(1) or a SQLite BOOLEAN holds any integer the database lets in.
-  for (const [v, shown] of [[2, "2"], [-1, "-1"], [255n, "255"], ["yes", '"yes"'], [0.5, "0.5"], [Uint8Array.of(2), "the bytes 0x02"]] as const) {
+  for (const [v, shown] of [[2, "2"], [-1, "-1"], [BigInt("255"), "255"], ["yes", '"yes"'], [0.5, "0.5"], [Uint8Array.of(2), "the bytes 0x02"]] as const) {
     assert.throws(() => coerce("bool", v, "active"), (e: Error) => e instanceof DecodeError && e.message.startsWith(`Column "active" is a boolean, stored as 0 or 1, and holds ${shown}, which is neither`), String(v));
   }
 });
 
+// oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
 test("the kinds: a BIGINT is a BigInt, and an integer a temporary table may widen to one is too; a timestamptz a string; no kind a Date", () => {
   assert.deepEqual(["int8", "int8|int4", "int4|int8", "int8|float8|numeric", "int4|int8|float8|numeric", "bool", "timestamptz"].map((n) => scalarKind(n, "mysql")), ["int8", "int8", "int8", "int8|float|decimal", "int|int8|float|decimal", "bool", "timestamptz"]);
   assert.deepEqual(["int8", "int8|int4", "int8|float8|numeric", "bool", "timestamptz", "date"].map((n) => kindType(scalarKind(n, "mysql"))), ["bigint", "bigint", "bigint | number | string", "boolean", "string", "string"]);
   assert.equal(renderType({ kind: "array", of: scalar("int8") }), "(bigint | null)[]");
   assert.equal(renderType(scalar("int8"), true), "number", "inside a JSON document, as the database writes it");
-  assert.deepEqual(typeSchema(scalar("int8"), "postgres"), { type: "integer", format: "int64" });
-  assert.deepEqual(typeSchema(scalar("int8"), "postgres", true), { type: ["integer", "string"], format: "int64" }, "a parameter, as every driver binds it");
-  assert.deepEqual(typeSchema(scalar("timestamptz"), "postgres"), { type: "string", format: "date-time" });
+  assert.deepEqual(typeSchema(scalar("int8"), "postgres"), { format: "int64", type: "integer" });
+  assert.deepEqual(typeSchema(scalar("int8"), "postgres", true), { format: "int64", type: ["integer", "string"] }, "a parameter, as every driver binds it");
+  assert.deepEqual(typeSchema(scalar("timestamptz"), "postgres"), { format: "date-time", type: "string" });
   assert.deepEqual(typeSchema(scalar("bool"), "mysql"), { type: "boolean" });
   assert.deepEqual(typeSchema(scalar("bool"), "sqlite"), { type: "boolean" });
-  assert.deepEqual(typeSchema(scalar("integer"), "sqlite"), { type: "integer", format: "int64" });
+  assert.deepEqual(typeSchema(scalar("integer"), "sqlite"), { format: "int64", type: "integer" });
   assert.deepEqual(typeSchema(scalar("numeric"), "sqlite"), { type: ["number", "string"] });
-  for (const kind of ["bool", "int", "float", "int8", "decimal", "text", "date", "timestamp", "timestamptz", "json", "bytes", "unknown"]) assert.notEqual(kindType(kind), "Date", kind);
+  for (const kind of ["bool", "int", "float", "int8", "decimal", "text", "date", "timestamp", "timestamptz", "json", "bytes", "unknown"]) {assert.notEqual(kindType(kind), "Date", kind);}
 });
 
+// oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
 test("SQLite: Reylo's own statement per database and text, with integers read as BigInts whatever the database's setting, and the app's statements unchanged", () => {
   const db = new DatabaseSync(":memory:", { readBigInts: true, returnArrays: true });
   db.exec("create table t (id integer primary key, n integer, r real, b blob, doc text, flag integer, x); insert into t values (1, 5, 1.5, x'0102', '{\"a\":1}', 1, 7), (2, 9007199254740993, null, null, null, 0, null), (3, 1, null, null, null, 2, null)");
@@ -321,26 +335,28 @@ test("SQLite: Reylo's own statement per database and text, with integers read as
   // A plain object, as on every other driver: node:sqlite's own rows have a null prototype.
   assert.deepEqual(row, { id: 1, n: 5, r: 1.5, b: Uint8Array.of(1, 2), doc: { a: 1 }, flag: true, x: 7 });
   // The failing control: the app's own statement keeps its database's settings.
-  assert.deepEqual(db.prepare("select n from t where id = 1").get(), [5n]);
-  assert.throws(() => execute(db, q, { id: 2 }), (e: Error) => e instanceof DecodeError && e instanceof TypeError && /^Column "n" holds 9007199254740993/.test(e.message));
+  assert.deepEqual(db.prepare("select n from t where id = 1").get(), [BigInt("5")]);
+  assert.throws(() => execute(db, q, { id: 2 }), (e: Error) => e instanceof DecodeError && e instanceof TypeError && /^Column "n" holds 9007199254740993/u.test(e.message));
   // A boolean column holding 2, which SQLite lets in: refused, naming it.
   assert.throws(() => execute(db, q, { id: 3 }), /^TypeError: Column "flag" is a boolean, stored as 0 or 1, and holds 2/);
   // A query defined by hand: integers exact, nothing else known.
   const [bare] = execute(db, { dialect: "sqlite", sql: "select n, doc from t where id = 1", params: [] }) as Record<string, unknown>[];
-  assert.deepEqual(bare, { n: 5, doc: '{"a":1}' });
+  assert.deepEqual(bare, { doc: '{"a":1}', n: 5 });
 });
 
+// oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
 test("SQLite: the asynchronous drivers' rows normalized: libSQL's BigInt, string and ArrayBuffer, D1's array, a rounded integer refused", async () => {
   const q: QueryModule<"sqlite"> = { dialect: "sqlite", sql: "select n, b, doc from t", params: [], columns: [["n", "int"], ["b", "bytes"], ["doc", "json"]] };
   const libsql = (rows: unknown[]) => ({ execute: async () => ({ rows }), executeMultiple: async () => {} });
-  assert.deepEqual(await execute(libsql([{ n: 5n, b: Uint8Array.of(1).buffer, doc: "[1]" }]), q), [{ n: 5, b: Uint8Array.of(1), doc: [1] }]);
-  assert.deepEqual(await execute(libsql([{ n: "5", b: null, doc: null }]), q), [{ n: 5, b: null, doc: null }], "intMode: string");
-  const d1 = { batch: async () => [], prepare: () => ({ first: async () => null, bind: () => ({ all: async () => ({ results: [{ n: 9007199254740992, b: [1, 2], doc: "{}" }] }) }) }) };
+  assert.deepEqual(await execute(libsql([{ n: BigInt("5"), b: Uint8Array.of(1).buffer, doc: "[1]" }]), q), [{ n: 5, b: Uint8Array.of(1), doc: [1] }]);
+  assert.deepEqual(await execute(libsql([{ n: "5", b: null, doc: null }]), q), [{ b: null, doc: null, n: 5 }], "intMode: string");
+  const d1 = { batch: async () => [], prepare: () => ({ first: async () => null, bind: () => ({ all: async () => ({ results: [{ n: 9_007_199_254_740_992, b: [1, 2], doc: "{}" }] }) }) }) };
   await assert.rejects(execute(d1, q) as Promise<unknown>, /Column "n" holds an integer past .* already rounded/);
   const ok = { ...d1, prepare: () => ({ first: async () => null, bind: () => ({ all: async () => ({ results: [{ n: 1, b: [1, 2], doc: "{}" }] }) }) }) };
   assert.deepEqual(await execute(ok, q), [{ n: 1, b: Uint8Array.of(1, 2), doc: {} }]);
 });
 
+// oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
 test("SQLite: a value its column's type does not allow, which a table that is not STRICT stores, refused naming the column; a NUMERIC's text, an untyped column's BLOB and an INTEGER column's REAL kept", async () => {
   const db = new DatabaseSync(":memory:");
   db.exec(`create table loose (id integer primary key, n integer, r real, s text, b blob, big bigint, z numeric, x);
@@ -348,7 +364,7 @@ test("SQLite: a value its column's type does not allow, which a table that is no
       (4, null, 'xyz', null, null, null, null, null), (5, null, null, x'0203', null, null, null, null), (6, null, null, null, 'plain', null, null, null), (7, null, null, null, 5, null, null, null),
       (8, null, null, null, null, 1.5, null, null), (9, null, null, null, null, 'x', null, null), (10, null, null, null, null, null, x'01', null)`);
   const q: QueryModule<"sqlite"> = { dialect: "sqlite", sql: "select n, r, s, b, big, z, x from loose where id = :id", params: ["id"], columns: [["n", "int"], ["r", "float"], ["s", "text"], ["b", "bytes"], ["big", "int8"], ["z", "int|float|text"], ["x", "unknown"]] };
-  assert.deepEqual(execute(db, q, { id: 1 }), [{ n: 1.5, r: 2, s: "hi", b: Uint8Array.of(1), big: 9007199254740993n, z: "abc", x: Uint8Array.of(2) }]);
+  assert.deepEqual(execute(db, q, { id: 1 }), [{ n: 1.5, r: 2, s: "hi", b: Uint8Array.of(1), big: BigInt("9007199254740993"), z: "abc", x: Uint8Array.of(2) }]);
   const refusals: [number, RegExp][] = [
     [2, /^TypeError: Column "n" is typed number and holds the text "abc": outside a STRICT table SQLite stores a value of any type in any column.* Replace the value, or read what the column holds with cast\(n as text\)\.$/],
     [3, /^TypeError: Column "n" is typed number and holds a BLOB of 2 bytes/],
@@ -360,11 +376,11 @@ test("SQLite: a value its column's type does not allow, which a table that is no
     [9, /^TypeError: Column "big" is typed bigint and holds the text "x"/],
     [10, /^TypeError: Column "z" is typed number \| string and holds a BLOB of 1 byte:/],
   ];
-  for (const [id, refused] of refusals) assert.throws(() => execute(db, q, { id }), (e: Error) => e instanceof DecodeError && refused.test(String(e)), `row ${id}`);
+  for (const [id, refused] of refusals) {assert.throws(() => execute(db, q, { id }), (e: Error) => e instanceof DecodeError && refused.test(String(e)), `row ${id}`);}
   // The drivers that read integers as numbers or strings: libSQL's digits are its INTEGER, any other text in a number's column is refused, and so is D1's BLOB in a string's.
   const libsql = (rows: unknown[]) => ({ execute: async () => ({ rows }), executeMultiple: async () => {} });
   const ints: QueryModule<"sqlite"> = { dialect: "sqlite", sql: "select n, big, b from loose", params: [], columns: [["n", "int"], ["big", "int8"], ["b", "bytes"]] };
-  assert.deepEqual(await execute(libsql([{ n: "5", big: "9007199254740993", b: null }]), ints), [{ n: 5, big: 9007199254740993n, b: null }], "intMode: string");
+  assert.deepEqual(await execute(libsql([{ n: "5", big: "9007199254740993", b: null }]), ints), [{ n: 5, big: BigInt("9007199254740993"), b: null }], "intMode: string");
   await assert.rejects(execute(libsql([{ n: "abc", big: null, b: null }]), ints) as Promise<unknown>, /Column "n" is typed number and holds the text "abc"/);
   await assert.rejects(execute(libsql([{ n: 5, big: 1.5, b: null }]), ints) as Promise<unknown>, /Column "big" is typed bigint and holds the number 1.5/);
   await assert.rejects(execute(libsql([{ n: Uint8Array.of(1).buffer, big: null, b: null }]), ints) as Promise<unknown>, /Column "n" is typed number and holds a BLOB of 1 byte/);
@@ -373,12 +389,13 @@ test("SQLite: a value its column's type does not allow, which a table that is no
   await assert.rejects(execute(d1, { dialect: "sqlite", sql: "select s from loose", params: [], columns: [["s", "text"]] }) as Promise<unknown>, /Column "s" is typed string and holds a BLOB of 2 bytes/);
 });
 
+// oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
 test("mysql2: per-query options and Reylo's typeCast, never decimalNumbers; a DECIMAL and JSON as their text, a date's dropped fraction and its T, TIME's digits", async () => {
   let sent: Record<string, any> = {};
   const field = (type: string, text: string | null) => ({ type, string: () => text, buffer: () => (text === null ? null : Buffer.from(text)) });
   const pool = {
     query: async () => [[], []],
-    // mysql2 calls the typeCast once per value with the field and its own reading, and resolves to [rows, fields].
+    // Mysql2 calls the typeCast once per value with the field and its own reading, and resolves to [rows, fields].
     execute: async (options: Record<string, any>) => {
       sent = options;
       const cast = options.typeCast as (f: unknown, next: () => unknown) => unknown;
@@ -398,16 +415,17 @@ test("mysql2: per-query options and Reylo's typeCast, never decimalNumbers; a DE
   };
   const [row] = (await execute(pool as never, { dialect: "mysql", sql: "select 1", params: [] })) as Record<string, unknown>[];
   // A BIGINT's exact text a BigInt, by the result's own column type (LONGLONG).
-  assert.deepEqual(row, { amount: "1.100000000000000001", doc: { big: 9007199254740992 }, at: "2026-03-08T09:31:00.000", at6: "2026-03-08T09:31:00.123456", latest: "2026-03-08T09:31:00", t: "10:00:00.50", geo: Buffer.from("wkb"), big: 9007199254740993n });
+  assert.deepEqual(row, { amount: "1.100000000000000001", doc: { big: 9_007_199_254_740_992 }, at: "2026-03-08T09:31:00.000", at6: "2026-03-08T09:31:00.123456", latest: "2026-03-08T09:31:00", t: "10:00:00.50", geo: Buffer.from("wkb"), big: BigInt("9007199254740993") });
   assert.equal("decimalNumbers" in sent, false, "a per-query decimalNumbers poisons mysql2's parser cache for every pool");
   assert.equal("jsonStrings" in sent, false);
 });
 
+// oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
 test("mariadb: every option per query, metaAsArray off, a SET joined and a DATETIME's T; a GEOMETRY read as bytes only where a column may hold one", async () => {
   let sent: Record<string, any> = {};
   const meta = [{ name: () => "tags", type: "SET", isSet: () => true }, { name: () => "at", type: "DATETIME", isSet: () => false }, { name: () => "id", type: "INT", isSet: () => false }];
   const conn = { batch: async () => ({}), query: async (options: Record<string, any>) => ((sent = options), Object.assign([{ tags: ["x", "z"], at: "2026-03-08 09:31:00.000", id: 1 }], { meta })) };
-  assert.deepEqual([...((await execute(conn as never, { dialect: "mysql", sql: "select 1", params: [] })) as unknown[])], [{ tags: "x,z", at: "2026-03-08T09:31:00.000", id: 1 }]);
+  assert.deepEqual([...((await execute(conn as never, { dialect: "mysql", sql: "select 1", params: [] })) as unknown[])], [{ at: "2026-03-08T09:31:00.000", id: 1, tags: "x,z" }]);
   assert.equal(sent.metaAsArray, false);
   // A BIGINT mariadb's own BigInt, a DECIMAL its text, on mariadb 3 and mariadb 2 (supportBigInt, bigNumberStrings).
   assert.deepEqual([sent.bigIntAsNumber, sent.supportBigNumbers, sent.decimalAsNumber, sent.supportBigInt, sent.bigNumberStrings], [false, false, false, true, true]);
@@ -416,6 +434,7 @@ test("mariadb: every option per query, metaAsArray off, a SET joined and a DATET
   assert.equal(typeof sent.typeCast, "function");
 });
 
+// oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
 test("PlanetScale: Reylo's cast per query, the driver's own default with a DATETIME's T, over the app's", async () => {
   let cast: (field: { type: string; charset?: number }, value: string | null) => unknown = () => null;
   const conn = { execute: async (_: string, __?: unknown, options?: { cast: typeof cast }) => ((cast = options!.cast), { rows: [], statement: "" }) };
@@ -423,21 +442,23 @@ test("PlanetScale: Reylo's cast per query, the driver's own default with a DATET
   const bytes = (s: string) => String.fromCharCode(...Buffer.from(s, "utf8"));
   assert.deepEqual(
     [cast({ type: "INT64" }, "9007199254740993"), cast({ type: "DATETIME" }, "2026-03-08 09:31:00.000"), cast({ type: "DECIMAL" }, "1.10"), cast({ type: "JSON" }, bytes('{"é":1}')), cast({ type: "INT32" }, "7"), cast({ type: "FLOAT64" }, "2.2"), cast({ type: "VARBINARY", charset: 63 }, "\u0001ÿ"), cast({ type: "VARCHAR", charset: 255 }, bytes("é")), cast({ type: "INT64" }, null)],
-    [9007199254740993n, "2026-03-08T09:31:00.000", "1.10", { é: 1 }, 7, 2.2, Uint8Array.of(1, 255), "é", null],
+    [BigInt("9007199254740993"), "2026-03-08T09:31:00.000", "1.10", { é: 1 }, 7, 2.2, Uint8Array.of(1, 255), "é", null],
   );
 });
 
+// oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
 test("mariadb's callback API, whose rows carry no meta, and mariadb 2, whose columns have no isSet(): the module's kinds join a SET and give a DATETIME its T", async () => {
   const conn = {
     batch: () => ({}),
     query: (_: unknown, __: unknown, done: (e: Error | null, rows?: unknown, meta?: unknown) => void) => (setImmediate(() => done(null, [{ tags: ["x", "z"], at: "2026-03-08 09:31:00.000", id: 1 }], [{ name: () => "tags", type: "SET" }])), { on() {} }),
   };
   const q: QueryModule<"mysql"> = { dialect: "mysql", sql: "select 1", params: [], columns: [["tags", "text"], ["at", "timestamp"], ["id", "int"]] };
-  assert.deepEqual(await execute(conn as never, q), [{ tags: "x,z", at: "2026-03-08T09:31:00.000", id: 1 }]);
+  assert.deepEqual(await execute(conn as never, q), [{ at: "2026-03-08T09:31:00.000", id: 1, tags: "x,z" }]);
   // A query defined by hand: the callback's own meta.
-  assert.deepEqual(await execute(conn as never, { ...q, columns: undefined }), [{ tags: "x,z", at: "2026-03-08 09:31:00.000", id: 1 }]);
+  assert.deepEqual(await execute(conn as never, { ...q, columns: undefined }), [{ at: "2026-03-08 09:31:00.000", id: 1, tags: "x,z" }]);
 });
 
+// oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
 test("runSync refuses a client whose prepared statement answers through a promise, which run awaits", async () => {
   const db = { prepare: () => ({ all: async () => [{ n: 1 }] }) };
   const q: QueryModule<"sqlite"> = { dialect: "sqlite", sql: "select 1 as n", params: [], columns: [["n", "int"]] };
@@ -446,6 +467,7 @@ test("runSync refuses a client whose prepared statement answers through a promis
   assert.throws(() => executeSync(db as never, { ...q, sql: "select 2 as n" }), /answered with a promise/);
 });
 
+// oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
 test("mysql2: Reylo's typeCast only where it is needed, since mysql2 calls it for every value: a JSON or unknown column, unknown columns, or the app's typeCast, decimalNumbers or jsonStrings", async () => {
   const sent: unknown[] = [];
   const pool = (connectionConfig: Record<string, unknown> | undefined) => ({ pool: connectionConfig && { config: { connectionConfig } }, query: async () => [[], []], execute: async (options: { typeCast: unknown }) => (sent.push(typeof options.typeCast === "function" ? "cast" : options.typeCast), [[], []]) });
@@ -461,20 +483,21 @@ test("mysql2: Reylo's typeCast only where it is needed, since mysql2 calls it fo
   assert.deepEqual(sent, [true, "cast", "cast", "cast", "cast", "cast", "cast", "cast"]);
 });
 
+// oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
 test("MySQL: a truth value is a boolean on every driver, whatever form it gives it in, and a BIGINT a BigInt; a TINYINT(1) holding 2 refused", async () => {
   const columns: Columns = [["done", "bool"], ["same", "bool"], ["one_bit", "bool"], ["n", "int8"], ["widened", "int8"], ["either", "int8|float|decimal"]];
   const q: QueryModule<"mysql"> = { dialect: "mysql", sql: "select 1", params: [], columns };
-  const expected = [{ done: true, same: false, one_bit: true, n: 9007199254740993n, widened: 7n, either: 2.5 }];
-  // mysql2: a TINYINT(1) a number, a comparison a BIGINT's text (bigNumberStrings), a BIT(1) a Buffer, an INT a temporary table may widen a number.
+  const expected = [{ done: true, same: false, one_bit: true, n: BigInt("9007199254740993"), widened: BigInt("7"), either: 2.5 }];
+  // Mysql2: a TINYINT(1) a number, a comparison a BIGINT's text (bigNumberStrings), a BIT(1) a Buffer, an INT a temporary table may widen a number.
   const mysql2Row = (done: unknown) => ({ done, same: "0", one_bit: Buffer.of(1), n: "9007199254740993", widened: 7, either: 2.5 });
   const fields = [["done", 1], ["same", 8], ["one_bit", 16], ["n", 8], ["widened", 3], ["either", 5]].map(([name, columnType]) => ({ name, columnType, decimals: 0 }));
   const mysql2 = (done: unknown) => ({ query: async () => [[], []], execute: async () => [[mysql2Row(done)], fields] });
   assert.deepEqual(await execute(mysql2(1) as never, q), expected);
   await assert.rejects(execute(mysql2(2) as never, q) as Promise<unknown>, /^TypeError: Column "done" is a boolean, stored as 0 or 1, and holds 2, which is neither/);
   // A query defined by hand: a BIGINT by the result's own type, a TINYINT(1) as it is.
-  assert.deepEqual(await execute(mysql2(2) as never, { ...q, columns: undefined }), [{ ...mysql2Row(2), same: 0n, n: 9007199254740993n }]);
-  // mariadb: a BIGINT its own BigInt, a BIT(1) a Buffer (bitOneIsBoolean off).
-  const mariadb = (done: unknown) => ({ batch: async () => ({}), query: async () => [{ done, same: 0n, one_bit: Buffer.of(1), n: 9007199254740993n, widened: 7, either: 2.5 }] });
+  assert.deepEqual(await execute(mysql2(2) as never, { ...q, columns: undefined }), [{ ...mysql2Row(2), same: BigInt("0"), n: BigInt("9007199254740993") }]);
+  // Mariadb: a BIGINT its own BigInt, a BIT(1) a Buffer (bitOneIsBoolean off).
+  const mariadb = (done: unknown) => ({ batch: async () => ({}), query: async () => [{ done, same: BigInt("0"), one_bit: Buffer.of(1), n: BigInt("9007199254740993"), widened: 7, either: 2.5 }] });
   assert.deepEqual([...((await execute(mariadb(1) as never, q)) as unknown[])], expected);
   await assert.rejects(execute(mariadb(-1) as never, q) as Promise<unknown>, /Column "done" is a boolean, stored as 0 or 1, and holds -1/);
   // PlanetScale: Reylo's cast, then the kinds.
@@ -492,6 +515,7 @@ test("MySQL: a truth value is a boolean on every driver, whatever form it gives 
   await assert.rejects(execute(bun(5) as never, q) as Promise<unknown>, /Column "done" is a boolean, stored as 0 or 1, and holds 5/);
 });
 
+// oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
 test("MySQL: a VECTOR is an array of its floats on every driver that reads one, and its parameter binds their text", async () => {
   const vector: EngineType = { kind: "array", of: scalar("float4"), nullable_items: false };
   assert.equal(columnKind(vector, "mysql"), "float[]");
@@ -504,7 +528,7 @@ test("MySQL: a VECTOR is an array of its floats on every driver that reads one, 
   const columns: Columns = [["v", "float[]"], ["vn", "float[]"]];
   const q: QueryModule<"mysql"> = { dialect: "mysql", sql: "select 1", params: [], columns };
   const expected = [{ v: floats, vn: null }];
-  // mysql2 3.x decodes the floats itself; mariadb and PlanetScale give the bytes.
+  // Mysql2 3.x decodes the floats itself; mariadb and PlanetScale give the bytes.
   const fields = [{ name: "v", columnType: 242, decimals: 0 }, { name: "vn", columnType: 242, decimals: 0 }];
   assert.deepEqual(await execute({ query: async () => [[], []], execute: async () => [[{ v: floats, vn: null }], fields] } as never, q), expected);
   assert.deepEqual(await execute({ query: async () => [[], []], execute: async () => [[{ v: Buffer.from(bytes), vn: null }], fields] } as never, q), expected);
@@ -517,7 +541,7 @@ test("MySQL: a VECTOR is an array of its floats on every driver that reads one, 
   assert.deepEqual(await execute(planetscale as never, q), expected);
   // A slice of a larger buffer, as a driver's row may be, reads from its own offset.
   assert.deepEqual(coerce("float[]", Buffer.concat([Buffer.of(9, 9, 9), bytes]).subarray(3), "v"), floats);
-  assert.throws(() => coerce("float[]", bytes.subarray(0, 5), "v"), (e: Error) => e instanceof DecodeError && /Column "v" is a VECTOR, whose value is 4 bytes per 32-bit float, and holds 5 bytes/.test(e.message));
+  assert.throws(() => coerce("float[]", bytes.subarray(0, 5), "v"), (e: Error) => e instanceof DecodeError && /Column "v" is a VECTOR, whose value is 4 bytes per 32-bit float, and holds 5 bytes/u.test(e.message));
   // A Postgres float4[] from Bun.sql is a Float32Array, which is not read as bytes.
   assert.deepEqual(coerce("float[]", new Float32Array([1, 2.5]), "v"), [1, 2.5]);
 
@@ -537,6 +561,7 @@ test("MySQL: a VECTOR is an array of its floats on every driver that reads one, 
   await assert.rejects(execute(fake, w, { v: [1, null] }) as Promise<unknown>, /^TypeError: Parameter "v" is an array whose elements may not be null, and the element at \[1\] is/);
 });
 
+// oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
 test("an hstore's text is an object of its keys, and an object goes back in as that text", () => {
   // As Postgres 17 writes hstore(array['a','q"uote','back\\slash','b c','x=>y','',','], array['1','v"','\\','sp ace',null,'empty','comma,']).
   const text = String.raw`""=>"empty", ","=>"comma,", "a"=>"1", "b c"=>"sp ace", "x=>y"=>NULL, "q\"uote"=>"v\"", "back\\slash"=>"\\"`;

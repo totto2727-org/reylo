@@ -1,6 +1,6 @@
 // The upstream engine's type model (engine/core/src/types.rs), apart from the engine's host so that the run time
-// and the modules a build writes can name it without Node's types: `src/execute.ts` reads a
-// parameter's type from a module's `inputs`.
+// And the modules a build writes can name it without Node's types: `src/execute.ts` reads a
+// Parameter's type from a module's `inputs`.
 export type EngineType =
   /** `name` lists two types or more (`int8|float8`) where the value is one or the other. */
   | { kind: "scalar"; name: string }
@@ -29,4 +29,5 @@ export type EngineType =
  * list), `enum`, `anyOf`, an array's `prefixItems`, `items` and `minItems`, and an object's
  * `properties`, `required` and `additionalProperties`, which it always states.
  */
-export type JsonSchema = boolean | { readonly [key: string]: unknown };
+// oxlint-disable-next-line typescript/consistent-indexed-object-style -- Keep numeric keys in keyof the public string index signature.
+export type JsonSchema = boolean | Readonly<{ [key: string]: unknown }>;

@@ -1,16 +1,16 @@
-// reylo's build-time half lives in the engine packages. Each one carries it as
+// Reylo's build-time half lives in the engine packages. Each one carries it as
 // `@totto2727/reylo-<database>/tooling` (src/tooling.ts), so that reylo itself holds the run time and the
-// entry points a project names: the build steps, the preload's worker, the content mapper and the
+// Entry points a project names: the build steps, the preload's worker, the content mapper and the
 // CLI. An entry point loads it the first time it runs, from the project's install first and then
-// from reylo's own, as the engine itself is found (src/engine.ts). Every engine package carries the
-// same code at reylo's version, so the first one installed serves a project of any database.
+// From reylo's own, as the engine itself is found (src/engine.ts). Every engine package carries the
+// Same code at reylo's version, so the first one installed serves a project of any database.
 //
 // The path is resolved when it is needed and loaded with a `require` of it, which no bundler
-// follows. A bundler that reads this file (Turbopack bundles the webpack loader; webpack parses it
-// for its build dependencies) follows an `import()` of a package's name, and fails the build where
-// that engine is not installed; an `import()` of a computed URL, which tsc wraps in a helper of its
-// own, Turbopack reports as a module it cannot resolve. A `require` loads an ES module that has no
-// top-level await, which scripts/build.ts checks of each `tooling.js`.
+// Follows. A bundler that reads this file (Turbopack bundles the webpack loader; webpack parses it
+// For its build dependencies) follows an `import()` of a package's name, and fails the build where
+// That engine is not installed; an `import()` of a computed URL, which tsc wraps in a helper of its
+// Own, Turbopack reports as a module it cannot resolve. A `require` loads an ES module that has no
+// Top-level await, which scripts/build.ts checks of each `tooling.js`.
 import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
@@ -38,7 +38,7 @@ export function tooling(from: string = process.cwd()): Promise<Tooling> {
     const loading = load(from);
     // A failure is not kept: an engine may be installed while the process runs.
     loading.catch(() => {
-      if (loaded === loading) loaded = undefined;
+      if (loaded === loading) {loaded = undefined;}
     });
     loaded = loading;
   }
@@ -48,7 +48,7 @@ export function tooling(from: string = process.cwd()): Promise<Tooling> {
 /** Closes the build steps' connections, where a build step has opened any. */
 export async function releaseConnections(): Promise<void> {
   const loading = loaded;
-  if (loading) await (await loading.catch(() => undefined))?.releaseConnections();
+  if (loading) {await (await loading.catch(() => undefined))?.releaseConnections();}
 }
 
 async function load(from: string): Promise<Tooling> {
@@ -75,7 +75,7 @@ async function load(from: string): Promise<Tooling> {
       return (require(path) as { default: Tooling }).default;
     }
   }
-  if (other) throw new Error(`reylo ${VERSION} runs with ${other.name} ${VERSION}, and the one installed is ${other.version ?? "of no version"} (${other.dir}): npm install -D ${other.name}@${VERSION}`);
+  if (other) {throw new Error(`reylo ${VERSION} runs with ${other.name} ${VERSION}, and the one installed is ${other.version ?? "of no version"} (${other.dir}): npm install -D ${other.name}@${VERSION}`);}
   throw new Error(`reylo's SQLite/HCL build steps are not installed: npm install -D @totto2727/reylo-sqlite`);
 }
 

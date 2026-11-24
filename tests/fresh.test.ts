@@ -1,19 +1,22 @@
+// oxlint-disable-next-line rules/no-node-imports, vitest/no-import-node-test -- Nub runs this suite with Node's test runner and provides the runtime used by the SQLite integration tests.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
+import { writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { DatabaseSync } from "node:sqlite";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
-import { differences, sqliteDefault, type Fresh } from "../src/fresh.ts";
+import { differences, sqliteDefault } from '../src/fresh.ts';
+import type { Fresh } from '../src/fresh.ts';
 import { sqlModule } from "../src/loader.ts";
 import { DRIVERS, INDEX, closeSessions } from "./helpers.ts";
 
 // The schema freshness check compares the facts a built SQLite query read against the current schema.
 const tursoLive = existsSync(join(DRIVERS, "@tursodatabase", "database")) ? false : "lab/drivers is not installed";
 
-function project(driver?: string): string {
+const project = function (driver?: string): string {
   const root = mkdtempSync(join(tmpdir(), "reylo-fresh-"));
   writeFileSync(join(root, "package.json"), "{}");
   if (driver) {
@@ -21,19 +24,20 @@ function project(driver?: string): string {
     symlinkSync(join(DRIVERS, driver), join(root, "node_modules", driver));
   }
   return root;
-}
+};
 
 /** A module built for `sql` and imported: each call gives a query object of its own, never checked yet. */
-async function built(root: string, url: string, name: string, sql: string) {
+const built = async function (root: string, url: string, name: string, sql: string) {
   const file = join(root, `${name}.sql`);
-  writeFileSync(file, sql);
-  writeFileSync(join(root, ".env"), `DATABASE_URL=${url}\n`);
+  await writeFile(file, sql);
+  await writeFile(join(root, ".env"), `DATABASE_URL=${url}\n`);
   const { code } = await sqlModule(file, sql);
   const out = join(root, `${name}.mjs`);
-  writeFileSync(out, code.replace(`from "@totto2727/reylo"`, `from ${JSON.stringify(INDEX)}`));
+  await writeFile(out, code.replace(`from "@totto2727/reylo"`, `from ${JSON.stringify(INDEX)}`));
   return (await import(`${pathToFileURL(out).href}?${Math.random()}`)).default;
-}
+};
 
+// oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
 test("a difference is a change: a column gone, retyped, made nullable or given a default, and a column an insert must now fill; rows of another shape check nothing", () => {
   const fresh: Fresh = {
     query: "…",
@@ -52,6 +56,7 @@ test("a difference is a change: a column gone, retyped, made nullable or given a
   assert.equal(differences(fresh, [["users", "id", "integer"]]), undefined);
 });
 
+// oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
 test("a default a structured insert copied is a fact by its text: changed, given or dropped, it fails the call; another column's default text is no fact", () => {
   const fresh: Fresh = {
     query: "…",
@@ -73,16 +78,18 @@ test("a default a structured insert copied is a fact by its text: changed, given
   assert.equal(differences(fresh, [["accounts", "role", "text", "true", "true"]]), undefined);
 });
 
+// oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
 test("a SQLite default is compared in one spelling, as node:sqlite and Turso's engine write the same one differently", () => {
   for (const [sqlite, turso] of [["member", "'member'"], ['"quoted"', "'quoted'"], ["lower(hex(randomblob(4)))", "(lower (hex (randomblob (4))))"], ["-7", "- 7"], ["current_timestamp", "CURRENT_TIMESTAMP"], ["true", "TRUE"], ["x'00ff'", "x'00ff'"], ["'it''s A b'", "'it''s A b'"]]) {
     assert.equal(sqliteDefault(sqlite!), sqliteDefault(turso!), `${sqlite} and ${turso}`);
   }
-  for (const [a, b] of [["'member'", "'Member'"], ["'a b'", "'ab'"], ["7", "-7"], ["member", "'guest'"]]) assert.notEqual(sqliteDefault(a!), sqliteDefault(b!), `${a} and ${b}`);
+  for (const [a, b] of [["'member'", "'Member'"], ["'a b'", "'ab'"], ["7", "-7"], ["member", "'guest'"]]) {assert.notEqual(sqliteDefault(a!), sqliteDefault(b!), `${a} and ${b}`);}
   const fresh: Fresh = { query: "…", rows: [["a", "role", "TEXT", "1", "1", "lower(hex(randomblob(4)))"]], inserts: ["a"], defaults: [["a", "role"]] };
   assert.deepEqual(differences(fresh, [["a", "role", "text", "1", "1", "(lower (hex (randomblob (4))))"]], "sqlite"), []);
   assert.equal(differences(fresh, [["a", "role", "text", "1", "1", "(lower (hex (randomblob (4))))"]], "postgres")?.length, 1);
 });
 
+// oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
 test("a SQLite type is compared without its case, as SQLite reads one; a Postgres or MySQL type exactly", () => {
   const fresh: Fresh = { query: "…", rows: [["t", "id", "INTEGER", "0", "1"], ["t", "n", "bigInt", "1", "0"]], inserts: [] };
   // SQLite's pragma_table_xinfo upper-cases a type name it knows; Turso's engine gives it as declared.
@@ -95,6 +102,7 @@ test("a SQLite type is compared without its case, as SQLite reads one; a Postgre
   assert.deepEqual(differences({ query: "…", rows: [["t", "x", "É", "0", "0"]], inserts: [] }, [["t", "x", "é", "0", "0"]], "sqlite"), ["t.x was É and is now é"]);
 });
 
+// oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
 test("SQLite on Turso's engine: a query built on node:sqlite runs, whose types Turso spells in lowercase, and a column it names, renamed, fails the call", { skip: tursoLive }, async () => {
   const require = createRequire(join(DRIVERS, "package.json"));
   const { connect } = await import(pathToFileURL(require.resolve("@tursodatabase/database")).href);
@@ -113,11 +121,11 @@ test("SQLite on Turso's engine: a query built on node:sqlite runs, whose types T
     assert.deepEqual(facts.map((r) => r[2]), ["TEXT", "INTEGER", "bigInt", "boolean"], "the facts node:sqlite gave the build, the names it knows upper-cased");
     assert.deepEqual((await db.prepare("select type from pragma_table_xinfo('users')").all()).map((r: { type: string }) => r.type), ["integer", "text", "bigInt", "boolean"], "the control: Turso's engine gives each type as declared");
     // A column declared BIGINT, in any case, is a BigInt.
-    assert.deepEqual(await read.run(db), [{ id: 1, email: "a@x", n: 7n, ok: true }]);
+    assert.deepEqual(await read.run(db), [{ id: 1, email: "a@x", n: BigInt("7"), ok: true }]);
     // A structured insert built on node:sqlite copies the defaults node:sqlite reads, which Turso
-    // writes again in its own spelling and evaluates the same, rows that leave out different keys included.
+    // Writes again in its own spelling and evaluates the same, rows that leave out different keys included.
     const insert = await built(root, url, "insert", "insert into accounts :a::rows(name text not null, role? text not null, tok? text not null, n integer) returning id, role, n");
-    assert.deepEqual(await insert.run(db, { a: [{ name: "Ada" }, { name: "Grace", role: "admin", tok: "t", n: null }] }), [{ id: 1, role: "member", n: -7 }, { id: 2, role: "admin", n: null }]);
+    assert.deepEqual(await insert.run(db, { a: [{ name: "Ada" }, { name: "Grace", role: "admin", tok: "t", n: null }] }), [{ id: 1, n: -7, role: "member" }, { id: 2, n: null, role: "admin" }]);
     const read2 = await built(root, url, "read2", "select id, email from users order by id");
     await db.exec("alter table users rename column email to mail");
     await assert.rejects(read2.run(db), /The database changed after read2\.sql was built: users\.email was TEXT not null and no longer exists\. Build it again/);
@@ -127,6 +135,7 @@ test("SQLite on Turso's engine: a query built on node:sqlite runs, whose types T
   }
 });
 
+// oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
 test("SQLite: a query whose columns changed fails, naming them; one whose table gained a column it does not name runs", async () => {
   const root = project();
   const db = new DatabaseSync(join(root, "app.db"));
@@ -135,7 +144,7 @@ test("SQLite: a query whose columns changed fails, naming them; one whose table 
   const url = "file:./app.db";
   try {
     const read = await built(root, url, "read", "select id, email from users order by id");
-    assert.deepEqual((await read.run(db)).map((r: object) => ({ ...r })), [{ id: 1, email: "a@x" }]);
+    assert.deepEqual((await read.run(db)).map((r: object) => ({ ...r })), [{ email: "a@x", id: 1 }]);
     // A column the statement does not name: no fact, so the query runs on.
     db.exec("alter table users add column bio text");
     const read2 = await built(root, url, "read2", "select id, email from users order by id");
@@ -147,6 +156,7 @@ test("SQLite: a query whose columns changed fails, naming them; one whose table 
     await assert.rejects(read3.run(db), /The database changed after read3\.sql was built: users\.email was TEXT not null and no longer exists\. Build it again/);
     const read4 = await built(root, url, "read4", "select id, name from users order by id");
     db.exec("alter table users rename column name to full_name");
+    // oxlint-disable-next-line rules/no-effect-runtime-run -- This test exercises Reylo's native synchronous query API, which does not run Effect.
     assert.throws(() => read4.runSync(db), /users\.name was TEXT and no longer exists/);
     // An insert's table that gains a column it must fill.
     const insert = await built(root, url, "insert", "insert into users (mail) values (:mail)");
@@ -158,6 +168,7 @@ test("SQLite: a query whose columns changed fails, naming them; one whose table 
   }
 });
 
+// oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
 test("SQLite: a default a structured insert copied, changed after the build, fails the call naming the table and the column", async () => {
   const root = project();
   const db = new DatabaseSync(join(root, "app.db"));

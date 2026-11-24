@@ -1,18 +1,22 @@
 // `reylo play`: the playground of reylo.dev/play on this machine, against the project's own
-// database. It serves the page and an API on 127.0.0.1: each statement the page or a caller sends
-// is analyzed as the type check analyzes a file (never run), and answered with its Params, Returns
-// and diagnostics by line and column (src/play-result.ts). The database is the one the type check
-// reads, and nothing else: a project that names none is told so, and pointed at reylo.dev/play.
+// Database. It serves the page and an API on 127.0.0.1: each statement the page or a caller sends
+// Is analyzed as the type check analyzes a file (never run), and answered with its Params, Returns
+// And diagnostics by line and column (src/play-result.ts). The database is the one the type check
+// Reads, and nothing else: a project that names none is told so, and pointed at reylo.dev/play.
 import { spawn } from "node:child_process";
 import { existsSync, readFileSync, statSync } from "node:fs";
-import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
+import { createServer } from 'node:http';
+import type { IncomingMessage, ServerResponse } from 'node:http';
 import { createRequire } from "node:module";
 import { dirname, extname, join, sep } from "node:path";
 import { styleText } from "node:util";
 import { Session } from "./analyze.ts";
 import type { Dialect } from "./engine.ts";
-import { catalog, CATALOG_QUERIES, type Catalog } from "./play-catalog.ts";
-import { playResult, type PlayResult } from "./play-result.ts";
+import { catalog, CATALOG_QUERIES } from './play-catalog.ts';
+import type { Catalog } from './play-catalog.ts';
+import { playResult } from './play-result.ts';
+import type { PlayResult } from './play-result.ts';
+import { hasObjectType, matchesNull, matchesNumber, matchesString, matchesUndefined } from "./native-predicates.ts";
 
 export const PLAY_USAGE = `Usage: reylo play [--port <n>] [--no-open]
 
@@ -42,7 +46,7 @@ const DEFAULT_PORT = 4983;
 
 export async function play(args: string[]): Promise<number> {
   const options = parseArgs(args);
-  if (typeof options === "string") {
+  if (matchesString(options)) {
     console.error(`reylo play: ${options}\n\n${PLAY_USAGE}`);
     return 2;
   }
@@ -58,9 +62,9 @@ export async function play(args: string[]): Promise<number> {
     return 1;
   }
   const { url, label, notice } = running;
-  if (notice) console.log(styleText("yellow", notice));
+  if (notice) {console.log(styleText("yellow", notice));}
   console.log(`${styleText("bold", "Reylo playground")} at ${styleText("cyan", url)}\n${styleText("dim", `${label}. The API: GET ${url}api/analyze?q=<sql>. Ctrl-C stops it.`)}`);
-  if (options.open) openBrowser(url);
+  if (options.open) {openBrowser(url);}
   await new Promise<void>((done) => {
     process.once("SIGINT", done);
     process.once("SIGTERM", done);
@@ -75,13 +79,13 @@ export type Playground = { url: string; label: string; notice?: string; close():
 export async function startPlay(options: { port?: number | undefined; cwd?: string; env?: Record<string, string | undefined> } = {}): Promise<Playground> {
   const cwd = options.cwd ?? process.cwd();
   const page = pageDir(cwd);
-  if (!page) throw new Error("the playground's page is not in this install of reylo; reinstall reylo.");
+  if (!page) {throw new Error("the playground's page is not in this install of reylo; reinstall reylo.");}
   const backend = await openBackend(cwd, options.env ?? process.env);
   const server = createServer((req, res) => {
     handle(req, res, backend, page, () => server.address()).catch((e: unknown) => send(res, 500, { error: (e as Error).message }));
   });
   const port = await listen(server, options.port);
-  if (port === undefined) {
+  if (matchesUndefined(port)) {
     await backend.close();
     throw new Error(`port ${options.port ?? DEFAULT_PORT} is in use; name another with --port.`);
   }
@@ -103,13 +107,13 @@ function parseArgs(args: string[]): { port?: number; open: boolean; help: boolea
     const a = args[i]!;
     const [flag, inline] = a.startsWith("--") && a.includes("=") ? [a.slice(0, a.indexOf("=")), a.slice(a.indexOf("=") + 1)] : [a, undefined];
     const value = () => inline ?? args[++i];
-    if (flag === "--help" || flag === "-h") out.help = true;
-    else if (flag === "--no-open") out.open = false;
+    if (flag === "--help" || flag === "-h") {out.help = true;}
+    else if (flag === "--no-open") {out.open = false;}
     else if (flag === "--port") {
       const n = Number(value());
-      if (!Number.isInteger(n) || n < 0 || n > 65535) return `--port takes a port number`;
+      if (!Number.isInteger(n) || n < 0 || n > 65_535) {return `--port takes a port number`;}
       out.port = n;
-    } else return `unknown argument ${a}`;
+    } else {return `unknown argument ${a}`;}
   }
   return out;
 }
@@ -117,11 +121,11 @@ function parseArgs(args: string[]): { port?: number; open: boolean; help: boolea
 /** The built page: in an installed reylo, `play/` beside its package.json; in this repository, dist/reylo/play/. */
 function pageDir(cwd: string): string | undefined {
   const candidates = [process.env.REYLO_PLAY_PAGE];
-  // reylo exports no package.json: its entry is resolved, and its directory found above it.
+  // Reylo exports no package.json: its entry is resolved, and its directory found above it.
   for (const from of [join(cwd, "noop.js"), import.meta.filename]) {
     try {
       let dir = dirname(createRequire(from).resolve("@totto2727/reylo"));
-      while (dir !== dirname(dir) && !existsSync(join(dir, "package.json"))) dir = dirname(dir);
+      while (dir !== dirname(dir) && !existsSync(join(dir, "package.json"))) {dir = dirname(dir);}
       candidates.push(join(dir, "play"));
     } catch {}
   }
@@ -145,7 +149,7 @@ async function databaseBackend(session: Session): Promise<Backend> {
   const { project } = session;
   const dialect = project.dialect;
   const schema = await session.schema();
-  if (schema.value === null || schema.fatal) throw new Error(schema.fatal ? schema.error! : session.cannotConnect(schema.error));
+  if (matchesNull(schema.value) || schema.fatal) {throw new Error(schema.fatal ? schema.error! : session.cannotConnect(schema.error));}
   const queries = CATALOG_QUERIES[dialect];
   const rows = async (sql: string | undefined) => (sql ? await session.query(sql).catch(() => []) : []);
   const cat = catalog(dialect, await rows(queries.tables), await rows(queries.functions), await rows(queries.types));
@@ -159,7 +163,7 @@ async function databaseBackend(session: Session): Promise<Backend> {
       const t = performance.now();
       const outcome = await session.analyze(sql, { store: false });
       const ms = performance.now() - t;
-      if (!outcome.ok) return playResult(sql, dialect, { error: { message: outcome.message, code: outcome.code } }, { width, ms });
+      if (!outcome.ok) {return playResult(sql, dialect, { error: { message: outcome.message, code: outcome.code } }, { width, ms });}
       let lexed;
       try {
         lexed = await session.lex(sql);
@@ -186,9 +190,9 @@ async function schemaDdl(dialect: Dialect, query: (sql: string) => Promise<unkno
       const tables = await query("select table_name, table_type from information_schema.tables where table_schema = database() order by table_type = 'VIEW', table_name");
       const out: string[] = [];
       for (const [name, type] of tables as [string, string][]) {
-        const [row] = await query(`show create ${type === "VIEW" ? "view" : "table"} \`${name.replace(/`/g, "``")}\``);
+        const [row] = await query(`show create ${type === "VIEW" ? "view" : "table"} \`${name.replace(/`/gu, "``")}\``);
         // A table's next AUTO_INCREMENT value is its data's, not its schema's.
-        out.push(`${String(row?.[1] ?? "").replace(/ AUTO_INCREMENT=\d+/, "")};`);
+        out.push(`${String(row?.[1] ?? "").replace(/ AUTO_INCREMENT=\d+/u, "")};`);
       }
       return out.join("\n\n");
     }
@@ -238,7 +242,7 @@ select ddl from (
 
 /** The schema as the page shows it where the database refuses to give it: each table's columns, as a CREATE TABLE writes them. */
 function schemaText(dialect: Dialect, cat: Catalog): string {
-  const q = (name: string) => (/^[a-z_][a-z0-9_]*$/.test(name) ? name : dialect === "mysql" ? `\`${name}\`` : `"${name.replace(/"/g, '""')}"`);
+  const q = (name: string) => (/^[a-z_][a-z0-9_]*$/u.test(name) ? name : dialect === "mysql" ? `\`${name}\`` : `"${name.replace(/"/gu, '""')}"`);
   return cat.tables
     .map((t) => {
       const width = Math.max(...t.columns.map((c) => q(c.name).length));
@@ -249,15 +253,15 @@ function schemaText(dialect: Dialect, cat: Catalog): string {
 
 function listen(server: ReturnType<typeof createServer>, port: number | undefined): Promise<number | undefined> {
   // A port the caller names is that port or nothing; the default moves up past ports in use.
-  const tries = port === undefined ? Array.from({ length: 20 }, (_, i) => DEFAULT_PORT + i) : [port];
+  const tries = matchesUndefined(port) ? Array.from({ length: 20 }, (_, i) => DEFAULT_PORT + i) : [port];
   return new Promise((done) => {
     const attempt = (i: number) => {
-      if (i >= tries.length) return done(undefined);
+      if (i >= tries.length) {return done(undefined);}
       server.once("error", (e: NodeJS.ErrnoException) => (e.code === "EADDRINUSE" ? attempt(i + 1) : done(undefined)));
       server.listen(tries[i], "127.0.0.1", () => {
         server.removeAllListeners("error");
         const address = server.address();
-        done(typeof address === "object" && address ? address.port : undefined);
+        done(hasObjectType(address) && address ? address.port : undefined);
       });
     };
     attempt(0);
@@ -268,13 +272,13 @@ const TYPES: Record<string, string> = { ".html": "text/html; charset=utf-8", ".j
 
 async function handle(req: IncomingMessage, res: ServerResponse, backend: Backend, page: string, address: () => ReturnType<ReturnType<typeof createServer>["address"]>): Promise<void> {
   const a = address();
-  const port = typeof a === "object" && a ? a.port : 0;
+  const port = hasObjectType(a) && a ? a.port : 0;
   // Only this machine's own pages and tools: a page on another site that sends a request here, or
-  // a DNS name rebound to 127.0.0.1, names another host or origin, and is refused, so no web page
-  // reads the schema through the playground.
+  // A DNS name rebound to 127.0.0.1, names another host or origin, and is refused, so no web page
+  // Reads the schema through the playground.
   const local = (host: string | undefined) => !!host && [`127.0.0.1:${port}`, `localhost:${port}`, `[::1]:${port}`].includes(host);
   const origin = req.headers.origin;
-  if (!local(req.headers.host) || (origin !== undefined && !local(origin.replace(/^http:\/\//, "")))) return send(res, 403, { error: "the playground answers this machine's own pages and tools only" });
+  if (!local(req.headers.host) || (!matchesUndefined(origin) && !local(origin.replace(/^http:\/\//u, "")))) {return send(res, 403, { error: "the playground answers this machine's own pages and tools only" });}
   const url = new URL(req.url ?? "/", `http://${req.headers.host}`);
 
   if (url.pathname === "/api/analyze") {
@@ -287,14 +291,14 @@ async function handle(req: IncomingMessage, res: ServerResponse, backend: Backen
       } catch {
         return send(res, 400, { error: "the body is not JSON" });
       }
-      sql = typeof body.sql === "string" ? body.sql : typeof body.q === "string" ? body.q : sql;
-      if (typeof body.width === "number") width = body.width;
-    } else if (req.method !== "GET") return send(res, 405, { error: "GET or POST" });
-    if (sql === null) return send(res, 400, { error: "name the query: ?q=<sql>, or a JSON body {\"sql\": \"<sql>\"}" });
+      sql = matchesString(body.sql) ? body.sql : matchesString(body.q) ? body.q : sql;
+      if (matchesNumber(body.width)) {width = body.width;}
+    } else if (req.method !== "GET") {return send(res, 405, { error: "GET or POST" });}
+    if (matchesNull(sql)) {return send(res, 400, { error: "name the query: ?q=<sql>, or a JSON body {\"sql\": \"<sql>\"}" });}
     return send(res, 200, await backend.analyze(sql, Number.isFinite(width) && width > 0 ? width : Infinity));
   }
-  if (url.pathname === "/api/schema") return send(res, 200, { dialect: backend.dialect, database: backend.label, ...backend.catalog });
-  if (url.pathname === "/api/page") return send(res, 200, { dialect: backend.dialect, label: backend.label, schema: backend.schema, catalog: backend.catalog });
+  if (url.pathname === "/api/schema") {return send(res, 200, { dialect: backend.dialect, database: backend.label, ...backend.catalog });}
+  if (url.pathname === "/api/page") {return send(res, 200, { dialect: backend.dialect, label: backend.label, schema: backend.schema, catalog: backend.catalog });}
 
   // The page's files; any other path is the page, which reads its query from the address.
   const file = url.pathname === "/" ? join(page, "index.html") : join(page, decodeURIComponent(url.pathname));
@@ -315,7 +319,7 @@ function readBody(req: IncomingMessage): Promise<string> {
     req.setEncoding("utf8");
     req.on("data", (chunk: string) => {
       text += chunk;
-      if (text.length > 1_000_000) req.destroy(new Error("the body is over a megabyte"));
+      if (text.length > 1_000_000) {req.destroy(new Error("the body is over a megabyte"));}
     });
     req.on("end", () => done(text));
     req.on("error", fail);
@@ -324,6 +328,6 @@ function readBody(req: IncomingMessage): Promise<string> {
 
 function openBrowser(url: string): void {
   const [command, args] = process.platform === "darwin" ? ["open", [url]] : process.platform === "win32" ? ["cmd", ["/c", "start", "", url]] : ["xdg-open", [url]];
-  spawn(command, args, { stdio: "ignore", detached: true }).on("error", () => {}).unref();
+  spawn(command, args, { detached: true, stdio: "ignore" }).on("error", () => {}).unref();
 }
 

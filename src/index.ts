@@ -1,16 +1,23 @@
+
 // The runtime query object behind `import query from "./file.sql"`.
 // Types come from the content mapper; values come from the runtime loader.
-import { compile, execute, executeSync, type ClientFor, type Dialect, type Inputs, type QueryModule, type SyncClientFor } from "./execute.ts";
+import { compile, execute, executeSync } from './execute.ts';
+import type { ClientFor, Dialect, Inputs, QueryModule, SyncClientFor } from './execute.ts';
 import type { StandardJSONSchemaV1, StandardTypedV1 } from "./standard.ts";
-import { standardQuery, type StandardQueryV1 } from "./standard-query.ts";
+import { standardQuery } from './standard-query.ts';
+import type { StandardQueryV1 } from './standard-query.ts';
 import type { Structured } from "./rows.ts";
 import type { Checks } from "./checks.ts";
 import type { Fresh } from "./fresh.ts";
-import { DecodeError, ParameterError, type Columns } from "./values.ts";
-import { readQueryError, readQueryErrorSync, type QueryError } from "./query-error.ts";
+import { DecodeError, ParameterError } from './values.ts';
+import type { Columns } from './values.ts';
+import { readQueryError, readQueryErrorSync } from './query-error.ts';
+import type { QueryError } from './query-error.ts';
 import { normalize } from "./decode-sqlite.ts";
 import { registerObjectDecoder } from "./query-metadata.ts";
-import { listening, type QueryTrace } from "./trace.ts";
+import { listening } from './trace.ts';
+import type { QueryTrace } from './trace.ts';
+import { hasObjectType, matchesNull, matchesString, matchesUndefined } from "./native-predicates.ts";
 
 export type { ClientFor, Dialect, Inputs, MysqlClient, PostgresClient, SqliteClient, SyncClientFor } from "./execute.ts";
 export type { QueryTrace } from "./trace.ts";
@@ -40,38 +47,38 @@ export type AsJson<T> = T extends bigint
   ? number
   : T extends Date | Uint8Array | { toJSON(): string }
   ? string
-  : T extends readonly (infer U)[]
+  : T extends Readonly<(infer U)[]>
     ? AsJson<U>[]
     : T extends object
       ? { [K in keyof T]: AsJson<T[K]> }
       : T;
 
-export type ReyloTypes<Params, Row, C extends Cardinality> = {
-  readonly element: Row;
-  readonly cardinality: C;
-  readonly json: Materialize<AsJson<Row>, C>;
-  readonly input: Params;
-};
+export type ReyloTypes<Params, Row, C extends Cardinality> = Readonly<{
+  element: Row;
+  cardinality: C;
+  json: Materialize<AsJson<Row>, C>;
+  input: Params;
+}>;
 
 /**
  * What `try` returns: the value, or the error the database raised. The other field is undefined,
  * so either can be read first, as `if (result.error)`; the shape is Standard Schema's result, with one
  * error where it has a list of issues.
  */
-export type TryResult<Value, E> = { readonly value: Value; readonly error?: undefined } | { readonly error: E; readonly value?: undefined };
+export type TryResult<Value, E> = Readonly<{ value: Value; error?: undefined }> | Readonly<{ error: E; value?: undefined }>;
 
 /** A query: its statement, its parameters and result types (`Params`, `Row`), and the error its database may raise (`E`). */
 export interface Query<Params, Row, C extends Cardinality, D extends Dialect, E = QueryError<D>>
   extends StandardTypedV1<Params, Materialize<Row, C>>, StandardJSONSchemaV1<Params, Materialize<Row, C>>, StandardQueryV1<Params, Materialize<Row, C>, D> {
   readonly dialect: D;
   // `sql` and `raw` carry no doc comment: each module declares them as their own text, which a
-  // hover shows. `sql` is the base text: a structured parameter (`::rows`, `::row`, src/rows.ts) in a
+  // Hover shows. `sql` is the base text: a structured parameter (`::rows`, `::row`, src/rows.ts) in a
   // MySQL insert has its column lists written again for the keys each call carries, and the
-  // statement Reylo sends ends with the comment naming its file, which `sql` leaves out.
+  // Statement Reylo sends ends with the comment naming its file, which `sql` leaves out.
   readonly sql: string;
   readonly raw: string;
   /** Parameter names in binding order. */
-  readonly params: readonly string[];
+  readonly params: Readonly<string[]>;
   /**
    * The `.sql` file the query was built from, relative to the project's root: a name for logs and
    * traces. Reylo's own errors about the query start with it. A query defined by hand has none.
@@ -117,20 +124,20 @@ export type QueryDefinition = {
   dialect: Dialect;
   /** The statement as written, Reylo's placeholders in place: the query's `raw`. */
   sql: string;
-  params: readonly string[];
+  params: Readonly<string[]>;
   /**
    * The statement as the engine compiled it for the database, the query's `sql`, and its binding
    * order: every build step puts them in the module. A query defined by hand without them is
    * compiled from `sql` by the run time's own lexer.
    */
   text?: string;
-  order?: readonly string[];
+  order?: Readonly<string[]>;
   /** Each parameter's type, by name, as the engine found it: every build step puts it in the module, and a driver that binds some values wrong gets them converted by it. */
   inputs?: Inputs;
   /** Each output column's name and kind (src/values.ts), in order: every build step puts them in the module, and the run time gives each value its kind by them. */
   columns?: Columns;
   /** Each structured parameter in a MySQL insert, with the lists of `text` the run time writes again for the keys a call carries (a Postgres or SQLite insert copies its defaults instead). */
-  structured?: readonly Structured[];
+  structured?: Readonly<Structured[]>;
   /** The catalog facts the statement relied on, which the run time checks before it runs (src/fresh.ts). */
   fresh?: Fresh;
   /** The `.sql` file, relative to the project's root and written with `/`: the query's `source`. Every build step puts it in the module. */
@@ -213,23 +220,24 @@ export function defineQuery<Params, Row, C extends Cardinality, D extends Dialec
         (value) => ({ value }),
         async (error) => {
           const read = await readQueryError(def.dialect, error);
-          if (read) return { error: read };
+          if (read) {return { error: read };}
           throw error;
         },
       )) as Query<Params, Row, C, D>["try"],
     trySync: ((client: SyncClientFor<D>, params?: Params) => {
       try {
+        // oxlint-disable-next-line rules/no-effect-runtime-run -- Reylo's public runSync executes SQLite through the native driver without Effect.
         return { value: query.runSync(client, ...([params] as ParamsArg<Params>)) };
       } catch (error) {
         const read = readQueryErrorSync(def.dialect, error);
-        if (read) return { error: read };
+        if (read) {return { error: read };}
         throw error;
       }
     }) as Query<Params, Row, C, D>["trySync"],
     with: ((client: ClientFor<D>) => (params?: Params) => run(client, params ?? ({} as Params))) as Query<Params, Row, C, D>["with"],
   };
   // `.run()`, `.try()` and the function `.with()` returns, published on the tracing channel as one
-  // call each (src/trace.ts).
+  // Call each (src/trace.ts).
   function run(client: ClientFor<D>, params: Params): Promise<Materialize<Row, C>> {
     const tracing = listening();
     return tracing ? tracing.tracePromise(() => runOnce(client, params), trace(client, params as Record<string, unknown>, false)) : runOnce(client, params);
@@ -238,7 +246,7 @@ export function defineQuery<Params, Row, C extends Cardinality, D extends Dialec
     return { query: query as unknown as QueryTrace["query"], client, params, sync };
   }
   // A synchronous client answers before run returns, but its rows and its error still come
-  // back through the promise, so run means the same on every client.
+  // Back through the promise, so run means the same on every client.
   function runOnce(client: ClientFor<D>, params: Params): Promise<Materialize<Row, C>> {
     try {
       const rows = execute(client, module, params as Record<string, unknown>);
@@ -253,43 +261,47 @@ export function defineQuery<Params, Row, C extends Cardinality, D extends Dialec
     }
   }
   // Reylo's errors about a parameter's value or a column's value take the file, as the row counts'
-  // below do. The driver's own errors, and Reylo's about the client, pass through as they are.
+  // Below do. The driver's own errors, and Reylo's about the client, pass through as they are.
   function named(error: unknown): unknown {
     if (where && (error instanceof ParameterError || error instanceof DecodeError) && !error.message.startsWith(where)) {
       const message = error.message;
       error.message = where + message;
       // V8 writes the stack when it is first read, with the message as it is then; a stack written
-      // earlier (read before, or on Bun) still has the old message in its first line.
-      if (typeof error.stack === "string" && !error.stack.includes(error.message)) error.stack = error.stack.replace(message, () => error.message);
+      // Earlier (read before, or on Bun) still has the old message in its first line.
+      if (matchesString(error.stack) && !error.stack.includes(error.message)) {error.stack = error.stack.replace(message, () => error.message);}
     }
     return error;
   }
   function materialize(rows: Row[]): Materialize<Row, C> {
     switch (cardinality) {
-      case "none":
+      case "none": {
         return undefined as Materialize<Row, C>;
-      case "many":
+      }
+      case "many": {
         return rows as Materialize<Row, C>;
-      case "one":
-        if (rows.length !== 1) throw new Error(`${where}Expected exactly one row, got ${rows.length}`);
+      }
+      case "one": {
+        if (rows.length !== 1) {throw new Error(`${where}Expected exactly one row, got ${rows.length}`);}
         return rows[0] as Materialize<Row, C>;
-      default:
-        if (rows.length > 1) throw new Error(`${where}Expected at most one row, got ${rows.length}`);
+      }
+      default: {
+        if (rows.length > 1) {throw new Error(`${where}Expected at most one row, got ${rows.length}`);}
         return (rows[0] ?? null) as Materialize<Row, C>;
+      }
     }
   }
   registerObjectDecoder(query, (rows) => {
-    if (module.dialect !== "sqlite") throw new TypeError("Object-row execution supports only SQLite queries.");
+    if (module.dialect !== "sqlite") {throw new TypeError("Object-row execution supports only SQLite queries.");}
     const columns = module.columns;
-    if (columns === undefined) throw new TypeError("A query defined by hand without its columns cannot map rows to its output.");
+    if (matchesUndefined(columns)) {throw new TypeError("A query defined by hand without its columns cannot map rows to its output.");}
     const keyed = rows.map((row) => {
-      if (row === null || typeof row !== "object" || Array.isArray(row)) throw new DecodeError("Expected an object row from the query executor.");
+      if (matchesNull(row) || !hasObjectType(row) || Array.isArray(row)) {throw new DecodeError("Expected an object row from the query executor.");}
       for (const [name] of columns) {
-        if (!Object.hasOwn(row, name)) throw new DecodeError(`The query executor's row is missing column "${name}".`);
+        if (!Object.hasOwn(row, name)) {throw new DecodeError(`The query executor's row is missing column "${name}".`);}
       }
       return { ...row };
     });
-    // normalize validates the SQLite storage classes, as the existing runtime path does.
+    // Normalize validates the SQLite storage classes, as the existing runtime path does.
     return materialize(normalize(keyed, columns) as Row[]);
   });
   return query;

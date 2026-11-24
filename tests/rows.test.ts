@@ -1,11 +1,13 @@
+// oxlint-disable-next-line rules/no-node-imports, vitest/no-import-node-test -- Nub runs this suite with Node's test runner and provides the runtime used by the SQLite integration tests.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import type { EngineType } from "../src/engine.ts";
 import { renderParamType } from "../src/render.ts";
-import { prepareRows, variant, type RowsType } from "../src/rows.ts";
+import { prepareRows, variant } from '../src/rows.ts';
+import type { RowsType } from '../src/rows.ts';
 
 // What the engine gives for `:events::rows(id int8 not null, ts timestamptz not null, status? text
-// not null, amount numeric(12,2), tags text[], meta jsonb('{"type": "object", …}'))`.
+// Not null, amount numeric(12,2), tags text[], meta jsonb('{"type": "object", …}'))`.
 const scalar = (name: string): EngineType => ({ kind: "scalar", name });
 const events: RowsType = {
   kind: "rows",
@@ -20,6 +22,7 @@ const events: RowsType = {
   ],
 };
 
+// oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
 test("the caller's type is the column list's: each key as its parameter type takes it, ? where it may be left out, | null where it may be null", () => {
   assert.equal(
     renderParamType(events, "postgres"),
@@ -28,10 +31,11 @@ test("the caller's type is the column list's: each key as its parameter type tak
   assert.equal(renderParamType({ ...events, one: true, fields: events.fields.slice(0, 1) }, "postgres"), "{ id: number | bigint | string }");
 });
 
+// oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
 test("a value is checked against its column list, and written as the JSON the statement reads", () => {
-  const row = { id: 9007199254740993n, ts: "2026-10-20T10:00:00.000Z", status: "done", amount: "1.50", tags: ["a"], meta: { source: "x" } };
+  const row = { id: BigInt("9007199254740993"), ts: "2026-10-20T10:00:00.000Z", status: "done", amount: "1.50", tags: ["a"], meta: { source: "x" } };
   // Postgres reads a 64-bit integer from its digits exactly, and the run time binds the JSON value.
-  assert.deepEqual(prepareRows("events", events, [row], "postgres", true).value, [{ id: "9007199254740993", ts: "2026-10-20T10:00:00.000Z", status: "done", amount: "1.50", tags: ["a"], meta: { source: "x" } }]);
+  assert.deepEqual(prepareRows("events", events, [row], "postgres", true).value, [{ amount: "1.50", id: "9007199254740993", meta: { source: "x" }, status: "done", tags: ["a"], ts: "2026-10-20T10:00:00.000Z" }]);
   // MySQL and SQLite take the JSON text, with the integer a bare number.
   assert.equal(prepareRows("events", events, [row], "mysql", true).value, `[{"id":9007199254740993,"ts":"2026-10-20T10:00:00.000Z","status":"done","amount":"1.50","tags":["a"],"meta":{"source":"x"}}]`);
   const refused: [unknown, RegExp][] = [
@@ -39,20 +43,21 @@ test("a value is checked against its column list, and written as the JSON the st
     [{ id: 1, ts: "2026-10-20T10:00:00Z", status: null }, /"status" is text not null, and the row gives null; leave the key out for the column's default/],
     [{ id: 1, ts: "2026-10-20T10:00:00Z", stauts: "x" }, /the column list names no key "stauts"/],
     [{ id: 2 ** 53, ts: "2026-10-20T10:00:00Z" }, /past 2\^53 - 1/],
-    [{ id: 2n ** 63n, ts: "2026-10-20T10:00:00Z" }, /from -9223372036854775808 to 9223372036854775807/],
+    [{ id: BigInt("2") ** BigInt("63"), ts: "2026-10-20T10:00:00Z" }, /from -9223372036854775808 to 9223372036854775807/],
     [{ id: 1.5, ts: "2026-10-20T10:00:00Z" }, /"id" is int8, an integer; got 1.5/],
     [{ id: 1, ts: "2026-10-20 10:00" }, /names its zone/],
     [{ id: 1, ts: new Date() }, /not a Date: pass date.toISOString\(\)/],
     [{ id: 1, ts: "2026-10-20T10:00:00Z", amount: "1.234" }, /keeps 2 digits after the point, so 1.234 would be rounded/],
     [{ id: 1, ts: "2026-10-20T10:00:00Z", amount: "12345678901" }, /at most 10 digits before the point/],
     [{ id: 1, ts: "2026-10-20T10:00:00Z", tags: ["a", 1] }, /"tags" element 2 is text, a string; got 1/],
-    [{ id: 1, ts: "2026-10-20T10:00:00Z", meta: { n: 1n } }, /holds a JSON value/],
+    [{ id: 1, ts: "2026-10-20T10:00:00Z", meta: { n: BigInt("1") } }, /holds a JSON value/],
   ];
-  for (const [value, message] of refused) assert.throws(() => prepareRows("events", events, [value], "postgres", true), message, JSON.stringify(value, (_, v) => (typeof v === "bigint" ? `${v}n` : v)));
+  for (const [value, message] of refused) {assert.throws(() => prepareRows("events", events, [value], "postgres", true), message, JSON.stringify(value, (_, v) => (typeof v === "bigint" ? `${v}n` : v)));}
   assert.throws(() => prepareRows("events", events, { id: 1 }, "postgres", true), /pass an array of objects, one per row; got an object/);
   assert.throws(() => prepareRows("user", { ...events, one: true }, [], "postgres", true), /each row is an object/);
 });
 
+// oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
 test("the rows an insert writes carry the same keys, and its lists name only those", () => {
   const a = { id: 1, ts: "2026-10-20T10:00:00Z" };
   assert.throws(() => prepareRows("events", events, [a, { ...a, status: "x" }], "postgres", true), /row 2 gives "status", which row 1 leaves out/);
@@ -70,6 +75,7 @@ test("the rows an insert writes carry the same keys, and its lists name only tho
   assert.throws(() => prepareRows("p", { kind: "rows", one: true, fields: [{ ...events.fields[2]! }] }, {}, "postgres", true), /every key is left out/);
 });
 
+// oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
 test("a pgvector vector member takes an array of finite numbers, written as the text pgvector reads", () => {
   const items: RowsType = {
     kind: "rows",
@@ -81,9 +87,10 @@ test("a pgvector vector member takes an array of finite numbers, written as the 
   };
   assert.equal(renderParamType(items), "readonly { embedding: number[]; history?: (number[] | null)[] | null }[]");
   assert.deepEqual(prepareRows("items", items, [{ embedding: [1, 2.5, 3], history: [[0.5], null] }], "postgres", true).value, [{ embedding: "[1,2.5,3]", history: ["[0.5]", null] }]);
-  for (const embedding of [[], [1, NaN], ["1"], "x".length]) assert.throws(() => prepareRows("items", items, [{ embedding }], "postgres", true), /embedding.* is vector\(3\), an array of finite numbers with one at least/);
+  for (const embedding of [[], [1, NaN], ["1"], "x".length]) {assert.throws(() => prepareRows("items", items, [{ embedding }], "postgres", true), /embedding.* is vector\(3\), an array of finite numbers with one at least/);}
 });
 
+// oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
 test("an hstore member takes an object of its keys, written as the text hstore reads", () => {
   const settings: RowsType = {
     kind: "rows",

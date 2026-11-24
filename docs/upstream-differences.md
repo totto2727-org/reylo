@@ -153,8 +153,10 @@ These are development-install settings, not runtime source or upstream engine ch
 ## Shared TypeScript lint
 
 Relative to the upstream release at `7a3928a8ff4dfb387b34ed584ab1319aa72f3f3b`, the fork adds `nub run lint` to local checks and CI.
-Oxlint loads `@totto2727/oxlint` to check explicit local import extensions, required causes where declared on errors, lint suppression reasons, ESLint disable comments, and JSX script tags in source, tests, examples, and tooling.
-These development-only checks do not change the runtime, published package contents, or native engine.
+Oxlint loads the published `@totto2727/oxlint/preset/library` with type-aware checking across handwritten source, tests, examples, and tooling.
+The HCL scanner generator owns `src/hclsyntax/scanner-tables.ts` and `src/hclsyntax/string-literal-tables.ts`. Oxlint omits those generated transition tables.
+The generated MySQL and SQLite error tables keep the upstream protocol numbers and key order through file-scoped lint exceptions.
+The Effect adapter documents local exceptions where its public readonly types and native `TypeError` causes are part of the integration contract.
 
 ## Fork npm publication
 

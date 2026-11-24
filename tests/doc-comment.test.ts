@@ -1,3 +1,4 @@
+// oxlint-disable-next-line rules/no-node-imports, vitest/no-import-node-test -- Nub runs this suite with Node's test runner and provides the runtime used by the SQLite integration tests.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { docComment, leadingComment, statementAfter } from "../src/doc-comment.ts";
@@ -8,6 +9,7 @@ const read = (sql: string, dialect?: Dialect) => {
   return [leading.prose, statementAfter(sql, leading)];
 };
 
+// oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
 test("the comment before the statement is its prose, markers stripped and lines kept", () => {
   assert.deepEqual(read("-- The signed-in user's profile.\n-- Null when the id no longer exists.\nselect 1\n"), ["The signed-in user's profile.\nNull when the id no longer exists.", "select 1"]);
   // Blank lines around it, indentation the lines share, and the indentation of one line beyond it.
@@ -23,6 +25,7 @@ test("the comment before the statement is its prose, markers stripped and lines 
   assert.deepEqual(read("-- only a comment\n"), ["only a comment", ""]);
 });
 
+// oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
 test("comments are read as the dialect reads them", () => {
   // Postgres nests block comments; MySQL and SQLite end one at the first `*/`.
   assert.deepEqual(read("/* a /* b */ c */ select 1", "postgres"), ["a /* b */ c", "select 1"]);
@@ -34,6 +37,7 @@ test("comments are read as the dialect reads them", () => {
   assert.deepEqual(read("# One.\nselect 1", "postgres"), ["", "# One.\nselect 1"]);
 });
 
+// oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
 test("the doc comment holds the prose, the statement in a sql block and the note, and nothing ends it early", () => {
   assert.equal(docComment("One.\nTwo.", "select 1\nfrom t", "What it is."), ["/**", " * One.", " * Two.", " *", " * ```sql", " * select 1", " * from t", " * ```", " *", " * What it is.", " */", ""].join("\n"));
   assert.equal(docComment("", "select 1", "", "  "), ["  /**", "   * ```sql", "   * select 1", "   * ```", "   */", ""].join("\n"));

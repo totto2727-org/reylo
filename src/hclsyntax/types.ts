@@ -39,39 +39,39 @@ export type Expression = Literal | Dynamic | Traversal | RelativeTraversal | Cal
 export function rangeBetween(first: Range, last: Range): Range { return { filename: first.filename, start: { ...first.start }, end: { ...last.end } } }
 export function emptyRangeAt(range: Range, at: 'start' | 'end' = 'end'): Range { return { filename: range.filename, start: { ...range[at] }, end: { ...range[at] } } }
 export function rangeString(range: Range): string {
-  if (range.start.line === range.end.line) return `${range.filename}:${range.start.line},${range.start.column}-${range.end.column}`;
+  if (range.start.line === range.end.line) {return `${range.filename}:${range.start.line},${range.start.column}-${range.end.column}`;}
   return `${range.filename}:${range.start.line},${range.start.column}-${range.end.line},${range.end.column}`;
 }
 /** Match upstream IsStringLiteral, including a literal dynamic error placeholder. */
 export function isStringLiteral(expression: Expression): expression is Template & { parts: [Literal | Dynamic] } {
-  return expression.kind === 'template' && expression.parts.length === 1 && (expression.parts[0]!.kind === 'literal' || expression.parts[0]!.kind === 'dynamic' && !expression.parts[0]!.diagnostics);
+  return expression.kind === 'template' && expression.parts.length === 1 && (expression.parts[0]!.kind === 'literal' || expression.parts[0]!.kind === 'dynamic' && !expression.parts[0].diagnostics);
 }
 export function staticString(expression: Expression): string | undefined {
-  if (expression.kind === 'literal' && typeof expression.value === 'string') return expression.value;
-  if (isStringLiteral(expression) && expression.parts[0].kind === 'literal' && typeof expression.parts[0].value === 'string') return expression.parts[0].value;
+  if (expression.kind === 'literal' && typeof expression.value === 'string') {return expression.value;}
+  if (isStringLiteral(expression) && expression.parts[0].kind === 'literal' && typeof expression.parts[0].value === 'string') {return expression.parts[0].value;}
   return undefined;
 }
-export function staticTraversal(expression: Expression): readonly (string | number)[] | undefined {
+export function staticTraversal(expression: Expression): Readonly<(string | number)[]> | undefined {
   return expression.kind === 'traversal' && !expression.steps.some(step => step.dynamic || typeof step.value !== 'string' && typeof step.value !== 'number') ? expression.parts : undefined;
 }
 
 /** Data-only equivalent of the upstream expression StartRange methods. */
 export function expressionStartRange(expression: Expression): Range {
   switch (expression.kind) {
-    case 'parentheses': return expressionStartRange(expression.expression);
-    case 'call': return rangeBetween(expression.nameRange, expression.openParenRange);
-    case 'conditional': return expressionStartRange(expression.condition);
-    case 'binary': return expressionStartRange(expression.left);
-    case 'unary': return expression.symbolRange;
-    case 'index': case 'tuple': case 'object': case 'for': return expression.openRange;
-    case 'objectKey': return expressionStartRange(expression.wrapped);
-    case 'splat': return expression.markerRange;
-    case 'template': return expressionStartRange(expression.parts[0]!);
-    case 'templateJoin': return expressionStartRange(expression.tuple);
-    default: return expression.range;
+    case 'parentheses': { return expressionStartRange(expression.expression); }
+    case 'call': { return rangeBetween(expression.nameRange, expression.openParenRange); }
+    case 'conditional': { return expressionStartRange(expression.condition); }
+    case 'binary': { return expressionStartRange(expression.left); }
+    case 'unary': { return expression.symbolRange; }
+    case 'index': case 'tuple': case 'object': case 'for': { return expression.openRange; }
+    case 'objectKey': { return expressionStartRange(expression.wrapped); }
+    case 'splat': { return expression.markerRange; }
+    case 'template': { return expressionStartRange(expression.parts[0]!); }
+    case 'templateJoin': { return expressionStartRange(expression.tuple); }
+    default: { return expression.range; }
   }
 }
 export function staticObjectKey(expression: ObjectKey): string | undefined {
-  if (!expression.forceNonLiteral && expression.wrapped.kind === 'traversal' && expression.wrapped.steps.length === 1) return expression.wrapped.parts[0] as string;
+  if (!expression.forceNonLiteral && expression.wrapped.kind === 'traversal' && expression.wrapped.steps.length === 1) {return expression.wrapped.parts[0] as string;}
   return staticString(expression.wrapped);
 }

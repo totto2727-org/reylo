@@ -1,26 +1,29 @@
+// oxlint-disable-next-line rules/no-node-imports, vitest/no-import-node-test -- Nub runs this suite with Node's test runner and provides the runtime used by the SQLite integration tests.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { DatabaseSync } from "node:sqlite";
 import { join } from "node:path";
-import { defineQuery, type MysqlClient, type MysqlCode, type MysqlQueryError, type PostgresClient, type PostgresCondition, type PostgresQueryError, type Query, type SqliteCode, type SqliteQueryError } from "../src/index.ts";
+import { defineQuery } from '../src/index.ts';
+import type { MysqlClient, MysqlCode, MysqlQueryError, PostgresClient, PostgresCondition, PostgresQueryError, Query, SqliteCode, SqliteQueryError } from '../src/index.ts';
 import { readQueryError, readQueryErrorSync } from "../src/query-error.ts";
 
 // `.try()` and the database's error it reads from each driver's own (src/query-error.ts). The
-// drivers' errors below are the ones each throws, measured on the real package (lab/driver-matrix
-// checks them through `.try()` on every driver).
+// Drivers' errors below are the ones each throws, measured on the real package (lab/driver-matrix
+// Checks them through `.try()` on every driver).
 
 /** A driver's error: an Error with the driver's own fields. */
 const thrown = (message: string, fields: Record<string, unknown> = {}, Class: new (message: string) => Error = Error) => Object.assign(new Class(message), fields);
 
 /** What a read error holds, its message and its fields. */
-function fields(error: unknown) {
+const fields = function (error: unknown) {
   assert.ok(error instanceof Error);
   assert.equal(error.name, "QueryError");
   return { ...error, message: error.message };
-}
+};
 
 const PG_NONE = { severity: "ERROR", detail: undefined, hint: undefined, position: undefined, where: undefined, schema: undefined, table: undefined, column: undefined, dataType: undefined, constraint: undefined };
 
+// oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
 test("Postgres: the error each driver throws reads as one, with the server's fields under one name each", async () => {
   const cases: [string, Error, Record<string, unknown> | undefined][] = [
     [
@@ -76,6 +79,7 @@ test("Postgres: the error each driver throws reads as one, with the server's fie
 
 const MY_NONE = { key: undefined, constraint: undefined, table: undefined, column: undefined };
 
+// oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
 test("MySQL: the error each driver throws reads as one, named from MySQL's own list, with what its message names", async () => {
   const cases: [string, Error, Record<string, unknown> | undefined][] = [
     [
@@ -126,7 +130,7 @@ test("MySQL: the error each driver throws reads as one, named from MySQL's own l
     ["a value too long", thrown("Data too long for column 'email' at row 1", { errno: 1406, sqlState: "22001", sqlMessage: "Data too long for column 'email' at row 1" }), { ...MY_NONE, message: "Data too long for column 'email' at row 1", code: "ER_DATA_TOO_LONG", errno: 1406, sqlState: "22001", column: "email" }],
     ["mysql2's refused connection", thrown("connect ECONNREFUSED 127.0.0.1:1", { errno: -61, code: "ECONNREFUSED", syscall: "connect", fatal: true }), undefined],
     ["mariadb's refused connection, which has a state", thrown("connect ECONNREFUSED 127.0.0.1:1", { errno: -61, code: "ECONNREFUSED", fatal: true, sqlState: "HY000" }), undefined],
-    ["mariadb's own error", thrown("(conn:-1, no: 45001, SQLState: 08S01) Cannot execute new commands: connection closed", { sqlMessage: "Cannot execute new commands: connection closed", fatal: true, errno: 45001, sqlState: "08S01", code: "ER_CONNECTION_ALREADY_CLOSED" }), undefined],
+    ["mariadb's own error", thrown("(conn:-1, no: 45001, SQLState: 08S01) Cannot execute new commands: connection closed", { sqlMessage: "Cannot execute new commands: connection closed", fatal: true, errno: 45_001, sqlState: "08S01", code: "ER_CONNECTION_ALREADY_CLOSED" }), undefined],
     ["mysql2's lost connection", thrown("Connection lost: The server closed the connection.", { code: "PROTOCOL_CONNECTION_LOST", fatal: true }), undefined],
   ];
   for (const [label, error, expected] of cases) {
@@ -142,6 +146,7 @@ test("MySQL: the error each driver throws reads as one, named from MySQL's own l
 
 const SQ_NONE = { table: undefined, columns: undefined, constraint: undefined };
 
+// oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
 test("SQLite: the error each driver throws reads as one, its most specific code named and numbered, with what its message names", () => {
   const cases: [string, Error, Record<string, unknown> | undefined][] = [
     ["better-sqlite3, which names the extended code", thrown("UNIQUE constraint failed: t.id", { code: "SQLITE_CONSTRAINT_PRIMARYKEY" }), { ...SQ_NONE, message: "UNIQUE constraint failed: t.id", code: "SQLITE_CONSTRAINT_PRIMARYKEY", errcode: 1555, table: "t", columns: ["id"] }],
@@ -182,6 +187,7 @@ test("SQLite: the error each driver throws reads as one, its most specific code 
   }
 });
 
+// oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
 test("try resolves to the value or to the database's error, and rejects with every other error, as run does", async () => {
   const unique = thrown(`duplicate key value violates unique constraint "users_email_key"`, { severity: "ERROR", code: "23505", table: "users", constraint: "users_email_key" });
   const refused = thrown("connect ECONNREFUSED 127.0.0.1:1", { errno: -61, code: "ECONNREFUSED" });
@@ -207,6 +213,7 @@ test("try resolves to the value or to the database's error, and rejects with eve
   await assert.rejects(many.try(answering([]), 1 as never), /The parameters must be an object/);
 });
 
+// oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
 test("trySync returns the value or the database's error on a synchronous SQLite client, and throws every other error", () => {
   const db = new DatabaseSync(":memory:");
   db.exec("create table users (id integer primary key, email text unique not null)");
@@ -225,7 +232,7 @@ test("trySync returns the value or the database's error on a synchronous SQLite 
     const fresh = defineQuery<{}, { n: number }, "one", "sqlite">({ dialect: "sqlite", sql: "select 1 as n", params: [], cardinality: "one" });
     assert.throws(() => fresh.trySync(db), /database is not open/);
   } finally {
-    if (db.isOpen) db.close();
+    if (db.isOpen) {db.close();}
   }
 });
 
@@ -256,7 +263,7 @@ export async function types(pg: Query<{}, { id: number }, "one", "postgres">, my
     if (b.error.code === "ER_DUP_ENTY") {}
   }
   // A statement that runs only the server's own code: a code Postgres defines, and the names its
-  // writes reach.
+  // Writes reach.
   const narrowed = null as unknown as PostgresQueryError<{ "23505": { constraint: "users_email_key" | "users_pkey"; table: "users" } }>;
   if (narrowed.condition === "unique_violation") {
     narrowed.code satisfies "23505";
@@ -274,9 +281,9 @@ export async function types(pg: Query<{}, { id: number }, "one", "postgres">, my
     // @ts-expect-error: no such key
     if (myNarrowed.key === "posts.PRIMARY") {}
   }
-  const liteNarrowed = null as unknown as SqliteQueryError<{ SQLITE_CONSTRAINT_UNIQUE: { table: "posts"; columns: readonly ["email"] | readonly ["slug", "lang"] } }>;
+  const liteNarrowed = null as unknown as SqliteQueryError<{ SQLITE_CONSTRAINT_UNIQUE: { table: "posts"; columns: Readonly<["email"]> | Readonly<["slug", "lang"]> } }>;
   if (liteNarrowed.code === "SQLITE_CONSTRAINT_UNIQUE") {
-    liteNarrowed.columns satisfies readonly ["email"] | readonly ["slug", "lang"] | undefined;
+    liteNarrowed.columns satisfies Readonly<["email"]> | Readonly<["slug", "lang"]> | undefined;
     // @ts-expect-error: no such table
     if (liteNarrowed.table === "users") {}
   }

@@ -21,20 +21,20 @@ export interface RagelTables {
   eof_actions?: ArrayLike<number>;
 }
 export class RagelState {
-  p = 0;
-  ts = 0;
-  te = 0;
-  act = 0;
-  done = false;
-  cs: number;
-  constructor(cs: number) { this.cs = cs; }
+  public p = 0;
+  public ts = 0;
+  public te = 0;
+  public act = 0;
+  public done = false;
+  public cs: number;
+  public constructor(cs: number) { this.cs = cs; }
 }
 // Return true from an action to implement the generated `goto _again`.
 export function runRagel(data: Uint8Array, t: RagelTables, s: RagelState, action: (id: number) => boolean | void): void {
   const actions = (offset: number): boolean => {
     const count = t.actions[offset++] ?? 0;
     for (let n = 0; n < count; n++) {
-      if (action(t.actions[offset++]!) || s.done) return true;
+      if (action(t.actions[offset++]!) || s.done) {return true;}
     }
     return false;
   };
@@ -43,8 +43,8 @@ export function runRagel(data: Uint8Array, t: RagelTables, s: RagelState, action
   executor: while (!s.done) {
     switch (phase) {
       case 'resume': {
-        if (s.cs === 0) break executor;
-        if (t.from_state_actions) actions(t.from_state_actions[s.cs]!);
+        if (s.cs === 0) {break executor;}
+        if (t.from_state_actions) {actions(t.from_state_actions[s.cs]!);}
         let keys = t.key_offsets[s.cs]!;
         trans = t.index_offsets[s.cs]!;
         let klen = t.single_lengths[s.cs]!;
@@ -54,8 +54,8 @@ export function runRagel(data: Uint8Array, t: RagelTables, s: RagelState, action
           let upper = keys + klen - 1;
           while (upper >= lower) {
             const mid = lower + ((upper - lower) >> 1);
-            if (data[s.p]! < t.trans_keys[mid]!) upper = mid - 1;
-            else if (data[s.p]! > t.trans_keys[mid]!) lower = mid + 1;
+            if (data[s.p]! < t.trans_keys[mid]!) {upper = mid - 1;}
+            else if (data[s.p]! > t.trans_keys[mid]!) {lower = mid + 1;}
             else {
               trans += mid - keys;
               matched = true;
@@ -74,42 +74,45 @@ export function runRagel(data: Uint8Array, t: RagelTables, s: RagelState, action
             let upper = keys + (klen << 1) - 2;
             while (upper >= lower) {
               const mid = lower + (((upper - lower) >> 1) & ~1);
-              if (data[s.p]! < t.trans_keys[mid]!) upper = mid - 2;
-              else if (data[s.p]! > t.trans_keys[mid + 1]!) lower = mid + 2;
+              if (data[s.p]! < t.trans_keys[mid]!) {upper = mid - 2;}
+              else if (data[s.p]! > t.trans_keys[mid + 1]!) {lower = mid + 2;}
               else {
                 trans += (mid - keys) >> 1;
                 matched = true;
                 break;
               }
             }
-            if (!matched) trans += klen;
+            if (!matched) {trans += klen;}
           }
         }
         trans = t.indicies[trans]!;
         phase = 'eof_trans';
         continue;
       }
-      case 'eof_trans':
+      case 'eof_trans': {
         s.cs = t.trans_targs[trans]!;
-        if (t.trans_actions[trans] !== 0) actions(t.trans_actions[trans]!);
+        if (t.trans_actions[trans] !== 0) {actions(t.trans_actions[trans]!);}
         phase = 'again';
         continue;
-      case 'again':
-        if (t.to_state_actions) actions(t.to_state_actions[s.cs]!);
-        if (s.done || s.cs === 0) break executor;
+      }
+      case 'again': {
+        if (t.to_state_actions) {actions(t.to_state_actions[s.cs]!);}
+        if (s.done || s.cs === 0) {break executor;}
         s.p++;
         phase = s.p !== data.length ? 'resume' : 'test_eof';
         continue;
-      case 'test_eof':
+      }
+      case 'test_eof': {
         if (s.p === data.length) {
           if (t.eof_trans && t.eof_trans[s.cs]! > 0) {
             trans = t.eof_trans[s.cs]! - 1;
             phase = 'eof_trans';
             continue;
           }
-          if (t.eof_actions) actions(t.eof_actions[s.cs]!);
+          if (t.eof_actions) {actions(t.eof_actions[s.cs]!);}
         }
         break executor;
+      }
     }
   }
 }

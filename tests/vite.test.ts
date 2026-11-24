@@ -1,3 +1,4 @@
+// oxlint-disable-next-line rules/no-node-imports, vitest/no-import-node-test -- Nub runs this suite with Node's test runner and provides the runtime used by the SQLite integration tests.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
@@ -6,9 +7,10 @@ import { join } from "node:path";
 import reylo from "../src/vite.ts";
 
 // The Cloudflare Vite plugin makes every `.sql` import in a Worker an external text module in its
-// own resolveId (`@cloudflare/vite-plugin` 1.64), so the import never reached Reylo's load hook and
+// Own resolveId (`@cloudflare/vite-plugin` 1.64), so the import never reached Reylo's load hook and
 // `.run` was undefined. Reylo's plugin now resolves a relative `.sql` import itself, in a resolveId
-// ordered "pre", which runs before every other plugin's wherever each is listed.
+// Ordered "pre", which runs before every other plugin's wherever each is listed.
+// oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
 test("@totto2727/reylo/vite resolves a relative .sql import to its file before any other plugin can claim it", () => {
   const root = mkdtempSync(join(tmpdir(), "reylo-vite-"));
   mkdirSync(join(root, "src"));
@@ -21,7 +23,7 @@ test("@totto2727/reylo/vite resolves a relative .sql import to its file before a
   // Vite's importer may carry a query.
   assert.equal(resolveId("../queries/get_user.sql", `${importer}?v=1a2b`), join(root, "queries", "get_user.sql"));
   // Everything else is left to Vite: a missing file (Vite's own error), a bare or aliased
-  // specifier, another extension, an entry with no importer and a virtual importer.
+  // Specifier, another extension, an entry with no importer and a virtual importer.
   assert.equal(resolveId("../queries/missing.sql", importer), null);
   assert.equal(resolveId("queries/get_user.sql", importer), null);
   assert.equal(resolveId("~/queries/get_user.sql", importer), null);
@@ -30,6 +32,7 @@ test("@totto2727/reylo/vite resolves a relative .sql import to its file before a
   assert.equal(resolveId("../queries/get_user.sql", "\0virtual:entry"), null);
 });
 
+// oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
 test("@totto2727/reylo/vite's resolveId runs before the other plugins' hooks", () => {
   assert.equal(reylo().resolveId.order, "pre");
 });

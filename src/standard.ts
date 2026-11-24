@@ -1,5 +1,5 @@
 // Vendored verbatim from @standard-schema/spec 1.1.0 (packages/spec/src/index.ts in
-// github.com/standard-schema/standard-schema; MIT License, Copyright (c) 2024 Colin McDonnell).
+// Github.com/standard-schema/standard-schema; MIT License, Copyright (c) 2024 Colin McDonnell).
 // The spec is designed to be copied so that implementers carry no dependency: Standard Typed,
 // Standard Schema and Standard JSON Schema, unchanged. Update by copying the file again.
 

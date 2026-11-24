@@ -4,10 +4,10 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileS
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-function copyLicense(source, target) {
-  if (existsSync(target)) chmodSync(target, 0o644);
+const copyLicense = function (source, target) {
+  if (existsSync(target)) {chmodSync(target, 0o644);}
   writeFileSync(target, readFileSync(source), { mode: 0o644 });
-}
+};
 const here = dirname(fileURLToPath(import.meta.url));
 const output = resolve(here, '..');
 const root = resolve(output, '../..');
@@ -15,7 +15,7 @@ const upstream = resolve(process.argv[2] ?? join(root, 'tmp/direct-hcl/upstream'
 const go = process.env.GO ?? join(process.env.HOME, '.nix-profile/bin/go');
 const revision = '00057cf06d7b38a3f89e6e54d622eee98322b314';
 const actual = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: upstream, encoding: 'utf8' }).trim();
-if (actual !== revision) throw new Error(`Expected upstream ${revision}, found ${actual}`);
+if (actual !== revision) {throw new Error(`Expected upstream ${revision}, found ${actual}`);}
 mkdirSync(join(root, 'tmp/direct-hcl'), { recursive: true });
 const work = mkdtempSync(join(root, 'tmp/direct-hcl/test-export-'));
 const raw = join(work, 'raw.jsonl');
@@ -41,7 +41,7 @@ const manifest = {
   corpus: { cases: counts.TestReyloOfficialCorpus?.cases.size ?? 0, nativeSpecFiles: 15, fuzzConfig: 7, fuzzExpression: 10, fuzzTemplate: 8, excludedTraversalSeeds: 4, coverage: 'Pinned Go parser AST and diagnostics, not hcldec evaluation parity.' },
   exclusions: ['Expression.Value and cty evaluation assertions', 'Standalone traversal parsing, JSON parsing, hcldec body decoding, navigation, variable enumeration, walking', 'BenchmarkLexConfig performance benchmark, which has no correctness assertions', 'pos_test.go helpers not copied into the parser are outside scope'],
 };
-writeFileSync(join(output, 'fixtures.jsonl'), fixtures.map(fixture => JSON.stringify(fixture)).join('\n') + '\n');
-writeFileSync(join(output, 'manifest.json'), JSON.stringify(manifest, null, 2) + '\n');
+writeFileSync(join(output, 'fixtures.jsonl'), `${fixtures.map(fixture => JSON.stringify(fixture)).join('\n')  }\n`);
+writeFileSync(join(output, 'manifest.json'), `${JSON.stringify(manifest, null, 2)  }\n`);
 copyLicense(join(upstream, 'LICENSE'), join(output, 'LICENSE'));
 console.log(`Exported ${fixtures.length} official Go fixtures to ${output}`);

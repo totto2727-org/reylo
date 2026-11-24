@@ -1,10 +1,13 @@
+// oxlint-disable-next-line rules/no-node-imports, vitest/no-import-node-test -- Nub runs this suite with Node's test runner and provides the runtime used by the SQLite integration tests.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { writeFileSync } from "node:fs";
+import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { connect, createServer, type AddressInfo, type Server } from "node:net";
+import { connect, createServer } from 'node:net';
+import type { AddressInfo, Server } from 'node:net';
 import { engine, reason, Unreachable } from "../src/engine.ts";
 import { hostUrl } from "../src/host-url.ts";
 import { mysqlStandIn } from "./mysql-stand-in.ts";
@@ -13,9 +16,9 @@ import { mysqlStandIn } from "./mysql-stand-in.ts";
 const noUnixSockets = process.platform === "win32" && "Node opens no Unix socket on Windows";
 
 /** A Unix socket in a directory of its own that pipes each connection to the TCP server `url` names, as a server listening on its socket. */
-async function socketFor(url: string, name: string): Promise<{ dir: string; path: string; server: Server }> {
+const socketFor = async function (url: string, name: string): Promise<{ dir: string; path: string; server: Server }> {
   const { hostname, port } = new URL(url);
-  const dir = mkdtempSync(join(tmpdir(), "reylo-sock-"));
+  const dir = await mkdtemp(join(tmpdir(), "reylo-sock-"));
   const path = join(dir, name);
   const server = createServer((client) => {
     const upstream = connect(Number(port), hostname);
@@ -25,14 +28,16 @@ async function socketFor(url: string, name: string): Promise<{ dir: string; path
   });
   await new Promise<void>((done) => server.listen(path, done));
   return { dir, path, server };
-}
+};
 
+// oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
 test("reason reads a refused connection, an AggregateError with no message of its own", () => {
   const refused = Object.assign(new AggregateError([new Error("connect ECONNREFUSED ::1:1"), new Error("connect ECONNREFUSED 127.0.0.1:1")], ""), { code: "ECONNREFUSED" });
   assert.equal(reason(refused), "connect ECONNREFUSED ::1:1; connect ECONNREFUSED 127.0.0.1:1");
   assert.equal(reason(Object.assign(new Error(""), { code: "ETIMEDOUT" })), "ETIMEDOUT");
 });
 
+// oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
 test("the files a Postgres URL names are resolved from the working directory for the native engine", async () => {
   const { url } = await hostUrl("postgres://u@h/d?sslmode=verify-ca&sslrootcert=certs/root.pem&sslcert=%2Fabs%2Fc.pem&sslkey=k.pem&application_name=a+b");
   const params = new URLSearchParams(url.slice(url.indexOf("?") + 1));
@@ -45,6 +50,7 @@ test("the files a Postgres URL names are resolved from the working directory for
   assert.equal((await hostUrl("mysql://root@h/d?ssl=true")).url, "mysql://root@h/d?ssl=true");
 });
 
+// oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
 test("the native engine works when Node's watch dependency reporting is enabled", () => {
   // Watch mode sets this variable. A native engine must not report modules to the parent.
   const script = `const { engine } = await import(${JSON.stringify(new URL("../src/engine.ts", import.meta.url).href)});
@@ -57,8 +63,8 @@ await c.close();`;
 });
 
 /** A connection to `url`'s host and port that writes `bytes`, and resolves with what it read once the bridge closed it. */
-async function knock(url: string, bytes: Buffer): Promise<Buffer> {
-  const { hostname, port } = new URL(url.replace(/^[a-z]+:/, "http:"));
+const knock = async function (url: string, bytes: Buffer): Promise<Buffer> {
+  const { hostname, port } = new URL(url.replace(/^[a-z]+:/u, "http:"));
   const socket = connect(Number(port), hostname);
   const read: Buffer[] = [];
   socket.on("data", (chunk: Buffer) => read.push(chunk));
@@ -66,11 +72,12 @@ async function knock(url: string, bytes: Buffer): Promise<Buffer> {
   socket.write(bytes);
   await new Promise((done) => socket.on("close", done));
   return Buffer.concat(read);
-}
+};
 
+// oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
 test("the bridge to a Unix socket closes a connection that does not carry its token, before the server reads it", { skip: noUnixSockets }, async () => {
   // Postgres: the socket is not even opened for a connection that does not open with the token.
-  const dir = mkdtempSync(join(tmpdir(), "reylo-sock-"));
+  const dir = await mkdtemp(join(tmpdir(), "reylo-sock-"));
   let reached = 0;
   const pgSocket = createServer((socket) => {
     reached++;
@@ -94,13 +101,13 @@ test("the bridge to a Unix socket closes a connection that does not carry its to
     const login = Buffer.alloc(36);
     login.writeUIntLE(32, 0, 3);
     login[3] = 1;
-    login.writeUInt32LE(0x200 | 0x8000, 4);
+    login.writeUInt32LE(0x2_00 | 0x80_00, 4);
     const greeting = await knock(mysql.url, login);
     assert.ok(greeting.length > 4 && greeting[4] === 10, "the greeting reached the client");
     // The greeting's capabilities offer no TLS, so the login that answers it is read in plain text.
     // After the protocol byte and the version, the connection id (4), the scramble's first part (8) and a filler byte.
     const capabilities = greeting.readUInt16LE(greeting.indexOf(0, 5) + 1 + 4 + 8 + 1);
-    assert.equal(capabilities & 0x0800, 0);
+    assert.equal(capabilities & 0x08_00, 0);
     assert.deepEqual(standIn.tried, []);
     mysql.close();
   } finally {
@@ -110,6 +117,7 @@ test("the bridge to a Unix socket closes a connection that does not carry its to
   }
 });
 
+// oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
 test("PGHOST names the socket's directory where the URL names no host, as libpq reads it", async () => {
   // As on a system with Unix sockets: the bridge itself is a TCP server, which every system opens.
   const bridged = await hostUrl("postgres://u@/d", { PGHOST: "/var/run/postgresql", PGPORT: "5433" }, "linux");
@@ -120,5 +128,5 @@ test("PGHOST names the socket's directory where the URL names no host, as libpq 
   assert.equal((await hostUrl("postgres://u@db/d", { PGHOST: "/var/run/postgresql" })).bridge, undefined);
   assert.equal((await hostUrl("postgres://u@/d", { PGHOST: "db.internal" })).bridge, undefined);
   // Node opens no Unix socket on Windows, so the URL is refused with what to write instead.
-  await assert.rejects(hostUrl("postgres://u@/d?host=/var/run/postgresql", {}, "win32"), (e: Error) => e instanceof Unreachable && /names the Unix socket \/var\/run\/postgresql\/\.s\.PGSQL\.5432, which Node cannot open on Windows: name the server's host and port/.test(e.message));
+  await assert.rejects(hostUrl("postgres://u@/d?host=/var/run/postgresql", {}, "win32"), (e: Error) => e instanceof Unreachable && /names the Unix socket \/var\/run\/postgresql\/\.s\.PGSQL\.5432, which Node cannot open on Windows: name the server's host and port/u.test(e.message));
 });

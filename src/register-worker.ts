@@ -1,7 +1,7 @@
 // The worker behind `src/bridge.ts` (`reylo/register`, `reylo/jest`): it builds a `.sql` file's
-// module, which can take a database round trip, while the loading thread blocks on `done`. It
-// loads the engine package's half only when asked (src/engine-package.ts), so that a failure to
-// load it is an answer and not a silent worker.
+// Module, which can take a database round trip, while the loading thread blocks on `done`. It
+// Loads the engine package's half only when asked (src/engine-package.ts), so that a failure to
+// Load it is an answer and not a silent worker.
 import { parentPort } from "node:worker_threads";
 import type { MessagePort } from "node:worker_threads";
 import { dirname } from "node:path";

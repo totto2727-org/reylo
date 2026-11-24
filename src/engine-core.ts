@@ -1,8 +1,9 @@
 // The engine's half that needs no host: a request to the engine, the lexer, and the replay loop
-// that hands each round's needs to an `EngineIo` until the analysis is done, for a host that answers
-// them over a connection of its own. src/engine.ts runs it over the published native engine.
+// That hands each round's needs to an `EngineIo` until the analysis is done, for a host that answers
+// Them over a connection of its own. src/engine.ts runs it over the published native engine.
 import { Unreachable } from "./connection.ts";
 import type { EngineType } from "./engine-type.ts";
+import { matchesUndefined } from "./native-predicates.ts";
 
 export type { EngineType } from "./engine-type.ts";
 export type Dialect = "postgres" | "sqlite" | "mysql" | "duckdb";
@@ -90,11 +91,11 @@ export type EngineCall = (request: string) => string;
 export class EngineCore {
   #call: EngineCall;
 
-  constructor(call: EngineCall) {
+  public constructor(call: EngineCall) {
     this.#call = call;
   }
 
-  call(request: object): Response {
+  public call(request: object): Response {
     return JSON.parse(this.#call(JSON.stringify(request)));
   }
 
@@ -103,19 +104,19 @@ export class EngineCore {
     return this.call(request);
   }
 
-  lex(sql: string, dialect: Dialect): Lexed {
+  public lex(sql: string, dialect: Dialect): Lexed {
     const r = this.call({ op: "lex", sql, dialect });
-    if (r.status !== "lexed") throw new Error(r.status === "error" ? r.message : `unexpected ${r.status}`);
+    if (r.status !== "lexed") {throw new Error(r.status === "error" ? r.message : `unexpected ${r.status}`);}
     return r.lexed;
   }
 
   /** Analyze one statement, fulfilling the engine's needs through `io` until it answers. */
-  async analyze(sql: string, dialect: Dialect, io: EngineIo, cache = new AnswerCache()): Promise<Analysis> {
+  public async analyze(sql: string, dialect: Dialect, io: EngineIo, cache = new AnswerCache()): Promise<Analysis> {
     const answers: Record<string, Answer> = {};
     for (let round = 0; round < 16; round++) {
       const r = await this.ask({ op: "analyze", sql, dialect, answers });
-      if (r.status === "analysis") return r.analysis;
-      if (r.status !== "need") throw new Error(r.status === "error" ? r.message : `unexpected ${r.status}`);
+      if (r.status === "analysis") {return r.analysis;}
+      if (r.status !== "need") {throw new Error(r.status === "error" ? r.message : `unexpected ${r.status}`);}
       await Promise.all(r.needs.map(async (need) => { answers[need.id] = await cache.get(need, () => fulfil(need, io)); }));
     }
     throw new Error("the analysis engine did not converge");
@@ -126,17 +127,17 @@ async function fulfil(need: Need, io: EngineIo): Promise<Answer> {
   try {
     if (need.kind === "describe") {
       const d = await io.describe(need.sql);
-      if ("kind" in d && d.kind === "duckdb") return { describe: { statement: d.statement, params: d.params, columns: d.columns } };
-      if ("kind" in d) return { mysql: { columns: d.columns, params: d.params } };
+      if ("kind" in d && d.kind === "duckdb") {return { describe: { statement: d.statement, params: d.params, columns: d.columns } };}
+      if ("kind" in d) {return { mysql: { columns: d.columns, params: d.params } };}
       return { describe: { params: d.params.map((p) => p.oid), columns: d.columns } };
     }
     return { rows: await io.query(need.sql, need.params) };
   } catch (e) {
-    if (e instanceof Unreachable) throw e;
+    if (e instanceof Unreachable) {throw e;}
     const err = e as Error & { code?: string; position?: string | number };
     const error: DbError = { message: err.message };
-    if (err.code) error.code = err.code;
-    if (err.position !== undefined) error.position = Number(err.position);
+    if (err.code) {error.code = err.code;}
+    if (!matchesUndefined(err.position)) {error.position = Number(err.position);}
     return { error };
   }
 }
@@ -151,21 +152,21 @@ async function fulfil(need: Need, io: EngineIo): Promise<Answer> {
 export class AnswerCache {
   #entries = new Map<string, { at: number; answer: Answer }>();
   #ttl: { session: number; statement: number };
-  constructor(ttl = { session: 60_000, statement: 5_000 }) {
+  public constructor(ttl = { session: 60_000, statement: 5000 }) {
     this.#ttl = ttl;
   }
 
-  async get(need: Need, fetch: () => Promise<Answer>): Promise<Answer> {
+  public async get(need: Need, fetch: () => Promise<Answer>): Promise<Answer> {
     const ttl = need.kind === "query" && need.scope === "session" ? this.#ttl.session : this.#ttl.statement;
     const hit = this.#entries.get(need.id);
-    if (hit && Date.now() - hit.at < ttl) return hit.answer;
+    if (hit && Date.now() - hit.at < ttl) {return hit.answer;}
     const answer = await fetch();
     // A failure is not knowledge: the next transform asks again.
-    if (!("error" in answer)) this.#entries.set(need.id, { at: Date.now(), answer });
+    if (!("error" in answer)) {this.#entries.set(need.id, { at: Date.now(), answer });}
     return answer;
   }
 
-  clear() {
+  public clear() {
     this.#entries.clear();
   }
 }

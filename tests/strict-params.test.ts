@@ -1,26 +1,28 @@
+// oxlint-disable-next-line rules/no-node-imports, vitest/no-import-node-test -- Nub runs this suite with Node's test runner and provides the runtime used by the SQLite integration tests.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, symlinkSync, writeFileSync } from "node:fs";
+import { mkdtemp } from "node:fs/promises";
 import { DatabaseSync } from "node:sqlite";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { transform, DRIVERS } from "./helpers.ts";
 
 // A parameter nothing in the statement types is error reylo12 in the type check unless the project
-// file says `strict_params: false`. The content
-// mapper runs as the type check runs it, through its own JSON-RPC process.
+// File says `strict_params: false`. The content
+// Mapper runs as the type check runs it, through its own JSON-RPC process.
 
-function project(url: string, reylo: string | undefined, driver?: string, name = ".reylo.yaml"): string {
+const project = function (url: string, reylo: string | undefined, driver?: string, name = ".reylo.yaml"): string {
   const root = mkdtempSync(join(tmpdir(), "reylo-strict-"));
   writeFileSync(join(root, "package.json"), "{}");
   writeFileSync(join(root, ".env"), `DATABASE_URL=${url}\n`);
-  if (reylo !== undefined) writeFileSync(join(root, name), reylo);
+  if (reylo !== undefined) {writeFileSync(join(root, name), reylo);}
   if (driver) {
     mkdirSync(join(root, "node_modules"));
     symlinkSync(join(DRIVERS, driver), join(root, "node_modules", driver));
   }
   return root;
-}
+};
 
 const message = (written: string, file = ".reylo.yaml") => `Nothing in the statement gives the parameter ${written} a type; cast it, as in ${written}::text, or set strict_params: false in ${file}.`;
 
@@ -32,14 +34,15 @@ const CASTS = {
 const CAST_TYPES = /export type Params = \{ a: number; b: number; c: string; d: number; e: string; f: string; g: string; h: Uint8Array; i: string; j: string; n: number \}/;
 
 /** A JSON cast without a schema types its parameter as JSON, which is no `unknown`, so it is never flagged; the TypeScript type of any JSON value is `unknown` all the same. */
-async function jsonCast(url: string, json: string, driver?: string) {
+const jsonCast = async function (url: string, json: string, driver?: string) {
   const out = await transform(project(url, undefined, driver), { "json.sql": json, "cast.sql": "select :x::text as x\n" });
   assert.deepEqual(out["json.sql"]!.diagnostics, []);
   assert.deepEqual(out["cast.sql"]!.diagnostics, []);
-}
+};
 
+// oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
 test("SQLite: a parameter nothing types is an error by default, and strict_params: false keeps it unknown", async () => {
-  const root = mkdtempSync(join(tmpdir(), "reylo-strict-db-"));
+  const root = await mkdtemp(join(tmpdir(), "reylo-strict-db-"));
   const db = new DatabaseSync(join(root, "app.db"));
   db.exec("create table users (id integer primary key)");
   db.close();
@@ -63,7 +66,7 @@ test("SQLite: a parameter nothing types is an error by default, and strict_param
   assert.deepEqual(loose["bare.sql"]!.diagnostics, []);
   assert.match(loose["bare.sql"]!.text, /export type Params = \{ x: unknown; y: unknown \}/);
   // A statement the engine refused keeps its own error alone: a parameter written twice is untyped
-  // because the analysis stopped there.
+  // Because the analysis stopped there.
   const repeated = await transform(project(url, undefined), { "repeated.sql": "select :q as a, :q as b\n" });
   assert.deepEqual(repeated["repeated.sql"]!.diagnostics.map((d) => d.code), [3]);
   // The cast the message suggests types it.
@@ -71,8 +74,9 @@ test("SQLite: a parameter nothing types is an error by default, and strict_param
   await jsonCast(url, "select json_extract(:doc::json, '$.a') as a\n");
 });
 
+// oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
 test("SQLite: a parameter as a whole sort or group key is error reylo17 at the parameter, and the statement is typed all the same", async () => {
-  const root = mkdtempSync(join(tmpdir(), "reylo-strict-db-"));
+  const root = await mkdtemp(join(tmpdir(), "reylo-strict-db-"));
   const db = new DatabaseSync(join(root, "app.db"));
   db.exec("create table users (id integer primary key, name text not null)");
   db.close();

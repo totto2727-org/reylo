@@ -1,7 +1,8 @@
+// oxlint-disable-next-line rules/no-node-imports, vitest/no-import-node-test -- Nub runs this suite with Node's test runner and provides the runtime used by the SQLite integration tests.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { Session } from "../src/analyze.ts";
 import { declarations, ROOT } from "./helpers.ts";
@@ -58,32 +59,33 @@ const cases = [
   { name: "nullable-input", sql: "insert into users (id, email, nickname) values (:id, :email, :nickname) returning id, nickname", cardinality: "one", nulls: [false, true], params: [false, false, true] },
 ];
 
-test("direct HCL query types match the same schema applied by Atlas", { timeout: 120_000 }, async (t) => {
+// oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
+test("direct HCL query types match the same schema applied by Atlas", { timeout: 120_000 }, async (testContext) => {
   const tmp = join(ROOT, "tmp");
-  mkdirSync(tmp, { recursive: true });
-  const root = mkdtempSync(join(tmp, "reylo-hcl-parity-"));
+  await mkdir(tmp, { recursive: true });
+  const root = await mkdtemp(join(tmp, "reylo-hcl-parity-"));
   const atlasRoot = join(root, "atlas");
   const hclRoot = join(root, "hcl");
   const sessions: Session[] = [];
   try {
     for (const dir of [atlasRoot, hclRoot]) {
-      mkdirSync(dir);
-      writeFileSync(join(dir, "package.json"), "{}");
+      await mkdir(dir);
+      await writeFile(join(dir, "package.json"), "{}");
     }
     const source = join(hclRoot, "schema.hcl");
-    writeFileSync(source, schema);
+    await writeFile(source, schema);
     // Only this reference branch runs Atlas or creates a host database.
     const applied = spawnSync("atlas", ["schema", "apply", "--url", "sqlite://atlas/app.db", "--to", "file://hcl/schema.hcl", "--auto-approve"], { cwd: root, encoding: "utf8", timeout: 60_000 });
     assert.ifError(applied.error);
     assert.equal(applied.status, 0, `Atlas schema apply failed:\n${applied.stdout}\n${applied.stderr}`);
-    writeFileSync(join(atlasRoot, ".reylo.yaml"), "direct_url: file:./app.db\n");
-    writeFileSync(join(hclRoot, ".reylo.yaml"), "direct_url: hcl:./schema.hcl\n");
+    await writeFile(join(atlasRoot, ".reylo.yaml"), "direct_url: file:./app.db\n");
+    await writeFile(join(hclRoot, ".reylo.yaml"), "direct_url: hcl:./schema.hcl\n");
     const reference = await Session.open(atlasRoot, {});
     sessions.push(reference);
     const direct = await Session.open(hclRoot, {});
     sessions.push(direct);
     for (const scenario of cases) {
-      await t.test(scenario.name, async () => {
+      await testContext.test(scenario.name, async () => {
         const expected = await reference.analyze(scenario.sql);
         const actual = await direct.analyze(scenario.sql);
         assert.ok(expected.ok, JSON.stringify(expected));
@@ -97,19 +99,19 @@ test("direct HCL query types match the same schema applied by Atlas", { timeout:
         assert.deepEqual({ params: actual.analysis.params, columns: actual.analysis.columns, cardinality: actual.analysis.cardinality }, { params: expected.analysis.params, columns: expected.analysis.columns, cardinality: expected.analysis.cardinality });
       });
     }
-    await t.test("content mapper exposes identical input and result declarations", async () => {
+    await testContext.test("content mapper exposes identical input and result declarations", async () => {
       const files = Object.fromEntries(cases.map(({ name, sql }) => [`${name}.sql`, sql]));
       const expected = await declarations(atlasRoot, files);
       const actual = await declarations(hclRoot, files);
-      for (const name of Object.keys(files)) {
+      Object.keys(files).forEach((name) => {
         // Driver-specific errors and documentation are not inferred input/result types.
-        const types = (text: string) => text.split("\n").filter((line) => /^(export type (Params|Row) =|declare const query: Query<)/.test(line));
+        const types = (text: string) => text.split("\n").filter((line) => /^(export type (Params|Row) =|declare const query: Query<)/u.test(line));
         assert.equal(types(actual[name]!).length, 3, name);
         assert.deepEqual(types(actual[name]!), types(expected[name]!), name);
-      }
+      });
     });
   } finally {
-    for (const session of sessions) await session.close();
-    rmSync(root, { recursive: true, force: true });
+    for (const session of sessions) {await session.close();}
+    await rm(root, { force: true, recursive: true });
   }
 });

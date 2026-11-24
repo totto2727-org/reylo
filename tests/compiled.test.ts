@@ -1,6 +1,8 @@
+// oxlint-disable-next-line rules/no-node-imports, vitest/no-import-node-test -- Nub runs this suite with Node's test runner and provides the runtime used by the SQLite integration tests.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, symlinkSync, writeFileSync } from "node:fs";
+import { writeFile } from "node:fs/promises";
 import { DatabaseSync } from "node:sqlite";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -10,10 +12,10 @@ import { defineQuery } from "../src/index.ts";
 import { declarations, DRIVERS, INDEX, closeSessions } from "./helpers.ts";
 
 // A query's `sql` is the statement as Reylo sends it to the database, the engine's compiled text,
-// and `raw` the file as written. Both are the module's exports too,
-// and the content mapper declares both as string literals.
+// And `raw` the file as written. Both are the module's exports too,
+// And the content mapper declares both as string literals.
 
-function project(url: string, driver?: string): string {
+const project = function (url: string, driver?: string): string {
   const root = mkdtempSync(join(tmpdir(), "reylo-compiled-"));
   writeFileSync(join(root, "package.json"), "{}");
   writeFileSync(join(root, ".env"), `DATABASE_URL=${url}\n`);
@@ -22,25 +24,26 @@ function project(url: string, driver?: string): string {
     symlinkSync(join(DRIVERS, driver), join(root, "node_modules", driver));
   }
   return root;
-}
+};
 
 /** The module a build step writes for `raw`, imported: its default export and its `sql` and `raw` exports. */
-async function built(root: string, name: string, raw: string) {
+const built = async function (root: string, name: string, raw: string) {
   const file = join(root, `${name}.sql`);
-  writeFileSync(file, raw);
+  await writeFile(file, raw);
   const { code } = await sqlModule(file, raw);
   const out = join(root, `${name}.mjs`);
-  writeFileSync(out, code.replace(`from "@totto2727/reylo"`, `from ${JSON.stringify(INDEX)}`));
+  await writeFile(out, code.replace(`from "@totto2727/reylo"`, `from ${JSON.stringify(INDEX)}`));
   return (await import(pathToFileURL(out).href)) as { default: { sql: string; raw: string; "~standard": { query: { text: string } }; run(client: unknown, params?: unknown): Promise<unknown> }; sql: string; raw: string };
-}
+};
 
 /** The declaration's lines that carry the two texts, their doc comments left out. */
-function texts(declaration: string): string[] {
-  return declaration.split("\n").filter((line) => /^export declare const (sql|raw):|^ {2}readonly (sql|raw|source):/.test(line) || line.startsWith("declare const query:")).map((line) => line.replace(/^declare const query: Query<.*> & /, "declare const query: Query<…> & "));
-}
+const texts = function (declaration: string): string[] {
+  return declaration.split("\n").filter((line) => /^export declare const (sql|raw):|^ {2}readonly (sql|raw|source):/u.test(line) || line.startsWith("declare const query:")).map((line) => line.replace(/^declare const query: Query<.*> & /, "declare const query: Query<…> & "));
+};
 
 const GET_USER = "select id, name, email from users where id = :id\n";
 
+// oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
 test("a query defined by hand: `raw` is its statement as written and `sql` the one the run time compiles from it", () => {
   const raw = "select :id as id, :name as name, :id as again";
   const pg = defineQuery({ dialect: "postgres", sql: raw, params: ["id", "name"] });
@@ -59,6 +62,7 @@ test("a query defined by hand: `raw` is its statement as written and `sql` the o
   assert.throws(() => missing.sql, /The statement's placeholder :other is parameter "other", which the query's params \(\["id"\]\) do not list/);
 });
 
+// oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
 test("SQLite: `sql` is the compiled statement and `raw` the file, at run time and in the mapper's declaration", async () => {
   const root = project("file:./app.db");
   const db = new DatabaseSync(join(root, "app.db"));
@@ -73,7 +77,7 @@ test("SQLite: `sql` is the compiled statement and `raw` the file, at run time an
     assert.equal(getUser.default.raw, GET_USER);
     assert.equal(getUser.sql, getUser.default.sql);
     assert.equal(getUser.raw, GET_USER);
-    assert.deepEqual({ ...((await getUser.default.run(db, { id: 1 })) as object) }, { id: 1, name: "Ada", email: "ada@example.com" });
+    assert.deepEqual({ ...((await getUser.default.run(db, { id: 1 })) as object) }, { email: "ada@example.com", id: 1, name: "Ada" });
     const json = await built(root, "doc", doc);
     assert.equal(json.default.sql, "select json_extract(json(?), '$.a') as a, ? as tags");
     assert.equal(json.default.raw, doc);
@@ -89,7 +93,7 @@ test("SQLite: `sql` is the compiled statement and `raw` the file, at run time an
       `  readonly source: string;`,
     ]);
     // The query's doc comment is the statement as written; `sql` and `raw` carry none, so a hover
-    // over either shows its text once, as its type.
+    // Over either shows its text once, as its type.
     assert.ok(declared["get_user.sql"]!.includes("/**\n * ```sql\n * select id, name, email from users where id = :id\n * ```\n */\ndeclare const query:"), declared["get_user.sql"]!);
     assert.equal(declared["get_user.sql"]!.split("/**").length, 2, declared["get_user.sql"]!);
     // The parameters are one object type, with no tuple beside it.
@@ -104,6 +108,7 @@ test("SQLite: `sql` is the compiled statement and `raw` the file, at run time an
   }
 });
 
+// oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
 test("SQLite: a statement that fires no trigger declares its QueryError narrowed to the keys and columns it writes through, and one that fires one the whole of it", async () => {
   const root = project("file:./app.db");
   const db = new DatabaseSync(join(root, "app.db"));
@@ -136,9 +141,10 @@ test("SQLite: a statement that fires no trigger declares its QueryError narrowed
 
 
 
+// oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
 test("the comment naming the file is sent and left out of sql, sqlcommenter: false leaves it off, and a running build sees the change", async () => {
   const root = project("file:./app.db");
-  writeFileSync(join(root, ".reylo.yaml"), "sqlcommenter: false\n");
+  await writeFile(join(root, ".reylo.yaml"), "sqlcommenter: false\n");
   const db = new DatabaseSync(join(root, "app.db"));
   db.exec("create table users (id integer primary key, name text not null, email text)");
   db.exec("insert into users (name, email) values ('Ada', 'ada@example.com')");
@@ -146,16 +152,16 @@ test("the comment naming the file is sent and left out of sql, sqlcommenter: fal
     const plain = await built(root, "get_user", GET_USER);
     assert.equal(plain.sql, "select id, name, email from users where id = ?");
     assert.equal(plain.default["~standard"].query.text, "select id, name, email from users where id = ?");
-    assert.deepEqual({ ...((await plain.default.run(db, { id: 1 })) as object) }, { id: 1, name: "Ada", email: "ada@example.com" });
+    assert.deepEqual({ ...((await plain.default.run(db, { id: 1 })) as object) }, { email: "ada@example.com", id: 1, name: "Ada" });
     const declared = await declarations(root, { "get_user.sql": GET_USER });
     assert.ok(texts(declared["get_user.sql"]!).includes(`export declare const sql: "select id, name, email from users where id = ?";`), declared["get_user.sql"]!);
     // The same process, after the project file turns it back on: the session it builds with is a
-    // new one, and the statement it sends ends with the comment, which `sql` leaves out.
-    writeFileSync(join(root, ".reylo.yaml"), "sqlcommenter: true\n");
+    // New one, and the statement it sends ends with the comment, which `sql` leaves out.
+    await writeFile(join(root, ".reylo.yaml"), "sqlcommenter: true\n");
     const tagged = await built(root, "get_user_again", GET_USER);
     assert.equal(tagged.sql, "select id, name, email from users where id = ?");
     assert.equal(tagged.default["~standard"].query.text, "select id, name, email from users where id = ? /*file='get_user_again.sql'*/");
-    assert.deepEqual({ ...((await tagged.default.run(db, { id: 1 })) as object) }, { id: 1, name: "Ada", email: "ada@example.com" });
+    assert.deepEqual({ ...((await tagged.default.run(db, { id: 1 })) as object) }, { email: "ada@example.com", id: 1, name: "Ada" });
   } finally {
     db.close();
     await closeSessions();

@@ -1,26 +1,30 @@
 // The analysis engine: the `reylo` executable (src/native.ts), which holds every database's engine
-// and serves one database's as `reylo engine <database>`: one JSON request per line on its standard
-// input, one answer per line on its standard output, each carrying its request's `id` back
+// And serves one database's as `reylo engine <database>`: one JSON request per line on its standard
+// Input, one answer per line on its standard output, each carrying its request's `id` back
 // (upstream engine/native/src/lib.rs). The engine connects to the database itself. Each connection is a
-// child process of its own, which answers its requests in turn, so that a server slow to answer
-// holds up no other connection; the requests that need no database go to one child per database
+// Child process of its own, which answers its requests in turn, so that a server slow to answer
+// Holds up no other connection; the requests that need no database go to one child per database
 // (the ping, the lexer, and DuckDB's analysis, whose needs this process answers), and those that
-// must answer before this thread can go on (the project file's `config`) to `reylo engine
+// Must answer before this thread can go on (the project file's `config`) to `reylo engine
 // <database> call`, which answers the one request on its standard input and exits. A child keeps
-// this process alive only while a request waits on it, as esbuild's service does, so that a build
-// ends when its work does: the child and its pipes are unreferenced once, when it starts, and a
-// timer holds the process while a request waits. Bun keeps a process alive for good once a child
-// it unreferenced is referenced again in a Bun.build plugin's hook, which is where the esbuild
-// plugin asks the engine, so the child is never referenced again; a timer is held and let go alike
-// in every runtime.
-import { spawn, spawnSync, type ChildProcessWithoutNullStreams } from "node:child_process";
+// This process alive only while a request waits on it, as esbuild's service does, so that a build
+// Ends when its work does: the child and its pipes are unreferenced once, when it starts, and a
+// Timer holds the process while a request waits. Bun keeps a process alive for good once a child
+// It unreferenced is referenced again in a Bun.build plugin's hook, which is where the esbuild
+// Plugin asks the engine, so the child is never referenced again; a timer is held and let go alike
+// In every runtime.
+import { spawn, spawnSync } from 'node:child_process';
+import type { ChildProcessWithoutNullStreams } from 'node:child_process';
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { hostUrl, type HostUrl } from "./host-url.ts";
+import { hostUrl } from './host-url.ts';
+import type { HostUrl } from './host-url.ts';
 import { NotMysql, Unreachable } from "./connection.ts";
-import { EngineCore, type Analysis, type Described, type Dialect, type Lexed, type Response } from "./engine-core.ts";
+import { EngineCore } from './engine-core.ts';
+import type { Analysis, Described, Dialect, Lexed, Response } from './engine-core.ts';
 import { nativeBinary } from "./native.ts";
 import { ENGINE_VERSION } from "./engine-version.ts";
+import { matchesNull, matchesUndefined } from "./native-predicates.ts";
 
 export type { EngineType } from "./engine-type.ts";
 export { reason, Unreachable } from "./connection.ts";
@@ -39,7 +43,7 @@ export const REYLO_VERSION: string = (() => {
 
 /** An engine reylo cannot run: none installed, or a different upstream native release. Reported as the project's error. */
 export class MissingEngine extends Error {
-  constructor(message: string) {
+  public constructor(message: string) {
     super(message);
     this.name = "MissingEngine";
   }
@@ -56,12 +60,12 @@ const PING_TIMEOUT = 10_000;
  * as one database's engine.
  */
 export function engine(dialect: Dialect): Promise<Engine> {
-  if (dialect !== "sqlite") return Promise.reject(new MissingEngine(`This fork supports SQLite analysis only, not ${dialect} statements`));
+  if (dialect !== "sqlite") {return Promise.reject(new MissingEngine(`This fork supports SQLite analysis only, not ${dialect} statements`));}
   let binary: string;
   try {
     binary = nativeBinary();
-  } catch (e) {
-    return Promise.reject(new MissingEngine((e as Error).message));
+  } catch (error) {
+    return Promise.reject(new MissingEngine((error as Error).message));
   }
   const key = `${binary}\0${dialect}`;
   let loading = engines.get(key);
@@ -78,11 +82,11 @@ export function engine(dialect: Dialect): Promise<Engine> {
         core.kill();
         return new MissingEngine(message);
       };
-      if (ping.status !== "ok") throw refuse(`the engine ${binary} does not answer: ${answer.message ?? answer.status}`);
+      if (ping.status !== "ok") {throw refuse(`the engine ${binary} does not answer: ${answer.message ?? answer.status}`);}
       if (ping.version !== ENGINE_VERSION) {
         throw refuse(`reylo ${REYLO_VERSION} runs with its engine at ${ENGINE_VERSION}, and ${binary} is ${ping.version}: install reylo again with optional dependencies enabled, or point REYLO_ENGINE_PATH at the engine of reylo ${ENGINE_VERSION}`);
       }
-      if (ping.database !== dialect) throw refuse(`${binary} serves ${ping.database ?? "no one database"}'s engine when asked for ${dialect}'s`);
+      if (ping.database !== dialect) {throw refuse(`${binary} serves ${ping.database ?? "no one database"}'s engine when asked for ${dialect}'s`);}
       return new Engine(binary, dialect, ping.fingerprint, core);
     })();
     // A failure is not kept: the binary may be installed or rebuilt while the process runs.
@@ -115,25 +119,25 @@ export interface Connection {
 }
 
 /** The key a request's answer is kept by, for the requests whose answer is the same for the same request: `config` and `lex`. */
-function keptKey(request: object): string | undefined {
+const keptKey = function (request: object): string | undefined {
   const op = (request as { op?: unknown }).op;
   return op === "config" || op === "lex" ? JSON.stringify(request) : undefined;
-}
+};
 
 /** How many answers to `config` and `lex` are kept: each is the same for the same request, and a type check asks again for each file it transforms. */
 const KEPT_ANSWERS = 512;
 
 /** One database's engine, as the `reylo` executable serves it. */
 export class Engine extends EngineCore {
-  readonly binary: string;
-  readonly dialect: Dialect;
+  public readonly binary: string;
+  public readonly dialect: Dialect;
   /** The engine's fingerprint, core's sources and its database's, which names the `.reylo/` entries it writes. */
-  readonly fingerprint: string;
+  public readonly fingerprint: string;
   /** The child that answers this database's requests that need no database, started again where it stopped. */
   #core: Channel;
   readonly #kept = new Map<string, Response>();
 
-  constructor(binary: string, dialect: Dialect, fingerprint: string, core: Channel) {
+  public constructor(binary: string, dialect: Dialect, fingerprint: string, core: Channel) {
     super((request) => callSync(binary, dialect, request));
     this.binary = binary;
     this.dialect = dialect;
@@ -146,32 +150,32 @@ export class Engine extends EngineCore {
    * <database> call`, a process of its own, for a caller that cannot wait (the project file's
    * `config`). The answers to `config` and `lex`, the same for the same request, are kept.
    */
-  override call(request: object): Response {
+  public override call(request: object): Response {
     const key = keptKey(request);
     return (key && this.#kept.get(key)) || this.#remember(key, super.call(request));
   }
 
   /** The lexer's reading of `sql`, through the long-lived child, for a caller that can wait: a round trip, where the one-shot form starts a process. */
-  async lexAsync(sql: string, dialect: Dialect): Promise<Lexed> {
+  public async lexAsync(sql: string, dialect: Dialect): Promise<Lexed> {
     const request = { op: "lex", sql, dialect };
     const key = keptKey(request);
     const r = (key && this.#kept.get(key)) || this.#remember(key, await this.ask(request));
-    if (r.status !== "lexed") throw new Error(r.status === "error" ? r.message : `unexpected ${r.status}`);
+    if (r.status !== "lexed") {throw new Error(r.status === "error" ? r.message : `unexpected ${r.status}`);}
     return r.lexed;
   }
 
   #remember(key: string | undefined, answer: Response): Response {
-    if (key === undefined || answer.status === "error") return answer;
-    if (this.#kept.size >= KEPT_ANSWERS) this.#kept.delete(this.#kept.keys().next().value!);
+    if (matchesUndefined(key) || answer.status === "error") {return answer;}
+    if (this.#kept.size >= KEPT_ANSWERS) {this.#kept.delete(this.#kept.keys().next().value!);}
     this.#kept.set(key, answer);
     return answer;
   }
 
   /** A request that needs no database, through this database's long-lived child: the rounds of an analysis whose needs this process answers, and the lexer for a caller that can wait. */
   protected override async ask(request: object): Promise<Response> {
-    if (this.#core.ended) this.#core = new Channel(this.binary, this.dialect);
+    if (this.#core.ended) {this.#core = new Channel(this.binary, this.dialect);}
     const answer = await this.#core.ask(request);
-    if (answer.status === "unreachable") throw new Error(answer.message);
+    if (answer.status === "unreachable") {throw new Error(answer.message);}
     return answer as unknown as Response;
   }
 
@@ -180,19 +184,19 @@ export class Engine extends EngineCore {
    * child of its own, so that a server slow to answer holds up no other connection; an Unreachable
    * where it cannot be opened.
    */
-  async open(url: string): Promise<Connection> {
+  public async open(url: string): Promise<Connection> {
     const target: HostUrl = url.includes("://") ? await hostUrl(url) : { url, close: () => {} };
     const channel = new Channel(this.binary, this.dialect);
     const ask = async (request: object) => settled(await channel.ask(request));
     let conn: number;
     try {
       conn = (await ask({ op: "open", url: target.url, ...(target.bridge && { bridge: target.bridge }) })).conn!;
-    } catch (e) {
+    } catch (error) {
       channel.end();
       target.close();
       // A socket the bridge could not open: its reason, rather than the connection it closed.
       const failure = target.failure?.();
-      throw failure ? new Unreachable(failure) : e;
+      throw failure ? new Unreachable(failure) : error;
     }
     return {
       analyze: async (sql) => (await ask({ op: "run", conn, sql })).analysis!,
@@ -218,9 +222,9 @@ export class Engine extends EngineCore {
  * failure is an Error.
  */
 function settled(answer: Answer): Answer {
-  if (answer.status === "notMysql") throw new NotMysql(answer.server!);
-  if (answer.status === "unreachable" || answer.status === "refused") throw new Unreachable(Object.assign(new Error(answer.message), answer.code && { code: answer.code }));
-  if (answer.status === "error") throw Object.assign(new Error(answer.message), answer.code && { code: answer.code });
+  if (answer.status === "notMysql") {throw new NotMysql(answer.server!);}
+  if (answer.status === "unreachable" || answer.status === "refused") {throw new Unreachable(Object.assign(new Error(answer.message), answer.code && { code: answer.code }));}
+  if (answer.status === "error") {throw Object.assign(new Error(answer.message), answer.code && { code: answer.code });}
   return answer;
 }
 
@@ -232,20 +236,20 @@ const FILE_VARIABLES = ["NODE_EXTRA_CA_CERTS", "PGSSLROOTCERT", "PGSSLCERT", "PG
  * this process's working directory as Node and libpq resolve it, now, so that a later `chdir` here
  * changes nothing for a child already running.
  */
-function engineEnv(): NodeJS.ProcessEnv {
+const engineEnv = function (): NodeJS.ProcessEnv {
   const env = { ...process.env };
-  for (const name of FILE_VARIABLES) if (env[name] && env[name] !== "system") env[name] = resolve(env[name]);
+  for (const name of FILE_VARIABLES) {if (env[name] && env[name] !== "system") {env[name] = resolve(env[name]);}}
   return env;
-}
+};
 
 /** The answer of `reylo engine <database> call` to `request`, or why there is none, as the engine words a failure. */
-function oneShot(binary: string, run: { error?: Error; status: number | null; signal: NodeJS.Signals | null; stdout: string; stderr: string }): string {
-  if (run.error) return JSON.stringify({ status: "error", message: `the engine ${binary} could not start: ${run.error.message}` });
+const oneShot = function (binary: string, run: { error?: Error; status: number | null; signal: NodeJS.Signals | null; stdout: string; stderr: string }): string {
+  if (run.error) {return JSON.stringify({ status: "error", message: `the engine ${binary} could not start: ${run.error.message}` });}
   const line = run.stdout.trim();
-  if (run.status === 0 && line) return line;
+  if (run.status === 0 && line) {return line;}
   const said = run.stderr.trim().split("\n").slice(-3).join("\n");
-  return JSON.stringify({ status: "error", message: `the engine ${binary} ${run.status === null ? `ended on ${run.signal}` : `exited with code ${run.status}`}${said ? `: ${said}` : ""}` });
-}
+  return JSON.stringify({ status: "error", message: `the engine ${binary} ${matchesNull(run.status) ? `ended on ${run.signal}` : `exited with code ${run.status}`}${said ? `: ${said}` : ""}` });
+};
 
 /** One request that needs no database, answered by the one-shot form while this thread waits. */
 function callSync(binary: string, dialect: Dialect, request: string): string {
@@ -274,7 +278,7 @@ class Channel {
   /** What holds this process while a request waits: a timer, which never fires. */
   #waiting: ReturnType<typeof setInterval> | undefined;
 
-  constructor(binary: string, dialect: Dialect) {
+  public constructor(binary: string, dialect: Dialect) {
     const child = spawn(binary, ["engine", dialect], { env: engineEnv(), windowsHide: true });
     this.#child = child;
     child.stdout.setEncoding("utf8").on("data", (chunk: string) => {
@@ -297,15 +301,15 @@ class Channel {
     });
     // Neither the child nor its pipes keep this process alive, from the start (`#hold`).
     child.unref();
-    for (const stream of [child.stdin, child.stdout, child.stderr]) (stream as unknown as { unref?(): void }).unref?.();
+    for (const stream of [child.stdin, child.stdout, child.stderr]) {(stream as unknown as { unref?(): void }).unref?.();}
   }
 
-  get ended(): boolean {
-    return this.#ended !== undefined;
+  public get ended(): boolean {
+    return !matchesUndefined(this.#ended);
   }
 
-  ask(request: object): Promise<Answer> {
-    if (this.#ended) return Promise.resolve({ status: "unreachable", message: this.#ended });
+  public ask(request: object): Promise<Answer> {
+    if (this.#ended) {return Promise.resolve({ status: "unreachable", message: this.#ended });}
     const id = this.#next++;
     return new Promise<Answer>((resolve) => {
       this.#pending.set(id, resolve);
@@ -315,14 +319,14 @@ class Channel {
   }
 
   /** The child stopped, with what it held: its input closed, at which it exits. */
-  end(): void {
+  public end(): void {
     this.#ended ??= "the connection is closed";
     this.#child.stdin.end();
     this.#hold(false);
   }
 
   /** The child stopped at once, for one that is no engine to talk to. */
-  kill(): void {
+  public kill(): void {
     this.end();
     this.#child.kill();
   }
@@ -335,26 +339,26 @@ class Channel {
       return;
     }
     // A line the engine could not read as a request is answered without its `id`: the child answers
-    // in turn, so the answer is the oldest request's.
+    // In turn, so the answer is the oldest request's.
     const id = answer.id ?? this.#pending.keys().next().value;
-    const resolve = id === undefined ? undefined : this.#pending.get(id);
-    if (!resolve) return;
+    const resolve = matchesUndefined(id) ? undefined : this.#pending.get(id);
+    if (!resolve) {return;}
     this.#pending.delete(id!);
     resolve(answer);
-    if (this.#pending.size === 0) this.#hold(false);
+    if (this.#pending.size === 0) {this.#hold(false);}
   }
 
   #end(why: string): void {
     this.#ended ??= why;
-    for (const resolve of this.#pending.values()) resolve({ status: "unreachable", message: this.#ended });
+    for (const resolve of this.#pending.values()) {resolve({ status: "unreachable", message: this.#ended });}
     this.#pending.clear();
     this.#hold(false);
   }
 
   /** Whether this process is held for the requests waiting on the child: by a timer, since the child itself is never referenced again once it starts. */
   #hold(held: boolean): void {
-    if (held) this.#waiting ??= setInterval(() => {}, HOLD_INTERVAL);
-    else if (this.#waiting !== undefined) {
+    if (held) {this.#waiting ??= setInterval(() => {}, HOLD_INTERVAL);}
+    else if (!matchesUndefined(this.#waiting)) {
       clearInterval(this.#waiting);
       this.#waiting = undefined;
     }

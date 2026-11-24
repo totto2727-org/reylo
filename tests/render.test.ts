@@ -1,3 +1,4 @@
+// oxlint-disable-next-line rules/no-node-imports, vitest/no-import-node-test -- Nub runs this suite with Node's test runner and provides the runtime used by the SQLite integration tests.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import type { EngineType } from "../src/engine.ts";
@@ -30,12 +31,14 @@ const doc: EngineType = {
 
 const inJson = `{ id: number; seen: string | null; tags: (string | null)[] | null; mood: "ok" | "sad" }`;
 
+// oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
 test("a composite is its row's text on the wire", () => {
   assert.equal(renderType(users, false, "postgres"), "string");
   assert.equal(renderType({ kind: "array", of: users }, false, "postgres"), "string");
   assert.equal(renderParamType(users, "postgres"), "string");
 });
 
+// oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
 test("inside a JSON document a composite is an object of its JSON-encoded fields", () => {
   assert.equal(renderType(users, true, "postgres"), inJson);
   // The renderer parenthesizes an element whose text holds a `|` anywhere, as it does for an object.
@@ -46,6 +49,7 @@ test("inside a JSON document a composite is an object of its JSON-encoded fields
   assert.equal(renderType(doc, true, "postgres"), expected);
 });
 
+// oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
 test("one type per SQL type, on every driver: what the run time returns (src/values.ts)", () => {
   const wire = (name: string, dialect: "postgres" | "mysql" = "postgres") => renderType(scalar(name), false, dialect);
   assert.deepEqual(["bool", "int2", "int4", "oid", "float4", "float8"].map((n) => wire(n)), ["boolean", "number", "number", "number", "number", "number"]);
@@ -67,9 +71,10 @@ test("one type per SQL type, on every driver: what the run time returns (src/val
   assert.equal(wire("bool", "mysql"), "boolean");
 });
 
+// oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
 test("a scalar that names two types is either", () => {
   // What MySQL answers with by what is bound for a placeholder: a BIGINT is a BigInt, a DOUBLE a
-  // number; an INT a temporary table may widen to a BIGINT is a BigInt either way.
+  // Number; an INT a temporary table may widen to a BIGINT is a BigInt either way.
   assert.equal(renderType(scalar("int8|float8"), false, "mysql"), "bigint | number");
   assert.equal(renderType(scalar("int8|int4"), false, "mysql"), "bigint");
   assert.equal(renderType(scalar("numeric|float8"), false, "mysql"), "string | number");
@@ -82,6 +87,7 @@ test("a scalar that names two types is either", () => {
   assert.equal(renderType(scalar("int8|mystery"), true, "mysql"), "Json");
 });
 
+// oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
 test("pgvector's vector and halfvec are arrays of numbers, as columns and as parameters; inside a document their text", () => {
   for (const name of ["vector", "halfvec"]) {
     assert.equal(renderType(scalar(name), false, "postgres"), "number[]");
@@ -89,23 +95,25 @@ test("pgvector's vector and halfvec are arrays of numbers, as columns and as par
     assert.equal(renderParamType(scalar(name), "postgres"), "number[]");
     assert.equal(renderType({ kind: "array", of: scalar(name) }, false, "postgres"), "(number[] | null)[]");
     assert.equal(renderParamType({ kind: "array", of: scalar(name) }, "postgres"), "number[][]");
-    assert.deepEqual(typeSchema(scalar(name), "postgres"), { type: "array", items: { type: "number", format: "float" } });
+    assert.deepEqual(typeSchema(scalar(name), "postgres"), { items: { format: "float", type: "number" }, type: "array" });
     assert.deepEqual(typeSchema(scalar(name), "postgres", false, true), { type: "string" });
   }
   // A sparsevec stays its text.
   assert.equal(renderType(scalar("sparsevec"), false, "postgres"), "string");
 });
 
+// oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
 test("an hstore is an object of nullable text, as a column, a parameter and inside a document", () => {
   assert.equal(renderType(scalar("hstore"), false, "postgres"), "Record<string, string | null>");
   assert.equal(renderParamType(scalar("hstore"), "postgres"), "Record<string, string | null>");
   assert.equal(renderType({ kind: "array", of: scalar("hstore") }, false, "postgres"), "(Record<string, string | null> | null)[]");
-  assert.deepEqual(typeSchema(scalar("hstore"), "postgres"), { type: "object", additionalProperties: { type: ["string", "null"] } });
+  assert.deepEqual(typeSchema(scalar("hstore"), "postgres"), { additionalProperties: { type: ["string", "null"] }, type: "object" });
   assert.equal(renderType(scalar("hstore"), true, "postgres"), "Record<string, string | null>");
   assert.equal(renderType({ kind: "list", of: scalar("hstore"), nullable_items: false }, false, "postgres"), "(Record<string, string | null>)[]");
-  assert.deepEqual(typeSchema(scalar("hstore"), "postgres", false, true), { type: "object", additionalProperties: { type: ["string", "null"] } });
+  assert.deepEqual(typeSchema(scalar("hstore"), "postgres", false, true), { additionalProperties: { type: ["string", "null"] }, type: "object" });
 });
 
+// oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
 test("inside a document an oid is its text, a geometry its GeoJSON, and an extension's type with no cast to JSON its text", () => {
   // Postgres writes JSON numbers only for the integers, the floats and numeric: `{"o" : "7"}`.
   assert.equal(renderType(scalar("oid"), false, "postgres"), "number");
@@ -114,16 +122,18 @@ test("inside a document an oid is its text, a geometry its GeoJSON, and an exten
   // PostGIS's cast to JSON writes GeoJSON: `{"type":"Point","coordinates":[1,2]}`.
   assert.equal(renderType(scalar("geometry"), false, "postgres"), "string");
   assert.equal(renderType(scalar("geometry"), true, "postgres"), "{ type: string; [key: string]: Json | undefined }");
-  assert.deepEqual(typeSchema(scalar("geometry"), "postgres", false, true), { type: "object", properties: { type: { type: "string" } }, required: ["type"], description: "a GeoJSON geometry" });
+  assert.deepEqual(typeSchema(scalar("geometry"), "postgres", false, true), { description: "a GeoJSON geometry", properties: { type: { type: "string" } }, required: ["type"], type: "object" });
   // A pgvector vector, a geography, a cube or an isbn inside a document is the JSON string of its text: `{"v" : "[1,2,3]"}`.
-  for (const name of ["vector", "halfvec", "sparsevec", "geography", "cube", "seg", "isbn", "semver", "ulid", "point"]) assert.equal(renderType(scalar(name), true, "postgres"), "string", name);
+  for (const name of ["vector", "halfvec", "sparsevec", "geography", "cube", "seg", "isbn", "semver", "ulid", "point"]) {assert.equal(renderType(scalar(name), true, "postgres"), "string", name);}
 });
 
+// oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
 test("a composite with no columns inside a document is an empty object", () => {
   assert.equal(renderType({ kind: "composite", name: "empty", fields: [] }, true), "Record<never, never>");
   assert.equal(renderType({ kind: "composite", name: "empty", fields: [] }, false), "string");
 });
 
+// oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
 test("SQLite: an INTEGER is a number, exact or an error; a NUMERIC whichever the row stored; a column with no type unknown", () => {
   assert.equal(renderType(scalar("integer"), false, "sqlite"), "number");
   assert.equal(renderType(scalar("numeric"), false, "sqlite"), "number | string");
@@ -138,12 +148,12 @@ test("SQLite: an INTEGER is a number, exact or an error; a NUMERIC whichever the
 });
 
 // Each column type beside the type the engine gives a parameter compared with that column, as
-// the engine reported them on 2026-10-20 against Postgres 18.6, MySQL 8.4.11 and SQLite for the
-// driver matrix's `typed` fixture (`select c from typed` and `select id from typed where c = :v`).
+// The engine reported them on 2026-10-20 against Postgres 18.6, MySQL 8.4.11 and SQLite for the
+// Driver matrix's `typed` fixture (`select c from typed` and `select id from typed where c = :v`).
 // MySQL describes every integer context as a BIGINT and a BIT one as BIT, so the engine types a
-// parameter by the column it is compared with (upstream engine/mysql `column_types`), and keeps the
-// prepare's (`int4`, `bool|bytea`) for an expression; SQLite types a parameter by the column's
-// affinity, a BOOLEAN column's being NUMERIC.
+// Parameter by the column it is compared with (upstream engine/mysql `column_types`), and keeps the
+// Prepare's (`int4`, `bool|bytea`) for an expression; SQLite types a parameter by the column's
+// Affinity, a BOOLEAN column's being NUMERIC.
 const array = (of: EngineType): EngineType => ({ kind: "array", of });
 const composite: EngineType = { kind: "composite", name: "user_in", fields: [{ name: "name", type: scalar("text"), nullable: true }] };
 const ROUND_TRIPS: Record<"postgres" | "mysql" | "sqlite", [column: EngineType, param: EngineType][]> = {
@@ -156,8 +166,8 @@ const ROUND_TRIPS: Record<"postgres" | "mysql" | "sqlite", [column: EngineType, 
     [array(composite), array(composite)],
     [array(scalar("record")), array(scalar("record"))],
     // An array the statement builds from values that may be NULL (`array_agg` over a left join)
-    // goes back into a structured member alone: a top-level array parameter takes no NULL
-    // element, tested below.
+    // Goes back into a structured member alone: a top-level array parameter takes no NULL
+    // Element, tested below.
   ],
   mysql: [
     [scalar("int8"), scalar("int8")],
@@ -186,15 +196,16 @@ const element = (ts: string) => (ts.endsWith("[]") ? ts.slice(0, -2).replace(/^\
  * column's may hold them, and a parameter's elements are strict, so an array goes back in without
  * them.
  */
-function admits(column: EngineType, param: EngineType, dialect: "postgres" | "mysql" | "sqlite"): boolean {
+const admits = function (column: EngineType, param: EngineType, dialect: "postgres" | "mysql" | "sqlite"): boolean {
   const returned = renderType(column, false, dialect);
   const taken = renderParamType(param, dialect);
   const members = (ts: string) => ts.split(" | ");
   const [returnedElement, takenElement] = [element(returned), element(taken)];
-  if (returnedElement !== undefined && takenElement !== undefined) return members(returnedElement).filter((m) => m !== "null").every((m) => members(takenElement).includes(m) || members(takenElement).includes("unknown"));
+  if (returnedElement !== undefined && takenElement !== undefined) {return members(returnedElement).filter((m) => m !== "null").every((m) => members(takenElement).includes(m) || members(takenElement).includes("unknown"));}
   return members(taken).includes("unknown") || members(returned).every((member) => members(taken).includes(member));
-}
+};
 
+// oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
 test("a parameter takes every value run returns for the column it is compared with, on every dialect: the round-trip rule", () => {
   for (const [dialect, pairs] of Object.entries(ROUND_TRIPS) as ["postgres" | "mysql" | "sqlite", [EngineType, EngineType][]][]) {
     for (const [column, param] of pairs) {
@@ -203,6 +214,7 @@ test("a parameter takes every value run returns for the column it is compared wi
   }
 });
 
+// oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
 test("parameters take what every driver binds, whatever Reylo returns", () => {
   assert.equal(renderParamType(scalar("numeric"), "postgres"), "string");
   assert.equal(renderParamType(scalar("int8"), "postgres"), "number | bigint | string");
@@ -219,6 +231,7 @@ test("parameters take what every driver binds, whatever Reylo returns", () => {
   assert.equal(renderType(inner, false, "mysql"), "{ b: string; n: number }");
 });
 
+// oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
 test("two columns or keys of one name keep the last, as a row object and JSON.parse do", () => {
   const object: EngineType = { kind: "object", fields: [{ name: "x", type: scalar("text"), nullable: false }, { name: "x", type: scalar("int4"), nullable: true }] };
   assert.equal(renderType(object, false, "postgres"), "{ x: number | null }");
@@ -226,6 +239,7 @@ test("two columns or keys of one name keep the last, as a row object and JSON.pa
   assert.equal(renderType({ kind: "list", of: scalar("record"), nullable_items: false }, false, "postgres"), "Record<string, Json>[]");
 });
 
+// oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
 test("every date and time parameter takes a string: a timestamptz one the text that names its zone, which run returns, and no Date", () => {
   assert.equal(renderParamType(scalar("timestamptz"), "postgres"), "string");
   assert.equal(renderParamType({ kind: "array", of: scalar("timestamptz") }, "postgres"), "string[]");
@@ -238,10 +252,11 @@ test("every date and time parameter takes a string: a timestamptz one the text t
   assert.equal(renderParamType(scalar("date|timestamp"), "mysql"), "string");
 });
 
+// oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
 test("a returned array's elements may be NULL unless the statement shows they are not; a parameter's are strict", () => {
   // Postgres lets any array hold NULL elements, whatever a column's NOT NULL says: a table's array
-  // column is `(T | null)[]`, and so is `array_agg(u.email)` over a LEFT JOIN, `{NULL}` for a team
-  // with no users. An array the statement builds from values it shows are not NULL is `T[]`.
+  // Column is `(T | null)[]`, and so is `array_agg(u.email)` over a LEFT JOIN, `{NULL}` for a team
+  // With no users. An array the statement builds from values it shows are not NULL is `T[]`.
   const texts = (nullable_items?: boolean): EngineType => (nullable_items === undefined ? { kind: "array", of: scalar("text") } : { kind: "array", of: scalar("text"), nullable_items });
   assert.equal(renderType(texts()), "(string | null)[]");
   assert.equal(renderType(texts(false)), "string[]");
@@ -249,21 +264,22 @@ test("a returned array's elements may be NULL unless the statement shows they ar
   assert.equal(renderType(texts(true), true), "(string | null)[]");
   assert.equal(renderType({ kind: "array", of: { kind: "enum", name: "mood", labels: ["ok", "sad"] }, nullable_items: true }), `("ok" | "sad" | null)[]`);
   // A top-level array parameter's elements take no NULL, as the parameter itself takes NULL only
-  // when cast to `nullable(…)` or written bare to a nullable column: a NULL in `= any(:ids)`
-  // matches nothing. An array inside a
-  // structured parameter's member keeps NULL elements, so a built array goes back into a row.
+  // When cast to `nullable(…)` or written bare to a nullable column: a NULL in `= any(:ids)`
+  // Matches nothing. An array inside a
+  // Structured parameter's member keeps NULL elements, so a built array goes back into a row.
   assert.equal(renderParamType(texts()), "string[]");
   assert.equal(renderParamType({ kind: "array", of: scalar("int8") }), "(number | bigint | string)[]");
   assert.equal(renderParamType({ kind: "array", of: scalar("int4") }), "number[]");
   const member: EngineType = { kind: "rows", one: true, fields: [{ name: "tags", type: texts(), written: "text[]", nullable: false, optional: false }] };
   assert.equal(renderParamType(member), "{ tags: (string | null)[] }");
   // The JSON Schemas say the same.
-  assert.deepEqual(typeSchema(texts(), "postgres"), { type: "array", items: { type: ["string", "null"] } });
-  assert.deepEqual(typeSchema(texts(false), "postgres"), { type: "array", items: { type: "string" } });
-  assert.deepEqual(typeSchema(texts(), "postgres", true), { type: "array", items: { type: "string" } });
-  assert.deepEqual(typeSchema(member, "postgres", true), { type: "object", properties: { tags: { type: "array", items: { type: ["string", "null"] } } }, required: ["tags"], additionalProperties: false });
+  assert.deepEqual(typeSchema(texts(), "postgres"), { items: { type: ["string", "null"] }, type: "array" });
+  assert.deepEqual(typeSchema(texts(false), "postgres"), { items: { type: "string" }, type: "array" });
+  assert.deepEqual(typeSchema(texts(), "postgres", true), { items: { type: "string" }, type: "array" });
+  assert.deepEqual(typeSchema(member, "postgres", true), { additionalProperties: false, properties: { tags: { items: { type: ["string", "null"] }, type: "array" } }, required: ["tags"], type: "object" });
 });
 
+// oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
 test("a JSON value nothing constrains is any JSON value, Json, and so is a value nothing types inside JSON the statement builds", () => {
   for (const dialect of ["postgres", "mysql", "sqlite", "duckdb"] as const) {
     assert.equal(renderType({ kind: "json" }, false, dialect), "Json");
@@ -281,6 +297,7 @@ test("a JSON value nothing constrains is any JSON value, Json, and so is a value
   assert.equal(renderType({ kind: "struct", fields: [{ name: "j", type: { kind: "json" }, nullable: true }, { name: "u", type: { kind: "unknown" }, nullable: true }] }, false, "duckdb"), "{ j: Json; u: unknown | null }");
 });
 
+// oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
 test("a JSON column a CHECK holds to a JSON Schema is the type of the values the schema admits", () => {
   const json = (schema: unknown): EngineType => ({ kind: "json", schema: schema as never });
   const open = { type: "object", properties: { name: { type: "string" }, age: { type: ["integer", "null"] } }, required: ["name"], additionalProperties: true };

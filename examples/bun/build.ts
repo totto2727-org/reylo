@@ -7,4 +7,4 @@ const result = await Bun.build({
   plugins: [reylo()],
   outdir: "dist",
 });
-for (const output of result.outputs) console.log(`built ${output.path}`);
+for (const output of result.outputs) {console.log(`built ${output.path}`);}

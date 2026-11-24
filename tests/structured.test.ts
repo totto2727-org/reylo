@@ -1,6 +1,8 @@
+// oxlint-disable-next-line rules/no-node-imports, vitest/no-import-node-test -- Nub runs this suite with Node's test runner and provides the runtime used by the SQLite integration tests.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, symlinkSync, writeFileSync } from "node:fs";
+import { writeFile } from "node:fs/promises";
 import { DatabaseSync } from "node:sqlite";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -10,10 +12,10 @@ import { sqlModule } from "../src/loader.ts";
 import { DRIVERS, INDEX, closeSessions, plain } from "./helpers.ts";
 
 // Structured parameters (wiki/structured-params.md): a parameter cast to `rows(…)` or `row(…)` is
-// typed by its column list and written for its position; the run time checks each value, and a key
-// a row leaves out takes its column's default, copied from SQLite's catalog into the insert.
+// Typed by its column list and written for its position; the run time checks each value, and a key
+// A row leaves out takes its column's default, copied from SQLite's catalog into the insert.
 
-function project(driver?: string): string {
+const project = function (driver?: string): string {
   const root = mkdtempSync(join(tmpdir(), "reylo-structured-"));
   writeFileSync(join(root, "package.json"), "{}");
   if (driver) {
@@ -21,20 +23,20 @@ function project(driver?: string): string {
     symlinkSync(join(DRIVERS, driver), join(root, "node_modules", driver));
   }
   return root;
-}
+};
 
 /** The module a build step writes for `sql`, imported. */
-async function built(root: string, url: string, name: string, sql: string) {
+const built = async function (root: string, url: string, name: string, sql: string) {
   const file = join(root, `${name}.sql`);
-  writeFileSync(file, sql);
-  writeFileSync(join(root, ".env"), `DATABASE_URL=${url}\n`);
+  await writeFile(file, sql);
+  await writeFile(join(root, ".env"), `DATABASE_URL=${url}\n`);
   const { code } = await sqlModule(file, sql);
   const out = join(root, `${name}.mjs`);
-  writeFileSync(out, code.replace(`from "@totto2727/reylo"`, `from ${JSON.stringify(INDEX)}`));
+  await writeFile(out, code.replace(`from "@totto2727/reylo"`, `from ${JSON.stringify(INDEX)}`));
   return (await import(pathToFileURL(out).href)).default;
-}
+};
 
-async function analysis(root: string, url: string, sql: string) {
+const analysis = async function (root: string, url: string, sql: string) {
   const session = await Session.open(root, { DATABASE_URL: url });
   try {
     const outcome = await session.analyze(sql, { force: true });
@@ -43,10 +45,11 @@ async function analysis(root: string, url: string, sql: string) {
   } finally {
     await session.close();
   }
-}
+};
 
 // The rows as plain objects: drivers return them with their own prototypes and extra properties.
 
+// oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
 test("SQLite: an insert's rows are checked and written in their order, a key left out takes its default, and the column list types the parameter", async () => {
   const root = project();
   const db = new DatabaseSync(join(root, "app.db"));
@@ -66,9 +69,9 @@ test("SQLite: an insert's rows are checked and written in their order, a key lef
     await assert.rejects(q.run(db, { events: [{ id: "4", ts: "x" }] }), /"id" is integer, an integer; got "4"/);
     // An explicit null stores NULL, never the text null, and a document stays JSON text.
     assert.deepEqual(db.prepare("select id, status, amount, meta, typeof(meta) as t from events order by id").all().map((r) => ({ ...r })), [
-      { id: 1, status: "late", amount: null, meta: null, t: "null" },
-      { id: 2, status: "done", amount: 1.5, meta: `{"source":"x"}`, t: "text" },
-      { id: 3, status: "new", amount: null, meta: null, t: "null" },
+      { amount: null, id: 1, meta: null, status: "late", t: "null" },
+      { amount: 1.5, id: 2, meta: `{"source":"x"}`, status: "done", t: "text" },
+      { amount: null, id: 3, meta: null, status: "new", t: "null" },
     ]);
     // Rows that leave out different keys go in one insert, each such row with the default.
     assert.deepEqual(plain(await q.run(db, { events: [{ id: 4, ts: "x" }, { id: 5, ts: "x", status: "s" }] })), [{ id: 4, status: "new" }, { id: 5, status: "s" }]);
@@ -81,6 +84,7 @@ test("SQLite: an insert's rows are checked and written in their order, a key lef
   }
 });
 
+// oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
 test("SQLite: rows that leave out different keys go in one insert, each such row with its column's default copied from the catalog", async () => {
   const root = project();
   const db = new DatabaseSync(join(root, "app.db"));
@@ -90,8 +94,8 @@ test("SQLite: rows that leave out different keys go in one insert, each such row
   const insert = "insert into accounts :a::rows(id? integer not null, name text not null, email text, role? text not null, nick text, token? text not null, n integer, at? text not null) returning id, role";
   try {
     const file = join(root, "insert_accounts.sql");
-    writeFileSync(file, insert);
-    writeFileSync(join(root, ".env"), `DATABASE_URL=${url}\n`);
+    await writeFile(file, insert);
+    await writeFile(join(root, ".env"), `DATABASE_URL=${url}\n`);
     // One statement for every call: no list for the run time to write again.
     const { code } = await sqlModule(file, insert);
     assert.ok(!code.includes("structured:"), code);
@@ -119,6 +123,7 @@ test("SQLite: rows that leave out different keys go in one insert, each such row
   }
 });
 
+// oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
 test("SQLite: elsewhere a rows parameter is a table named by its alias or by the parameter, a not null key never null and the rest nullable", async () => {
   const root = project();
   new DatabaseSync(join(root, "app.db")).close();
@@ -141,6 +146,7 @@ test("SQLite: elsewhere a rows parameter is a table named by its alias or by the
   }
 });
 
+// oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
 test("a column list that does not read is the type check's error at its place, and fails the build", async () => {
   const root = project();
   new DatabaseSync(join(root, "app.db")).close();
@@ -159,8 +165,8 @@ test("a column list that does not read is the type check's error at its place, a
       assert.match(d.message, message);
       assert.equal(sql.slice(d.start, d.start + d.length), at, sql);
       const file = join(root, "bad.sql");
-      writeFileSync(file, sql);
-      writeFileSync(join(root, ".env"), `DATABASE_URL=${url}\n`);
+      await writeFile(file, sql);
+      await writeFile(join(root, ".env"), `DATABASE_URL=${url}\n`);
       await assert.rejects(sqlModule(file, sql), message);
     }
   } finally {
@@ -168,6 +174,7 @@ test("a column list that does not read is the type check's error at its place, a
   }
 });
 
+// oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
 test("SQLite: the column list is checked against the table its insert writes, and a disagreement fails the build", async () => {
   const root = project();
   const db = new DatabaseSync(join(root, "app.db"));
@@ -190,8 +197,8 @@ test("SQLite: the column list is checked against the table its insert writes, an
       assert.match(d[0]!.message, message);
       assert.equal(sql.slice(d[0]!.start, d[0]!.start + d[0]!.length), at, sql);
       const file = join(root, "bad.sql");
-      writeFileSync(file, sql);
-      writeFileSync(join(root, ".env"), `DATABASE_URL=${url}\n`);
+      await writeFile(file, sql);
+      await writeFile(join(root, ".env"), `DATABASE_URL=${url}\n`);
       await assert.rejects(sqlModule(file, sql), message);
     }
     // The rowid is filled when it is left out, so an INTEGER PRIMARY KEY needs no `?`.
@@ -204,6 +211,7 @@ test("SQLite: the column list is checked against the table its insert writes, an
 
 
 
+// oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
 test("an imported query carries its input's and its output's JSON Schema, a structured parameter's keys included", async () => {
   const root = project();
   const db = new DatabaseSync(join(root, "app.db"));
@@ -213,25 +221,25 @@ test("an imported query carries its input's and its output's JSON Schema, a stru
     const q = await built(root, "file:./app.db", "insert_events", "insert into events :events::rows(id integer not null, ts text not null, status? text not null, amount real) returning id, status");
     assert.deepEqual(q.inputSchema, {
       $schema: "https://json-schema.org/draft/2020-12/schema",
-      type: "object",
+      additionalProperties: false,
       properties: {
         events: {
-          type: "array",
           items: {
-            type: "object",
-            properties: { id: { type: "integer", format: "int64" }, ts: { type: "string" }, status: { type: "string" }, amount: { anyOf: [{ type: "number", format: "double" }, { type: "null" }] } },
-            required: ["id", "ts"],
             additionalProperties: false,
+            properties: { amount: { anyOf: [{ format: "double", type: "number" }, { type: "null" }] }, id: { format: "int64", type: "integer" }, status: { type: "string" }, ts: { type: "string" } },
+            required: ["id", "ts"],
+            type: "object",
           },
+          type: "array",
         },
       },
       required: ["events"],
-      additionalProperties: false,
+      type: "object",
     });
     assert.deepEqual(q.outputSchema, {
       $schema: "https://json-schema.org/draft/2020-12/schema",
+      items: { properties: { id: { format: "int64", type: "integer" }, status: { type: "string" } }, required: ["id", "status"], type: "object" },
       type: "array",
-      items: { type: "object", properties: { id: { type: "integer", format: "int64" }, status: { type: "string" } }, required: ["id", "status"] },
     });
     // Standard Schema's converter gives the same.
     assert.deepEqual(q["~standard"].jsonSchema.input({ target: "draft-2020-12" }), q.inputSchema);
@@ -240,6 +248,7 @@ test("an imported query carries its input's and its output's JSON Schema, a stru
   }
 });
 
+// oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
 test("SQLite: a typed JSON parameter is typed by its schema, takes its defaults, and is checked before the statement runs", async () => {
   const root = project();
   const db = new DatabaseSync(join(root, "app.db"));
@@ -263,7 +272,7 @@ select value ->> '$.title', value ->> '$.done' from json_each(:todos::json('{
     // `done` has a default, so the caller may leave it out; the run time fills it.
     assert.deepEqual(p.type.kind === "json" && p.type.schema && (p.type.schema as { items: { required: string[] } }).items.required, ["title"]);
     const q = await built(root, url, "insert_todos", insert);
-    assert.deepEqual(plain(await q.run(db, { todos: [{ title: "a" }, { title: "b", done: true }] })), [{ id: 1, title: "a", done: 0 }, { id: 2, title: "b", done: 1 }]);
+    assert.deepEqual(plain(await q.run(db, { todos: [{ title: "a" }, { title: "b", done: true }] })), [{ done: 0, id: 1, title: "a" }, { done: 1, id: 2, title: "b" }]);
     await assert.rejects(q.run(db, { todos: [{ title: "" }] }), /Parameter "todos" at \/0\/title must be at least 1 characters long/);
     await assert.rejects(q.run(db, { todos: [{ title: "a", extra: 1 }] }), /at \/0\/extra is a key the schema does not allow/);
     await assert.rejects(q.run(db, { todos: [{ title: "a" }, { title: "b" }, { title: "c" }] }), /must have at most 2 items/);
@@ -285,6 +294,7 @@ select value ->> '$.title', value ->> '$.done' from json_each(:todos::json('{
   }
 });
 
+// oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
 test("SQLite: a JSON member of a column list is checked against its schema, its nested defaults filled", async () => {
   const root = project();
   const db = new DatabaseSync(join(root, "app.db"));
@@ -299,6 +309,7 @@ test("SQLite: a JSON member of a column list is checked against its schema, its 
   }
 });
 
+// oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
 test("binary data in a column list travels as hexadecimal text, which each reader decodes", async () => {
   const bytes = new Uint8Array([0, 1, 127, 128, 255]);
   const same = (got: unknown) => assert.deepEqual([...new Uint8Array(got as ArrayLike<number>)], [...bytes]);
@@ -320,6 +331,7 @@ test("binary data in a column list travels as hexadecimal text, which each reade
 });
 
 
+// oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
 test("an insert takes the table's alias before its rows, and refuses a column list of its own at the author's text", async () => {
   const root = project();
   const db = new DatabaseSync(join(root, "app.db"));
@@ -334,7 +346,7 @@ test("an insert takes the table's alias before its rows, and refuses a column li
     assert.ok(d);
     assert.match(d.message, /writes the insert's column list itself/);
     assert.equal(own.slice(d.start, d.start + d.length), "(id, x)");
-    writeFileSync(join(root, "own.sql"), own);
+    await writeFile(join(root, "own.sql"), own);
     await assert.rejects(sqlModule(join(root, "own.sql"), own), /writes the insert's column list itself/);
   } finally {
     db.close();

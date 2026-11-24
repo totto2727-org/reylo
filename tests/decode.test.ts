@@ -1,19 +1,21 @@
+// oxlint-disable-next-line rules/no-node-imports, vitest/no-import-node-test -- Nub runs this suite with Node's test runner and provides the runtime used by the SQLite integration tests.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
-import { execute, type QueryModule } from "../src/execute.ts";
+import { execute } from '../src/execute.ts';
+import type { QueryModule } from '../src/execute.ts';
 import { parseArray } from "../src/decode.ts";
 import type { Columns } from "../src/values.ts";
 
 // Fakes of the Postgres drivers that decode as the real ones do (checked against
-// lab/drivers/node_modules and wiki/driver-decoding/spike/postgres.md): a result asks a types
-// table (the query's own, else the client's) for one parser per field and applies it to the
-// field's text. The app's own parsers are hostile here: an int8 its text, a timestamptz tagged,
-// an interval an object, an enum upper-cased. Reylo's rows must not see any of them.
+// Lab/drivers/node_modules and wiki/driver-decoding/spike/postgres.md): a result asks a types
+// Table (the query's own, else the client's) for one parser per field and applies it to the
+// Field's text. The app's own parsers are hostile here: an int8 its text, a timestamptz tagged,
+// An interval an object, an enum upper-cased. Reylo's rows must not see any of them.
 type Parser = (text: string) => unknown;
-function noParse(x: string) {
+const noParse = function (x: string) {
   return String(x);
-}
+};
 const appTable: Record<number, Parser> = {
   20: (x) => x,
   23: (x) => parseInt(x, 10),
@@ -24,9 +26,9 @@ const appTable: Record<number, Parser> = {
 const appTypes = { getTypeParser: (oid: number) => appTable[oid] ?? noParse };
 
 // Oids the database created: an enum and its array, a domain's array, a row type's array, the
-// array of a type whose delimiter is not a comma (PostGIS's geometry), pgvector's vector and an
-// hstore and their arrays, and a type created after Reylo first read the catalog.
-const ROLE_ARR = 70000, ROLE = 70001, POSINT_ARR = 70010, POSINT = 70011, PAIR_ARR = 70020, PAIR = 70021, LATE_ARR = 70030, LATE = 70031, SHAPE_ARR = 70040, SHAPE = 70041, VEC_ARR = 70050, VEC = 70051, HSTORE_ARR = 70060, HSTORE = 70061;
+// Array of a type whose delimiter is not a comma (PostGIS's geometry), pgvector's vector and an
+// Hstore and their arrays, and a type created after Reylo first read the catalog.
+const ROLE_ARR = 70_000; const ROLE = 70_001; const POSINT_ARR = 70_010; const POSINT = 70_011; const PAIR_ARR = 70_020; const PAIR = 70_021; const LATE_ARR = 70_030; const LATE = 70_031; const SHAPE_ARR = 70_040; const SHAPE = 70_041; const VEC_ARR = 70_050; const VEC = 70_051; const HSTORE_ARR = 70_060; const HSTORE = 70_061;
 const COLUMNS: [string, number, string | null][] = [
   ["roles", ROLE_ARR, "{admin,member,NULL}"],
   ["role", ROLE, "admin"],
@@ -63,7 +65,7 @@ const declared = {
   spans: ["P1D", "PT2H"],
   amounts: ["1.5", "12345678901234567890.1"],
   ints: [1, null],
-  big: 9007199254740993n,
+  big: BigInt("9007199254740993"),
   at: "2024-01-15T08:30:00.123456Z",
   wall: "2024-01-15T10:30:00.123456",
   day: "2024-01-15",
@@ -85,8 +87,8 @@ const columns: Columns = [
 ];
 
 // The catalog, as decode.ts reads it: [array oid, element's base oid, a row type's array (kept as
-// text), delimiter, element oid, base type's name], for a type or an array type it asks about.
-function database() {
+// Text), delimiter, element oid, base type's name], for a type or an array type it asks about.
+const database = function () {
   const db = {
     types: [
       [ROLE_ARR, ROLE, false, ",", ROLE, "role"],
@@ -105,7 +107,7 @@ function database() {
         db.catalogQueries.push(text);
         const wanted = /any\('\{([\d,]+)\}'/.exec(text)![1]!.split(",").map(Number);
         // An array oid asked about also brings the array type's own row after its element's, as a
-        // query matching every requested oid would return it.
+        // Query matching every requested oid would return it.
         const rows = db.types
           .flatMap(([array, base, isText, delim, element, name]) => [
             ...(wanted.includes(array) || wanted.includes(element) ? [[array, base, isText, delim, element, name]] : []),
@@ -115,12 +117,12 @@ function database() {
         return { fields: [0, 1, 2, 3, 4, 5].map((i) => ({ name: `c${i}`, dataTypeID: 25 })), raw: rows };
       }
       const cols = [...COLUMNS];
-      if (text.includes("late")) cols.push(["lates", LATE_ARR, "{x,y}"], ["late", LATE, "x"]);
+      if (text.includes("late")) {cols.push(["lates", LATE_ARR, "{x,y}"], ["late", LATE, "x"]);}
       return { fields: cols.map(([name, dataTypeID]) => ({ name, dataTypeID })), raw: [cols.map(([, , v]) => v)] };
     },
   };
   return db;
-}
+};
 type Db = ReturnType<typeof database>;
 
 /** Rows compared by value, binary data by its bytes (a Buffer is a Uint8Array, with its own prototype). */
@@ -129,8 +131,8 @@ const same = (actual: unknown, expected: unknown) => assert.deepEqual(bytes(actu
 
 type Config = { text: string; values?: unknown[]; types?: { getTypeParser(oid: number, format?: string): Parser }; rowMode?: string };
 
-/** pg's Client: a query's own table, else the client's setTypeParser over the app's global table. */
-function pgClient(db: Db, options: { binary?: boolean } = {}) {
+/** Pg's Client: a query's own table, else the client's setTypeParser over the app's global table. */
+const pgClient = function (db: Db, options: { binary?: boolean } = {}) {
   const overrides: Record<number, Parser> = {};
   const client = Object.assign(new EventEmitter(), {
     binary: options.binary ?? false,
@@ -151,12 +153,13 @@ function pgClient(db: Db, options: { binary?: boolean } = {}) {
     },
   });
   return client;
-}
+};
 
 const probe: QueryModule<"postgres"> = { dialect: "postgres", sql: "select * from probe where id = :id", params: ["id"] };
 const built: QueryModule<"postgres"> = { ...probe, columns };
 const lateProbe: QueryModule<"postgres"> = { dialect: "postgres", sql: "select *, late from probe where id = :id", params: ["id"] };
 
+// oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
 test("parseArray: quoting, escapes, NULL, nesting, bounds and box's delimiter", () => {
   assert.deepEqual(parseArray("{}", String), []);
   assert.deepEqual(parseArray('{a,"b,c","NULL",NULL,"",\"q\\"x\\\\y\"}', String), ["a", "b,c", "NULL", null, "", 'q"x\\y']);
@@ -166,6 +169,7 @@ test("parseArray: quoting, escapes, NULL, nesting, bounds and box's delimiter", 
   assert.deepEqual(parseArray("{(1,1),(0,0);(2,2),(1,1)}", String, ";"), ["(1,1),(0,0)", "(2,2),(1,1)"]);
 });
 
+// oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
 test("pg Client: Reylo's table answers every oid, so no parser of the app's applies to its query, and the app's next query is unchanged", async () => {
   const db = database();
   const client = pgClient(db);
@@ -190,6 +194,7 @@ test("pg Client: Reylo's table answers every oid, so no parser of the app's appl
   assert.deepEqual(sent.values, [1]);
 });
 
+// oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
 test("pg Client: a module's columns give the created types their kinds, so no catalog query runs", async () => {
   const db = database();
   const client = pgClient(db);
@@ -201,6 +206,7 @@ test("pg Client: a module's columns give the created types their kinds, so no ca
   assert.equal(db.catalogQueries.length, 0);
 });
 
+// oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
 test("pg Client: a type created after Reylo read the catalog comes back decoded, after one lookup of that oid", async () => {
   const db = database();
   const client = pgClient(db);
@@ -214,10 +220,11 @@ test("pg Client: a type created after Reylo read the catalog comes back decoded,
   assert.equal(db.catalogQueries.length, 2, "a learned oid is not looked up again");
 });
 
+// oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
 test("pg: a client set up with binary: true is refused, before the query and if pg asks for a binary parser", async () => {
   const db = database();
   await assert.rejects(execute(pgClient(db, { binary: true }), built, { id: 1 }) as Promise<unknown>, /binary: true .*pg 8 reads wrong/);
-  // pg.defaults.binary, which the client does not show: pg asks the table for the binary format.
+  // Pg.defaults.binary, which the client does not show: pg asks the table for the binary format.
   const sneaky = pgClient(db, { binary: true });
   Object.defineProperty(sneaky, "binary", { get: () => false });
   const asked: string[] = [];
@@ -233,8 +240,8 @@ test("pg: a client set up with binary: true is refused, before the query and if 
   assert.ok(asked.length > 0);
 });
 
-/** pg's Pool: no getTypeParser; query() runs on a client it checks out, whose `connect` listeners set parsers. */
-function pgPool(db: Db) {
+/** Pg's Pool: no getTypeParser; query() runs on a client it checks out, whose `connect` listeners set parsers. */
+const pgPool = function (db: Db) {
   const clients: ReturnType<typeof pgClient>[] = [];
   const pool = Object.assign(new EventEmitter(), {
     options: { max: 2 } as { max: number; binary?: boolean },
@@ -252,8 +259,9 @@ function pgPool(db: Db) {
     },
   });
   return pool;
-}
+};
 
+// oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
 test("pg Pool: pool.query with Reylo's table, so a connect listener's parsers do not apply either", async () => {
   const db = database();
   const pool = pgPool(db);
@@ -265,6 +273,7 @@ test("pg Pool: pool.query with Reylo's table, so a connect listener's parsers do
   await assert.rejects(execute(pool, built, { id: 1 }) as Promise<unknown>, /binary: true/);
 });
 
+// oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
 test("pg-promise: result({ text, values, types }) on the database, a task and a transaction; its receive event is refused", async () => {
   const db = database();
   const conn = pgClient(db);
@@ -295,15 +304,15 @@ test("pg-promise: result({ text, values, types }) on the database, a task and a 
 });
 
 /** PGlite: a query's parsers merged over the instance's, as its parse.ts does. */
-function pglite(db: Db, instance: Record<number, Parser> | undefined) {
+const pglite = function (db: Db, instance: Record<number, Parser> | undefined) {
   const lite = {
     ...(instance ? { parsers: instance, refreshArrayTypes: async () => {} } : { rollback: async () => {}, closed: false }),
     exec: async () => [],
     seen: [] as Record<number, Parser>[],
     async query(text: string, _values?: unknown[], options?: { parsers?: Record<number, Parser>; rowMode?: string }) {
-      if (options?.parsers) lite.seen.push(options.parsers);
+      if (options?.parsers) {lite.seen.push(options.parsers);}
       const answer = db.answer(text);
-      const parsers = { ...(instance ?? {}), ...options?.parsers };
+      const parsers = { ...instance, ...options?.parsers };
       const rows = answer.raw.map((raw) => {
         const values = raw.map((v, i) => (v === null ? null : parsers[answer.fields[i]!.dataTypeID] ? parsers[answer.fields[i]!.dataTypeID]!(v) : v));
         return options?.rowMode === "array" ? values : Object.fromEntries(answer.fields.map((f, i) => [f.name, values[i]]));
@@ -312,8 +321,9 @@ function pglite(db: Db, instance: Record<number, Parser> | undefined) {
     },
   };
   return lite;
-}
+};
 
+// oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
 test("PGlite: per-query parsers that name the statement's oids, every oid the instance parses on a first run; a transaction too", async () => {
   const db = database();
   // The instance's table: the app's parsers, and PGlite's array parsers built at start.
@@ -331,6 +341,7 @@ test("PGlite: per-query parsers that name the statement's oids, every oid the in
   same(inTx, declared);
 });
 
+// oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
 test("Neon's neon(): query(text, params, { fullResults, types }), which replaces Neon's whole table", async () => {
   const db = database();
   const conn = pgClient(db);
@@ -349,8 +360,8 @@ test("Neon's neon(): query(text, params, { fullResults, types }), which replaces
   assert.deepEqual(Object.keys(calls[0]![2] as object), ["fullResults", "arrayMode", "types"]);
 });
 
-/** postgres.js: `.raw()` gives each value's bytes and the result's columns; a row transform runs on raw rows too. */
-function postgresJs(db: Db, rowTransform?: (row: unknown[]) => unknown) {
+/** Postgres.js: `.raw()` gives each value's bytes and the result's columns; a row transform runs on raw rows too. */
+const postgresJs = function (db: Db, rowTransform?: (row: unknown[]) => unknown) {
   return {
     typed: (value: unknown, type: number) => ({ value, type }),
     unsafe: (text: string) => ({
@@ -361,8 +372,9 @@ function postgresJs(db: Db, rowTransform?: (row: unknown[]) => unknown) {
       },
     }),
   };
-}
+};
 
+// oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
 test("postgres.js: .raw() and Reylo's text parsers, the rows built with the module's names, which a column transform does not rename", async () => {
   const db = database();
   // The fake's columns are upper-cased, as an app's transform.column would rename them.
@@ -374,9 +386,10 @@ test("postgres.js: .raw() and Reylo's text parsers, the rows built with the modu
   await assert.rejects(execute(postgresJs(db, (r) => [...r, "ROW-TRANSFORMED"]) as never, built, { id: 1 }) as Promise<unknown>, /transform\.row rewrites every row/);
 });
 
+// oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
 test("Bun.sql: its values are given their kinds after the fact", async () => {
   const bunRow = {
-    big: 9007199254740993n,
+    big: BigInt("9007199254740993"),
     day: new Date("2024-01-15T00:00:00Z"),
     wall: new Date("2024-01-15T10:30:00.120Z"),
     old: new Date("-000043-03-15T12:00:00Z"),
@@ -393,10 +406,10 @@ test("Bun.sql: its values are given their kinds after the fact", async () => {
   const q: QueryModule<"postgres"> = { ...probe, columns: [["big", "int8"], ["day", "date"], ["wall", "timestamp"], ["old", "timestamp"], ["far", "timestamp"], ["ints", "int[]"], ["roles", "text[]"], ["shapes", "text[]", ":"], ["embedding", "vector"], ["prefs", "hstore"], ["at", "timestamptz"], ["forever", "date"]] };
   // The failing control: Bun.sql's timestamptz is a Date; Reylo's the instant's text, to Bun's millisecond.
   assert.ok(bunRow.at instanceof Date);
-  assert.deepEqual(await execute(bun, q, { id: 1 }), [{ big: 9007199254740993n, day: "2024-01-15", wall: "2024-01-15T10:30:00.12", old: "-000043-03-15T12:00:00", far: "+012345-06-01T12:00:00", ints: [1, 2], roles: ["admin", "member"], shapes: ["0101", "0102"], embedding: [1, 2.5], prefs: { a: "1" }, at: "2024-01-15T08:30:00Z", forever: "infinity" }]);
+  assert.deepEqual(await execute(bun, q, { id: 1 }), [{ big: BigInt("9007199254740993"), day: "2024-01-15", wall: "2024-01-15T10:30:00.12", old: "-000043-03-15T12:00:00", far: "+012345-06-01T12:00:00", ints: [1, 2], roles: ["admin", "member"], shapes: ["0101", "0102"], embedding: [1, 2.5], prefs: { a: "1" }, at: "2024-01-15T08:30:00Z", forever: "infinity" }]);
   // Without bigint: true, Bun's int8 is its text.
   const plain = { unsafe: async () => [{ big: "9007199254740993", at: new Date("2024-01-15T08:30:00.5Z") }], commitDistributed: async () => {} };
-  assert.deepEqual(await execute(plain, { ...probe, columns: [["big", "int8"], ["at", "timestamptz"]] }, { id: 1 }), [{ big: 9007199254740993n, at: "2024-01-15T08:30:00.5Z" }]);
+  assert.deepEqual(await execute(plain, { ...probe, columns: [["big", "int8"], ["at", "timestamptz"]] }, { id: 1 }), [{ big: BigInt("9007199254740993"), at: "2024-01-15T08:30:00.5Z" }]);
   // A query defined by hand: a typed array an array, and a Date, which no value is, the instant's text.
   assert.deepEqual(await execute(bun, probe, { id: 1 }), [{ ...bunRow, day: "2024-01-15T00:00:00Z", wall: "2024-01-15T10:30:00.12Z", old: "-000043-03-15T12:00:00Z", far: "+012345-06-01T12:00:00Z", at: "2024-01-15T08:30:00Z", ints: [1, 2] }]);
 });

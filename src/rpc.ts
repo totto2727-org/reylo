@@ -1,25 +1,28 @@
+import { matchesUndefined } from "./native-predicates.ts";
+import { nativeErrorText } from "./native-error-text.ts";
+
 // Minimal JSON-RPC 2.0 server over stdio with LSP-style Content-Length framing,
-// which is what tsc uses to talk to content mapper processes.
+// Which is what tsc uses to talk to content mapper processes.
 
 type Handler = (params: unknown) => unknown | Promise<unknown>;
 
 export function serve(handlers: Record<string, Handler>): void {
   let buffer = Buffer.alloc(0);
-  // tsc closes the pipe when it is done with the mapper. A driver's pending reconnect timer must
-  // not keep the process, and tsc waiting on it, alive.
+  // Tsc closes the pipe when it is done with the mapper. A driver's pending reconnect timer must
+  // Not keep the process, and tsc waiting on it, alive.
   process.stdin.on("end", () => process.exit(0));
 
   process.stdin.on("data", (chunk: Buffer) => {
     buffer = Buffer.concat([buffer, chunk]);
     for (;;) {
       const headerEnd = buffer.indexOf("\r\n\r\n");
-      if (headerEnd === -1) return;
+      if (headerEnd === -1) {return;}
       const header = buffer.subarray(0, headerEnd).toString("ascii");
       const match = /Content-Length:\s*(\d+)/i.exec(header);
-      if (!match) throw new Error(`Bad header: ${header}`);
+      if (!match) {throw new Error(`Bad header: ${header}`);}
       const length = Number(match[1]);
       const bodyStart = headerEnd + 4;
-      if (buffer.length < bodyStart + length) return;
+      if (buffer.length < bodyStart + length) {return;}
       const body = buffer.subarray(bodyStart, bodyStart + length).toString("utf8");
       buffer = buffer.subarray(bodyStart + length);
       void dispatch(JSON.parse(body));
@@ -30,17 +33,17 @@ export function serve(handlers: Record<string, Handler>): void {
     const handler = handlers[message.method];
     let response: Record<string, unknown>;
     try {
-      if (!handler) throw new Error(`Unknown method ${message.method}`);
+      if (!handler) {throw new Error(`Unknown method ${message.method}`);}
       const result = await handler(message.params);
       response = { jsonrpc: "2.0", id: message.id, result: result ?? {} };
     } catch (error) {
       response = {
         jsonrpc: "2.0",
         id: message.id,
-        error: { code: -32603, message: error instanceof Error ? error.stack ?? error.message : String(error) },
+        error: { code: -32_603, message: nativeErrorText(error, "stack") },
       };
     }
-    if (message.id === undefined) return;
+    if (matchesUndefined(message.id)) {return;}
     const payload = Buffer.from(JSON.stringify(response), "utf8");
     process.stdout.write(`Content-Length: ${payload.length}\r\n\r\n`);
     process.stdout.write(payload);

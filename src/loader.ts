@@ -1,15 +1,16 @@
 // What every build step emits for a `.sql` file: a module that carries everything the query needs
-// at run time (the dialect, the statement as the engine rewrote it for the database, the binding
-// order, each parameter's type, the row count the analysis proved), so that the running code reads no file and asks no
-// database. The analysis comes from `src/analyze.ts`: `.reylo/` when it holds the statement for the
-// current schema, else the database. A build that has neither fails, because a module built
-// without the analysis would not do what its types say.
+// At run time (the dialect, the statement as the engine rewrote it for the database, the binding
+// Order, each parameter's type, the row count the analysis proved), so that the running code reads no file and asks no
+// Database. The analysis comes from `src/analyze.ts`: `.reylo/` when it holds the statement for the
+// Current schema, else the database. A build that has neither fails, because a module built
+// Without the analysis would not do what its types say.
 import { existsSync } from "node:fs";
 import { dirname } from "node:path";
 import { Session } from "./analyze.ts";
 import { sourceName } from "./project.ts";
 import { querySchemas } from "./schema.ts";
 import { arrayDelimiter, columnKind } from "./values.ts";
+import { matchesUndefined } from "./native-predicates.ts";
 
 export type SqlModule = {
   code: string;
@@ -23,63 +24,63 @@ export async function sqlModule(path: string, sql: string): Promise<SqlModule> {
   const session = await Session.for(dirname(path));
   let outcome = await session.analyze(sql);
   // A statement the database refuses may have been analyzed against a schema read a few seconds
-  // before a migration (a session reads it again at most every 5 seconds, and SQLite's analysis
-  // replays it): it is analyzed again when the schema has changed since.
-  if (outcome.ok && outcome.analysis.diagnostics.some((d) => d.code === 6) && (await session.recheck())) outcome = await session.analyze(sql);
-  if (!outcome.ok) throw new Error(`${path}: ${outcome.message}`);
+  // Before a migration (a session reads it again at most every 5 seconds, and SQLite's analysis
+  // Replays it): it is analyzed again when the schema has changed since.
+  if (outcome.ok && outcome.analysis.diagnostics.some((d) => d.code === 6) && (await session.recheck())) {outcome = await session.analyze(sql);}
+  if (!outcome.ok) {throw new Error(`${path}: ${outcome.message}`);}
   const { analysis } = outcome;
   // A statement whose placeholders break a rule fails the build: one the engine could not read
   // (1), named and positional mixed (2), or a parameter written more than once (3), since each
-  // parameter appears once so that one place types it.
+  // Parameter appears once so that one place types it.
   const unread = analysis.diagnostics.find((d) => d.code === 1 || d.code === 2 || d.code === 3);
-  if (unread) throw new Error(`${path}: ${unread.message}`);
+  if (unread) {throw new Error(`${path}: ${unread.message}`);}
   let params: string[];
   if (session.project.dialect === "mysql") {
     // A MySQL session reads its strings by its sql_mode, which the analysis asked for: its
-    // placeholders are the ones the server finds.
+    // Placeholders are the ones the server finds.
     params = analysis.params.map((p) => p.name);
   } else {
     try {
       params = (await session.lex(sql)).params;
-    } catch (e) {
-      throw new Error(`${path}: ${(e as Error).message}`);
+    } catch (error) {
+      throw new Error(`${path}: ${(error as Error).message}`);
     }
   }
   // A column list that does not read, or that disagrees with the table its insert writes, fails
-  // the build too.
+  // The build too.
   const descriptor = analysis.diagnostics.find((d) => d.code === 20 || d.code === 21);
-  if (descriptor) throw new Error(`${path}: ${descriptor.message}`);
+  if (descriptor) {throw new Error(`${path}: ${descriptor.message}`);}
   // So does a statement the database refuses (6: a misspelled column, a dropped table), at its line
-  // and column, as the type check reports it: its module would run a statement nothing typed, with
-  // no columns and any number of rows.
+  // And column, as the type check reports it: its module would run a statement nothing typed, with
+  // No columns and any number of rows.
   const refused = analysis.diagnostics.find((d) => d.code === 6);
-  if (refused) throw new Error(`${path}:${place(sql, refused.start)}: ${refused.message}`);
+  if (refused) {throw new Error(`${path}:${place(sql, refused.start)}: ${refused.message}`);}
   // Each parameter's type, for the drivers that bind an array or a JSON value wrong, and whether it
-  // takes null, which the run time refuses for one that does not (src/execute.ts).
-  const inputs = Object.fromEntries(analysis.params.map((p) => [p.name, { type: p.type, ...(p.schema === undefined ? {} : { schema: p.schema }), ...(p.cast === undefined ? {} : { cast: p.cast }), nullable: p.nullable }]));
+  // Takes null, which the run time refuses for one that does not (src/execute.ts).
+  const inputs = Object.fromEntries(analysis.params.map((p) => [p.name, { type: p.type, ...(matchesUndefined(p.schema) ? {} : { schema: p.schema }), ...(matchesUndefined(p.cast) ? {} : { cast: p.cast }), nullable: p.nullable }]));
   // Each output column's name and kind, from the table the declared types come from: what the run
-  // time gives each value (src/values.ts); and an array's delimiter where it is not a comma.
+  // Time gives each value (src/values.ts); and an array's delimiter where it is not a comma.
   const columns = analysis.columns.map((c) => {
     const kind = columnKind(c.type, session.project.dialect);
     const delimiter = arrayDelimiter(c.type);
-    return delimiter === undefined ? [c.name, kind] : [c.name, kind, delimiter];
+    return matchesUndefined(delimiter) ? [c.name, kind] : [c.name, kind, delimiter];
   });
   const source = sourceName(path);
   // The compiled statement without the file's trailing blank lines; the comment naming the file
-  // is added where the statement is sent (src/execute.ts, `sentText`).
+  // Is added where the statement is sent (src/execute.ts, `sentText`).
   const text = analysis.rewritten.sql.trimEnd();
   // A structured parameter's lists, at JavaScript's offsets into the statement (the engine's are
   // UTF-8 bytes).
   const structured = (analysis.structured ?? []).map((s) => ({ name: s.name, lists: s.lists.map((l) => ({ start: utf16(text, l.start), end: utf16(text, l.end), entries: l.entries })) }));
   // A typed JSON, structured or cast parameter is checked with reylo's `checks`, imported only where
-  // the statement has one, so that an app none of whose statements has one bundles none of them
+  // The statement has one, so that an app none of whose statements has one bundles none of them
   // (src/checks.ts). A non-null JSON parameter whose type alone carries a schema needs them too,
-  // to learn whether that schema allows null.
-  const checked = analysis.params.some((p) => p.schema !== undefined || p.cast !== undefined || p.type.kind === "rows" || (p.type.kind === "json" && p.type.schema !== undefined && !p.nullable));
+  // To learn whether that schema allows null.
+  const checked = analysis.params.some((p) => !matchesUndefined(p.schema) || !matchesUndefined(p.cast) || p.type.kind === "rows" || (p.type.kind === "json" && !matchesUndefined(p.type.schema) && !p.nullable));
   const code = [
     `import { defineQuery${checked ? ", checks" : ""} } from "@totto2727/reylo";`,
     // `sql` is the compiled statement and `raw` the file as written; the definition's own `sql` is
-    // the statement as written and its `text` the compiled one. The comment naming the file
+    // The statement as written and its `text` the compiled one. The comment naming the file
     // (src/sqlcommenter.ts) is added where the statement is sent, so `sql` leaves it out.
     `export const sql = ${JSON.stringify(text)};`,
     `export const raw = ${JSON.stringify(sql)};`,

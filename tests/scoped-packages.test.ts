@@ -1,3 +1,4 @@
+// oxlint-disable-next-line rules/no-node-imports, vitest/no-import-node-test -- Nub runs this suite with Node's test runner and provides the runtime used by the SQLite integration tests.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createRequire } from "node:module";
@@ -8,6 +9,7 @@ import { engine } from "../src/engine.ts";
 const require = createRequire(import.meta.url);
 const manifest = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
 
+// oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
 test("the fork exposes only its runtime and exact-version SQLite tooling under its own scope", () => {
   assert.equal(manifest.name, "@totto2727/reylo");
   assert.deepEqual(manifest.peerDependencies, { "@totto2727/reylo-sqlite": manifest.version, effect: "^4.0.6" });
@@ -24,6 +26,7 @@ test("the fork exposes only its runtime and exact-version SQLite tooling under i
 });
 
 for (const dialect of ["postgres", "mysql", "duckdb"] as const) {
+  // oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
   test(`the fork refuses ${dialect} analysis without discovering an engine package`, async () => {
     await assert.rejects(engine(dialect), {
       name: "MissingEngine",
@@ -32,6 +35,7 @@ for (const dialect of ["postgres", "mysql", "duckdb"] as const) {
   });
 }
 
+// oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
 test("the scoped public runtime preserves the Standard Query contract", () => {
   const query = defineQuery<{ id: number }, { id: number }, "one", "sqlite">({
     dialect: "sqlite", sql: "select :id as id", text: "select ? as id", params: ["id"],
@@ -43,6 +47,7 @@ test("the scoped public runtime preserves the Standard Query contract", () => {
   assert.deepEqual(query.decode([[7]]), { id: 7 });
 });
 
+// oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
 test("source packages stay private while distributions target public npm publication", () => {
   for (const path of ["../package.json", "../packages/sqlite/package.json"]) {
     const source = JSON.parse(readFileSync(new URL(path, import.meta.url), "utf8"));

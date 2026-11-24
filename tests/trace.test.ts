@@ -1,30 +1,32 @@
+// oxlint-disable-next-line rules/no-node-imports, vitest/no-import-node-test -- Nub runs this suite with Node's test runner and provides the runtime used by the SQLite integration tests.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { tracingChannel } from "node:diagnostics_channel";
 import { DatabaseSync } from "node:sqlite";
-import { defineQuery, type QueryTrace } from "../src/index.ts";
+import { defineQuery } from '../src/index.ts';
+import type { QueryTrace } from '../src/index.ts';
 import { listening } from "../src/trace.ts";
 
 // Every query Reylo runs is published on the tracing channel "reylo:query" (src/trace.ts): one
-// call per `.run()`, `.runSync()`, `.try()`, `.trySync()` and call of the function `.with()`
-// returns, with the query, the client, the parameters, whether it is synchronous, and its result
-// or error.
+// Call per `.run()`, `.runSync()`, `.try()`, `.trySync()` and call of the function `.with()`
+// Returns, with the query, the client, the parameters, whether it is synchronous, and its result
+// Or error.
 const channel = tracingChannel<QueryTrace>("reylo:query");
 
 const getUser = defineQuery<{ id: number }, { id: number; email: string }, "one", "sqlite">({ dialect: "sqlite", sql: "select id, email from users where id = :id", params: ["id"], cardinality: "one", source: "queries/get_user.sql" });
 const createUser = defineQuery<{ email: string }, never, "none", "sqlite">({ dialect: "sqlite", sql: "insert into users (email) values (:email)", params: ["email"], cardinality: "none", source: "queries/create_user.sql" });
 
-function database() {
+const database = function () {
   const db = new DatabaseSync(":memory:");
   db.exec("create table users (id integer primary key, email text not null unique); insert into users (email) values ('ada@example.com')");
   return db;
-}
+};
 
 type Event = { name: string; ctx: QueryTrace; result?: unknown; error?: unknown };
 
 /** Runs `fn` with a subscriber to every event, and returns the events with the result and error each saw. */
-async function traced(fn: () => unknown): Promise<Event[]> {
+const traced = async function (fn: () => unknown): Promise<Event[]> {
   const events: Event[] = [];
   const at = (name: string) => (ctx: QueryTrace) => events.push({ name, ctx, result: ctx.result, error: ctx.error });
   const subscribers = { start: at("start"), end: at("end"), asyncStart: at("asyncStart"), asyncEnd: at("asyncEnd"), error: at("error") };
@@ -35,13 +37,14 @@ async function traced(fn: () => unknown): Promise<Event[]> {
     channel.unsubscribe(subscribers);
   }
   return events;
-}
+};
 
 const names = (events: Event[]) => events.map((e) => e.name);
 
+// oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
 test(".run() publishes one call, which ends when its promise settles", async () => {
   const db = database();
-  const events = await traced(async () => assert.deepEqual(await getUser.run(db, { id: 1 }), { id: 1, email: "ada@example.com" }));
+  const events = await traced(async () => assert.deepEqual(await getUser.run(db, { id: 1 }), { email: "ada@example.com", id: 1 }));
   assert.deepEqual(names(events), ["start", "end", "asyncStart", "asyncEnd"]);
   const { ctx } = events[0]!;
   assert.ok(events.every((e) => e.ctx === ctx), "one context from start to asyncEnd");
@@ -51,28 +54,33 @@ test(".run() publishes one call, which ends when its promise settles", async () 
   assert.deepEqual(ctx.params, { id: 1 });
   assert.equal(ctx.sync, false);
   assert.equal(events[1]!.result, undefined, "end comes before the promise settles");
-  assert.deepEqual(events[3]!.result, { id: 1, email: "ada@example.com" });
+  assert.deepEqual(events[3]!.result, { email: "ada@example.com", id: 1 });
 });
 
+// oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
 test(".runSync() publishes one synchronous call, which ends on end", async () => {
   const db = database();
+  // oxlint-disable-next-line rules/no-effect-runtime-run -- This test exercises Reylo's native synchronous query API, which does not run Effect.
   const events = await traced(() => getUser.runSync(db, { id: 1 }));
   assert.deepEqual(names(events), ["start", "end"]);
   assert.equal(events[0]!.ctx.sync, true);
-  assert.deepEqual(events[1]!.result, { id: 1, email: "ada@example.com" });
+  assert.deepEqual(events[1]!.result, { email: "ada@example.com", id: 1 });
 });
 
+// oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
 test("a failed call publishes its error: the driver's own, or Reylo's about the row count", async () => {
   const db = database();
   const rowCount = await traced(() => getUser.run(db, { id: 2 }).catch(() => {}));
   assert.deepEqual(names(rowCount), ["start", "end", "error", "asyncStart", "asyncEnd"]);
   assert.match((rowCount[2]!.error as Error).message, /^queries\/get_user\.sql: Expected exactly one row, got 0$/);
 
+  // oxlint-disable-next-line rules/no-effect-runtime-run -- This test exercises Reylo's native synchronous query API, which does not run Effect.
   const unique = await traced(() => assert.throws(() => createUser.runSync(db, { email: "ada@example.com" }), /UNIQUE constraint failed/));
   assert.deepEqual(names(unique), ["start", "error", "end"]);
   assert.match((unique[1]!.error as Error).message, /UNIQUE constraint failed: users\.email/);
 });
 
+// oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
 test(".try() and .trySync() publish the database's error they return as a value, once each", async () => {
   const db = database();
   let result: unknown;
@@ -86,6 +94,7 @@ test(".try() and .trySync() publish the database's error they return as a value,
   assert.equal(sync[0]!.ctx.sync, true);
 });
 
+// oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
 test(".with() publishes nothing itself, and each call of its function publishes one", async () => {
   const db = database();
   let get: ReturnType<typeof getUser.with> | undefined;
@@ -98,6 +107,7 @@ test(".with() publishes nothing itself, and each call of its function publishes 
   assert.deepEqual(events[0]!.ctx.params, { id: 1 });
 });
 
+// oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
 test("a call without parameters publishes them as {}", async () => {
   const count = defineQuery<{}, { n: number }, "one", "sqlite">({ dialect: "sqlite", sql: "select count(*) as n from users", params: [], cardinality: "one" });
   const events = await traced(() => count.run(database()));
@@ -105,6 +115,7 @@ test("a call without parameters publishes them as {}", async () => {
   assert.equal(events[0]!.ctx.query.source, undefined);
 });
 
+// oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
 test("a store bound to start is the current one while the driver runs, so its spans nest under the query's", async () => {
   const store = new AsyncLocalStorage<string>();
   // The same channel, by its name, with a store of the subscriber's own type.
@@ -117,11 +128,12 @@ test("a store bound to start is the current one while the driver runs, so its sp
     const watched = new Proxy(db, {
       get(target, key) {
         const value = Reflect.get(target, key);
-        if (typeof value !== "function") return value;
+        if (typeof value !== "function") {return value;}
         return key === "prepare" ? (sql: string) => (seen.push(store.getStore()), target.prepare(sql)) : value.bind(target);
       },
     });
     await getUser.run(watched, { id: 1 });
+    // oxlint-disable-next-line rules/no-effect-runtime-run -- This test exercises Reylo's native synchronous query API, which does not run Effect.
     getUser.runSync(new Proxy(watched, {}), { id: 1 });
     assert.deepEqual(seen, ["span for queries/get_user.sql", "span for queries/get_user.sql"]);
     assert.equal(store.getStore(), undefined);
@@ -130,6 +142,7 @@ test("a store bound to start is the current one while the driver runs, so its sp
   }
 });
 
+// oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
 test("a query builds no context while nothing subscribes, and is published once anything subscribes to any event", () => {
   assert.equal(listening(), undefined);
   for (const event of ["start", "end", "asyncStart", "asyncEnd", "error"] as const) {

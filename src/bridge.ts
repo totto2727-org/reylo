@@ -1,5 +1,5 @@
 // A `.sql` file's module (`src/loader.ts`), answered synchronously, for the hosts that must answer
-// at once while the analysis waits on the database: Node's load hook and Bun's plugin under
+// At once while the analysis waits on the database: Node's load hook and Bun's plugin under
 // `require()` (`src/register.ts`) and Jest's `process` (`src/jest.ts`). A worker thread analyzes
 // (`src/register-worker.ts`) and this thread blocks until it answers, as SafeQL's ESLint rule does.
 import { readFileSync } from "node:fs";
@@ -16,11 +16,11 @@ export function sqlModuleSync(path: string): string {
   const { port1, port2 } = new MessageChannel();
   worker.postMessage({ path, source: readFileSync(path, "utf8"), port: port2, done }, [port2]);
   // The analysis is bounded by the driver's own timeouts (10 s to connect); this one only ends the
-  // wait on a worker that died.
+  // Wait on a worker that died.
   const waited = Atomics.wait(done, 0, 0, 120_000);
   const reply = receiveMessageOnPort(port1)?.message as { code: string } | { error: string } | undefined;
   port1.close();
-  if (!reply) throw new Error(`${path}: reylo's worker ${waited === "timed-out" ? "did not answer in 120 s" : "ended without an answer"}.`);
-  if ("error" in reply) throw new Error(reply.error);
+  if (!reply) {throw new Error(`${path}: reylo's worker ${waited === "timed-out" ? "did not answer in 120 s" : "ended without an answer"}.`);}
+  if ("error" in reply) {throw new Error(reply.error);}
   return reply.code;
 }

@@ -1,22 +1,24 @@
 // Standard Query: a SQL statement a driver can execute, as a typed function from an input to an
-// output. A query is a Standard Typed (its `~standard.types` are the input and the output), and
+// Output. A query is a Standard Typed (its `~standard.types` are the input and the output), and
 // `~standard.query` holds the statement, the database it is written for, and two mappings: from
-// the input to the values the driver binds, and from the rows the driver reads raw to the output.
+// The input to the values the driver binds, and from the rows the driver reads raw to the output.
 // A driver that supports it runs the statement with `encode`'s values, reads every row as an
-// array of raw values with its own conversions off, and returns what `decode` returns.
+// Array of raw values with its own conversions off, and returns what `decode` returns.
 //
 // Every Reylo query is one, with the same input and output as `.run()`: `encode` binds as
 // `.run()` binds, its checks included, and `decode` gives each value its kind and the result its
-// cardinality as `.run()` does. Two things `.run()` does need its client, and a Standard Query,
-// which has none, does neither: it never checks that the schema still matches the one the
-// statement was typed against (src/fresh.ts), and on MySQL it keeps a DATETIME's, TIMESTAMP's or
+// Cardinality as `.run()` does. Two things `.run()` does need its client, and a Standard Query,
+// Which has none, does neither: it never checks that the schema still matches the one the
+// Statement was typed against (src/fresh.ts), and on MySQL it keeps a DATETIME's, TIMESTAMP's or
 // TIME's fraction digits as the driver read them, which are the column's own over the text
-// protocol, while mysql2's binary protocol drops trailing zeros (`.000`) that `.run()` writes back
-// from the column's metadata.
+// Protocol, while mysql2's binary protocol drops trailing zeros (`.000`) that `.run()` writes back
+// From the column's metadata.
 import { normalize } from "./decode-sqlite.ts";
-import { compile, rawStatement, sentText, type Dialect, type QueryModule } from "./execute.ts";
+import { compile, rawStatement, sentText } from './execute.ts';
+import type { Dialect, QueryModule } from './execute.ts';
 import type { StandardTypedV1 } from "./standard.ts";
 import { coerce, DecodeError, textDecoder } from "./values.ts";
+import { matchesNull, matchesString, matchesUndefined } from "./native-predicates.ts";
 
 /** The Standard Query interface: a statement a driver can execute, as a typed function from an input to an output. */
 export interface StandardQueryV1<Input = unknown, Output = Input, D extends StandardQueryV1.Dialect = StandardQueryV1.Dialect>
@@ -44,13 +46,13 @@ export declare namespace StandardQueryV1 {
      * raw form. The driver passes the input as the caller gave it, `undefined` when it was left
      * out. Throws a `TypeError` for an input it cannot bind.
      */
-    encode(input: unknown): readonly RawValue<D>[];
+    encode(input: unknown): Readonly<RawValue<D>[]>;
     /**
      * Maps the raw result to the output: every row the statement returned, each an array of raw
      * values in the order the statement selects them. Throws for a result that does not fit the
      * output (a second row where at most one is expected, say).
      */
-    decode(rows: readonly (readonly RawValue<D>[])[]): Output;
+    decode(rows: Readonly<(Readonly<RawValue<D>[]>)[]>): Output;
   }
 
   /** The database a statement is written for. */
@@ -77,19 +79,19 @@ export declare namespace StandardQueryV1 {
 }
 
 /** A column's raw value as its kind, on Postgres from its text, on MySQL from whatever form the driver read. SQLite's rows go through `normalize` whole. */
-function decoder(dialect: Dialect, name: string, kind: string, delim: string | undefined): (v: unknown) => unknown {
+const decoder = function (dialect: Dialect, name: string, kind: string, delim: string | undefined): (v: unknown) => unknown {
   if (dialect === "postgres") {
     const fromText = textDecoder(kind, delim);
     return (v) => {
-      if (typeof v !== "string") throw new DecodeError(`Column "${name}" is not in Postgres's text form: a driver hands a Standard Query each value's text.`);
+      if (!matchesString(v)) {throw new DecodeError(`Column "${name}" is not in Postgres's text form: a driver hands a Standard Query each value's text.`);}
       return fromText(v);
     };
   }
   // A MySQL DATETIME's text takes a T between the date and the time, as `.run()` writes it, a
-  // column that may be one included (src/decode-mysql.ts, `mariadb`).
-  if (kind.split("|").includes("timestamp")) return (v) => (typeof v === "string" ? v.replace(" ", "T") : coerce(kind, v, name, delim));
+  // Column that may be one included (src/decode-mysql.ts, `mariadb`).
+  if (kind.split("|").includes("timestamp")) {return (v) => (matchesString(v) ? v.replace(" ", "T") : coerce(kind, v, name, delim));}
   return (v) => coerce(kind, v, name, delim);
-}
+};
 
 /**
  * The query members of a module: `encode` through `.run()`'s own binding, `decode` through its
@@ -107,25 +109,25 @@ export function standardQuery<D extends Dialect, Output>(module: QueryModule<D>,
       return statementText();
     },
     encode(input) {
-      const bound = rawStatement(module, input === undefined ? {} : input);
+      const bound = rawStatement(module, matchesUndefined(input) ? {} : input);
       // A structured parameter in a MySQL insert writes its column lists again for the keys a call
-      // carries, so its text depends on the input: such a statement runs through `.run()`.
-      if (bound.text !== statementText()) throw new TypeError(`${module.source ? `${module.source}: ` : ""}This statement's text depends on its input (a structured parameter in an insert names the keys it carries), so it runs through .run(), not as a Standard Query.`);
+      // Carries, so its text depends on the input: such a statement runs through `.run()`.
+      if (bound.text !== statementText()) {throw new TypeError(`${module.source ? `${module.source}: ` : ""}This statement's text depends on its input (a structured parameter in an insert names the keys it carries), so it runs through .run(), not as a Standard Query.`);}
       return bound.values as StandardQueryV1.RawValue<D>[];
     },
     decode(rows) {
       const columns = module.columns;
-      if (columns === undefined) throw new TypeError("A query defined by hand without its columns cannot map rows to its output: a module a build step writes carries them.");
+      if (matchesUndefined(columns)) {throw new TypeError("A query defined by hand without its columns cannot map rows to its output: a module a build step writes carries them.");}
       // SQLite's values go through `.run()`'s own `normalize`, its refusals of a storage class the
-      // column's type does not allow included. Its default reading suits a driver whose integer
-      // mode is unknown: a BigInt is read exact, and a number past 2^53 in an INTEGER column is
-      // refused as a rounded one.
+      // Column's type does not allow included. Its default reading suits a driver whose integer
+      // Mode is unknown: a BigInt is read exact, and a number past 2^53 in an INTEGER column is
+      // Refused as a rounded one.
       const sqlite = module.dialect === "sqlite";
-      if (!sqlite) decoders ??= columns.map(([name, kind, delim]) => decoder(module.dialect, name, kind, delim));
+      if (!sqlite) {decoders ??= columns.map(([name, kind, delim]) => decoder(module.dialect, name, kind, delim));}
       const keyed = rows.map((raw) => {
-        if (raw.length !== columns.length) throw new DecodeError(`The statement selects ${columns.length} columns, and a row has ${raw.length}.`);
+        if (raw.length !== columns.length) {throw new DecodeError(`The statement selects ${columns.length} columns, and a row has ${raw.length}.`);}
         const row: Record<string, unknown> = {};
-        for (let i = 0; i < raw.length; i++) row[columns[i]![0]] = raw[i] === null || raw[i] === undefined ? null : sqlite ? raw[i] : decoders![i]!(raw[i]);
+        for (let i = 0; i < raw.length; i++) {row[columns[i]![0]] = matchesNull(raw[i]) || matchesUndefined(raw[i]) ? null : sqlite ? raw[i] : decoders![i]!(raw[i]);}
         return row;
       });
       return materialize(sqlite ? (normalize(keyed, columns) as Record<string, unknown>[]) : keyed);

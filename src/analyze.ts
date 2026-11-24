@@ -1,17 +1,20 @@
 // One analysis path for every consumer of a `.sql` file — the type check, the bundler plugins,
-// the runtime hook and `reylo generate` — and one cache they share: `.reylo/` beside the project
-// file, one entry per statement. The cache is only for speed. An entry records the schema it was
-// analyzed against; while the database answers, an entry for another schema is analyzed again,
-// and while it does not, or no URL names it, the entries are used as they are, so a build that
-// cannot reach the database runs on what `reylo generate` or an earlier type check wrote.
+// The runtime hook and `reylo generate` — and one cache they share: `.reylo/` beside the project
+// File, one entry per statement. The cache is only for speed. An entry records the schema it was
+// Analyzed against; while the database answers, an entry for another schema is analyzed again,
+// And while it does not, or no URL names it, the entries are used as they are, so a build that
+// Cannot reach the database runs on what `reylo generate` or an earlier type check wrote.
 import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { join } from "node:path";
-import { anyEngine, AnswerCache, engine, reason, MissingEngine, Unreachable, type Analysis, type Engine, type Lexed } from "./engine.ts";
-import { duckdbPath, hclPath, packageDir, resolveProject, sqlitePath, type ResolvedProject } from "./project.ts";
+import { anyEngine, AnswerCache, engine, reason, MissingEngine, Unreachable } from './engine.ts';
+import type { Analysis, Engine, Lexed } from './engine.ts';
+import { duckdbPath, hclPath, packageDir, resolveProject, sqlitePath } from './project.ts';
+import type { ResolvedProject } from './project.ts';
 import { duckdbDatabase } from "./duckdb.ts";
 import { NotMysql, refusedLogin } from "./connection.ts";
 import type { SqliteDriver } from "./sqlite-drivers.ts";
+import { matchesNull, matchesUndefined } from "./native-predicates.ts";
 
 /** What `.reylo/` holds for one statement. */
 export type Entry = {
@@ -37,14 +40,14 @@ type Io = { analyze(sql: string): Promise<Analysis>; query(sql: string, params: 
 
 const ENTRY_VERSION = 1;
 // How long a schema fingerprint is trusted, as long as a statement answer: a migration shows up
-// in a running dev server or editor within seconds. Once the database is found unreachable, the
-// session stays offline for a minute instead of paying the connect timeout per file.
-const SCHEMA_TTL = 5_000;
+// In a running dev server or editor within seconds. Once the database is found unreachable, the
+// Session stays offline for a minute instead of paying the connect timeout per file.
+const SCHEMA_TTL = 5000;
 const OFFLINE_TTL = 60_000;
 // A build step's session closes its connection a moment after its last file, so that a build
-// process ends when its work does: the plugins whose bundler says when a build ends close it then
+// Process ends when its work does: the plugins whose bundler says when a build ends close it then
 // (`releaseConnections`), and a loader (webpack, Rspack, Turbopack) has no such signal. The type
-// check's session keeps its connection.
+// Check's session keeps its connection.
 const BUILD_IDLE = 250;
 
 const sessions = new Map<string, Session>();
@@ -53,17 +56,17 @@ const sessions = new Map<string, Session>();
  * The project a directory belongs to, its file read by the engine's core, and the engine of its own
  * database, or why that cannot be run.
  */
-async function openProject(dir: string, env: Record<string, string | undefined>): Promise<{ project: ResolvedProject; engine: Engine | MissingEngine }> {
+const openProject = async function (dir: string, env: Record<string, string | undefined>): Promise<{ project: ResolvedProject; engine: Engine | MissingEngine }> {
   const project = resolveProject(await anyEngine(), dir, env);
   const own = await engine(project.dialect).catch((e: unknown) => (e instanceof MissingEngine ? e : new MissingEngine((e as Error).message)));
   return { project, engine: own };
-}
+};
 
 export class Session {
   /** The project as resolved when the session opened, or again once a failed `direct_url` command succeeds (`#reread`). */
-  project!: ResolvedProject;
+  public project!: ResolvedProject;
   /** The project's directory, which holds `.reylo/`. */
-  readonly root: string;
+  public readonly root: string;
   /** The engine of the project's database, or why there is none, which an analysis reports. */
   #engine!: Engine | MissingEngine;
   #engineFingerprint!: string;
@@ -101,39 +104,39 @@ export class Session {
    * restart.
    */
   async #reread(): Promise<void> {
-    if (!this.project.error || !this.project.refreshUrl) return;
+    if (!this.project.error || !this.project.refreshUrl) {return;}
     const { project, engine } = await openProject(this.#dir, this.#env);
-    if (project.error) return;
+    if (project.error) {return;}
     this.#adopt(engine, project);
     this.#schema = undefined;
   }
 
   /** The build steps' session for the project a file or directory belongs to: one per project (and connection) and process. */
-  static async for(from: string, env: Record<string, string | undefined> = process.env): Promise<Session> {
+  public static async for(from: string, env: Record<string, string | undefined> = process.env): Promise<Session> {
     // From the package's directory, so that a message names a file as the project sees it.
     const dir = packageDir(from);
     const { project, engine } = await openProject(dir, env);
     // A setting the build step reads (`sqlcommenter`) is part of the key, so a change to it in the
-    // project file reaches a running watch process.
+    // Project file reaches a running watch process.
     const key = JSON.stringify([project.root, project.url ?? null, project.error ?? null, project.sqlcommenter, engine instanceof MissingEngine ? engine.message : null]);
     let session = sessions.get(key);
-    if (!session) sessions.set(key, (session = new Session(engine, project, BUILD_IDLE, dir, env)));
+    if (!session) {sessions.set(key, (session = new Session(engine, project, BUILD_IDLE, dir, env)));}
     return session;
   }
 
   /** A session of its own, for a caller that must not share one (the type check, a test); it keeps its connection until closed. */
-  static async open(from: string, env: Record<string, string | undefined> = process.env, idle = Infinity): Promise<Session> {
+  public static async open(from: string, env: Record<string, string | undefined> = process.env, idle = Infinity): Promise<Session> {
     const { project, engine } = await openProject(from, env);
     return new Session(engine, project, idle, from, env);
   }
 
   /** Every build-step session this process opened, for a caller that ends them (`reylo generate`). */
-  static opened(): Session[] {
+  public static opened(): Session[] {
     return [...sessions.values()];
   }
 
-  async lex(sql: string): Promise<Lexed> {
-    if (this.#engine instanceof MissingEngine) throw this.#engine;
+  public async lex(sql: string): Promise<Lexed> {
+    if (this.#engine instanceof MissingEngine) {throw this.#engine;}
     return this.#engine.lexAsync(sql, this.project.dialect);
   }
 
@@ -144,7 +147,7 @@ export class Session {
    * session that cannot reach its database, or has no URL, reads another server's entry for the
    * statement where it has none of its own (`#offlineEntry`).
    */
-  entryFile(sql: string): string {
+  public entryFile(sql: string): string {
     return join(this.root, ".reylo", "queries", `${this.#statementKey(sql)}-${sha256(this.#server()).slice(0, 16)}.json`);
   }
 
@@ -156,7 +159,7 @@ export class Session {
   #offlineEntry(sql: string): { file: string; entry: Entry } | undefined {
     const own = this.entryFile(sql);
     const entry = readEntry(own);
-    if (entry) return { file: own, entry };
+    if (entry) {return { file: own, entry };}
     const dir = join(this.root, ".reylo", "queries");
     const prefix = `${this.#statementKey(sql)}-`;
     let names: string[];
@@ -166,11 +169,11 @@ export class Session {
       return undefined;
     }
     // Newest by the time the entry records, since a copy (`cp -r`, `fs.cpSync`, a CI artifact) may
-    // reset the file's.
+    // Reset the file's.
     let newest: { file: string; entry: Entry } | undefined;
     for (const file of names.map((n) => join(dir, n))) {
       const other = readEntry(file);
-      if (other && (!newest || (other.at ?? -Infinity) > (newest.entry.at ?? -Infinity))) newest = { file, entry: other };
+      if (other && (!newest || (other.at ?? -Infinity) > (newest.entry.at ?? -Infinity))) {newest = { file, entry: other };}
     }
     return newest;
   }
@@ -180,7 +183,7 @@ export class Session {
    * database. `store: false` neither reads nor writes `.reylo/`, for a statement that is no file of
    * the project (`reylo play`'s, analyzed at each keystroke).
    */
-  async analyze(sql: string, options: { force?: boolean; store?: boolean } = {}): Promise<Outcome> {
+  public async analyze(sql: string, options: { force?: boolean; store?: boolean } = {}): Promise<Outcome> {
     clearTimeout(this.#timer);
     this.#busy++;
     try {
@@ -188,12 +191,12 @@ export class Session {
       const outcome = await this.#analyze(sql, options);
       return outcome.ok && this.project.dialect === "sqlite" ? await this.#onDrivers(sql, outcome) : outcome;
     } finally {
-      if (--this.#busy === 0 && this.#io && Number.isFinite(this.#idle)) this.#timer = setTimeout(() => this.#release(), this.#idle).unref();
+      if (--this.#busy === 0 && this.#io && Number.isFinite(this.#idle)) {this.#timer = setTimeout(() => this.#release(), this.#idle).unref();}
     }
   }
 
   /** Rows of a catalog query on the session's connection, as arrays of values: what `reylo play` completes. */
-  async query(sql: string, params: unknown[] = []): Promise<unknown[][]> {
+  public async query(sql: string, params: unknown[] = []): Promise<unknown[][]> {
     return (await this.#connection()).query(sql, params);
   }
 
@@ -206,11 +209,11 @@ export class Session {
    */
   async #onDrivers(sql: string, outcome: Extract<Outcome, { ok: true }>): Promise<Outcome> {
     const { analysis } = outcome;
-    if (analysis.diagnostics.length || this.#schema?.value == null) return outcome;
+    if (analysis.diagnostics.length || this.#schema?.value == null) {return outcome;}
     const io = await this.#connection().catch(() => undefined);
     for (const driver of io?.drivers ?? []) {
       const refusal = await driver.refuses(analysis.rewritten.sql, analysis.rewritten.order.length);
-      if (refusal === undefined) continue;
+      if (matchesUndefined(refusal)) {continue;}
       const { placeRefusal } = await import("./sqlite-drivers.ts");
       const { start, length } = placeRefusal(sql, refusal);
       const message = driver.says(refusal);
@@ -220,26 +223,26 @@ export class Session {
   }
 
   async #analyze(sql: string, options: { force?: boolean; store?: boolean }): Promise<Outcome> {
-    if (this.project.error) return { ok: false, message: this.project.error, code: 11 };
+    if (this.project.error) {return { ok: false, message: this.project.error, code: 11 };}
     // With no URL, `.reylo/` answers as it does where the database cannot be reached (the dialect
-    // is the installed engine's), and a statement it lacks needs a URL.
+    // Is the installed engine's), and a statement it lacks needs a URL.
     if (!this.project.url) {
       const hit = this.#engine instanceof MissingEngine || options.force ? undefined : this.#offlineEntry(sql);
       return hit ? { ok: true, analysis: hit.entry.analysis, source: "cache", entry: hit.file } : { ok: false, message: this.project.missingUrl, code: 4 };
     }
     // The URL names the database, whose engine package the project has to have installed.
     const engine = this.#engine;
-    if (engine instanceof MissingEngine) return { ok: false, message: engine.message, code: 11 };
+    if (engine instanceof MissingEngine) {return { ok: false, message: engine.message, code: 11 };}
     const file = this.entryFile(sql);
     const schema = await this.schema();
-    if (schema.fatal) return { ok: false, message: schema.error!, code: 5 };
-    if (schema.value === null) {
+    if (schema.fatal) {return { ok: false, message: schema.error!, code: 5 };}
+    if (matchesNull(schema.value)) {
       const hit = options.force ? undefined : this.#offlineEntry(sql);
-      if (hit) return { ok: true, analysis: hit.entry.analysis, source: "cache", entry: hit.file };
+      if (hit) {return { ok: true, analysis: hit.entry.analysis, source: "cache", entry: hit.file };}
       return { ok: false, message: `${this.cannotConnect(schema.error)}; .reylo has no analysis of this statement, so run reylo generate where the database can be reached.`, code: 5 };
     }
     const entry = options.force || options.store === false ? undefined : readEntry(file);
-    if (entry && entry.schema === schema.value) return { ok: true, analysis: entry.analysis, source: "cache", entry: file };
+    if (entry && entry.schema === schema.value) {return { ok: true, analysis: entry.analysis, source: "cache", entry: file };}
     let analysis: Analysis;
     const io = this.#connection();
     try {
@@ -258,7 +261,7 @@ export class Session {
       }
       return { ok: false, message: (e as Error).message, code: 5 };
     }
-    if (options.store !== false) writeEntry(this.root, file, { version: ENTRY_VERSION, dialect: this.project.dialect, schema: schema.value, analysis, at: Date.now() });
+    if (options.store !== false) {writeEntry(this.root, file, { version: ENTRY_VERSION, dialect: this.project.dialect, schema: schema.value, analysis, at: Date.now() });}
     return { ok: true, analysis, source: "database", entry: file };
   }
 
@@ -268,14 +271,14 @@ export class Session {
    * check refuses (MariaDB, `NotMysql`). A server that refuses the
    * fingerprint query gets a value no entry matches, so every statement is analyzed live.
    */
-  async schema(): Promise<{ value: string | null; error?: string; fatal?: boolean }> {
+  public async schema(): Promise<{ value: string | null; error?: string; fatal?: boolean }> {
     const now = Date.now();
     const source = this.project.url && hclPath(this.project.url, this.root);
     if (source) {
       // Unlike a remote database, a local source is checked before every cache hit, without a TTL.
       try {
         const hash = sha256(readFileSync(source, "utf8"));
-        if (hash !== this.#hclHash || this.#schema?.value === null) {
+        if (hash !== this.#hclHash || matchesNull(this.#schema?.value)) {
           await this.#release();
           this.#schema = undefined;
           this.#hclHash = hash;
@@ -286,7 +289,7 @@ export class Session {
         return this.#schema;
       }
     }
-    if (this.#schema && now - this.#schema.at < (this.#schema.value === null ? OFFLINE_TTL : SCHEMA_TTL)) return this.#schema;
+    if (this.#schema && now - this.#schema.at < (matchesNull(this.#schema.value) ? OFFLINE_TTL : SCHEMA_TTL)) {return this.#schema;}
     const pending = this.#connection();
     let io: Io;
     try {
@@ -301,7 +304,7 @@ export class Session {
       const rows = source ? [] : await io.query(FINGERPRINT[this.project.dialect], []);
       const value = createHash("sha256").update(JSON.stringify(source ? [this.#hclHash, rows] : rows)).digest("hex").slice(0, 16);
       // The engine's answers describe the old schema too.
-      if (this.#schema?.value && this.#schema.value !== value) await io.forget().catch(() => {});
+      if (this.#schema?.value && this.#schema.value !== value) {await io.forget().catch(() => {});}
       this.#schema = { value, at: now };
     } catch (e) {
       if (source) {
@@ -318,33 +321,33 @@ export class Session {
   }
 
   /** Reads the schema's fingerprint again now, however recent the last read; whether it changed. */
-  async recheck(): Promise<boolean> {
+  public async recheck(): Promise<boolean> {
     const before = this.#schema?.value;
-    if (this.#schema) this.#schema = { ...this.#schema, at: -Infinity };
+    if (this.#schema) {this.#schema = { ...this.#schema, at: -Infinity };}
     return (await this.schema()).value !== before;
   }
 
   /** Where the database was looked for, and where that came from; never the credentials. */
-  cannotConnect(why?: string): string {
+  public cannotConnect(why?: string): string {
     const { dialect, url, root, urlSource } = this.project;
-    if (dialect === "sqlite") return `Cannot open the database ${sqlitePath(url ?? "", root)} (${urlSource})${why ? `: ${why}` : ""}`;
-    if (dialect === "duckdb") return `Cannot open the database ${duckdbPath(url ?? "", root)} (${urlSource})${why ? `: ${why}` : ""}`;
+    if (dialect === "sqlite") {return `Cannot open the database ${sqlitePath(url ?? "", root)} (${urlSource})${why ? `: ${why}` : ""}`;}
+    if (dialect === "duckdb") {return `Cannot open the database ${duckdbPath(url ?? "", root)} (${urlSource})${why ? `: ${why}` : ""}`;}
     return `Cannot connect to the database at ${this.where()} (${urlSource})${why ? `: ${why}` : ""}`;
   }
 
   /** Why a server the type check cannot read is refused, and what to point it at instead. */
-  notMysql(e: NotMysql): string {
+  public notMysql(e: NotMysql): string {
     return `Cannot type-check against the database at ${this.where()} (${this.project.urlSource}): it is ${e.server}, and Reylo type-checks MySQL statements against MySQL. Point the type check's URL at a MySQL server, 8.4 or later, with the same schema.`;
   }
 
   /** The server, without credentials, that names this session's entries: none with no URL, which writes none. */
   #server(): string {
     const { dialect, url, root } = this.project;
-    if (!url) return "";
+    if (!url) {return "";}
     const source = hclPath(url, root);
-    if (source) return `hcl:${source}`;
-    if (dialect === "sqlite") return sqlitePath(url, root);
-    if (dialect === "duckdb") return duckdbPath(url, root);
+    if (source) {return `hcl:${source}`;}
+    if (dialect === "sqlite") {return sqlitePath(url, root);}
+    if (dialect === "duckdb") {return duckdbPath(url, root);}
     try {
       const u = new URL(url);
       return `${u.protocol}//${u.username}@${u.host}${u.pathname}`;
@@ -354,10 +357,10 @@ export class Session {
   }
 
   /** The database as a person names it: host, port and database, or the SQLite file. */
-  where(): string {
+  public where(): string {
     const { dialect, url, root } = this.project;
-    if (dialect === "sqlite") return sqlitePath(url ?? "", root);
-    if (dialect === "duckdb") return duckdbPath(url ?? "", root);
+    if (dialect === "sqlite") {return sqlitePath(url ?? "", root);}
+    if (dialect === "duckdb") {return duckdbPath(url ?? "", root);}
     try {
       const u = new URL(url ?? "");
       return `${u.hostname || u.searchParams.get("host") || "localhost"}${u.port ? `:${u.port}` : ""}${u.pathname}`;
@@ -366,13 +369,13 @@ export class Session {
     }
   }
 
-  async close(): Promise<void> {
-    for (const [key, session] of sessions) if (session === this) sessions.delete(key);
+  public async close(): Promise<void> {
+    for (const [key, session] of sessions) {if (session === this) {sessions.delete(key);}}
     await this.release();
   }
 
   /** Closes the connection now, for a caller that knows no file is coming; the next analysis opens another. */
-  async release(): Promise<void> {
+  public async release(): Promise<void> {
     clearTimeout(this.#timer);
     await this.#release();
   }
@@ -381,7 +384,7 @@ export class Session {
   async #release(): Promise<void> {
     const io = this.#io;
     this.#io = undefined;
-    if (io) await io.then((i) => i.close()).catch(() => {});
+    if (io) {await io.then((i) => i.close()).catch(() => {});}
   }
 
   #connection(): Promise<Io> {
@@ -389,30 +392,30 @@ export class Session {
       let first: Io;
       try {
         first = await this.#open(this.#url!);
-      } catch (e) {
-        const fresh = this.#freshUrl(e);
-        if (fresh === undefined) throw e;
+      } catch (error) {
+        const fresh = this.#freshUrl(error);
+        if (matchesUndefined(fresh)) {throw error;}
         first = await this.#open(fresh);
       }
-      if (!this.project.refreshUrl) return first;
+      if (!this.project.refreshUrl) {return first;}
       // A refused login can surface at any call, where a token expired while the session was open:
-      // the call is asked once more on a connection with the command's fresh output. The calls refused
-      // together, as every call waiting when a token expires is, share one reopen, so that the
-      // command runs once and one connection replaces the old; a call that fails on a connection
-      // already replaced is asked again on the one that replaced it.
+      // The call is asked once more on a connection with the command's fresh output. The calls refused
+      // Together, as every call waiting when a token expires is, share one reopen, so that the
+      // Command runs once and one connection replaces the old; a call that fails on a connection
+      // Already replaced is asked again on the one that replaced it.
       let current: Promise<Io> = Promise.resolve(first);
       const again = async <T>(call: (on: Io) => Promise<T>): Promise<T> => {
         const used = current;
         const on = await used;
         try {
           return await call(on);
-        } catch (e) {
+        } catch (error) {
           if (current === used) {
-            if (!refusedLogin(e)) throw e;
+            if (!refusedLogin(error)) {throw error;}
             current = (async () => {
               await on.close().catch(() => {});
-              const fresh = this.#freshUrl(e);
-              if (fresh === undefined) throw e;
+              const fresh = this.#freshUrl(error);
+              if (matchesUndefined(fresh)) {throw error;}
               return this.#open(fresh);
             })();
             current.catch(() => {});
@@ -430,7 +433,7 @@ export class Session {
     })();
     const io = this.#io;
     io.catch(() => {
-      if (this.#io === io) this.#io = undefined;
+      if (this.#io === io) {this.#io = undefined;}
     });
     return io;
   }
@@ -441,7 +444,7 @@ export class Session {
    * late never ends one opened since.
    */
   #drop(io: Promise<Io>): void {
-    if (this.#io !== io) return;
+    if (this.#io !== io) {return;}
     this.#io = undefined;
     io.then((i) => i.close()).catch(() => {});
   }
@@ -452,9 +455,9 @@ export class Session {
    * is tried twice on the same password.
    */
   #freshUrl(e: unknown): string | undefined {
-    if (!refusedLogin(e)) return undefined;
+    if (!refusedLogin(e)) {return undefined;}
     const fresh = this.project.refreshUrl?.();
-    if (fresh === undefined || fresh === this.#url) return undefined;
+    if (matchesUndefined(fresh) || fresh === this.#url) {return undefined;}
     this.#url = fresh;
     return fresh;
   }
@@ -462,9 +465,9 @@ export class Session {
   async #open(url: string): Promise<Io> {
     const { dialect, root } = this.project;
     // The URL names a database whose engine the project lacks: its error, as the import's.
-    if (this.#engine instanceof MissingEngine) throw this.#engine;
+    if (this.#engine instanceof MissingEngine) {throw this.#engine;}
     const source = hclPath(url, root);
-    if (source) return (await import("./hcl.ts")).hclCatalog(source, this.#engine);
+    if (source) {return (await import("./hcl.ts")).hclCatalog(source, this.#engine);}
     // DuckDB runs inside the app: the engine's needs are answered by the project's own DuckDB
     // (src/duckdb.ts), which opens the file for each analysis and holds nothing between them.
     if (dialect === "duckdb") {
@@ -479,15 +482,15 @@ export class Session {
       };
     }
     // The engine opens the database itself: on SQLite the file the project names, and the statement
-    // is prepared on the app's own SQLite drivers too, which are the app's, not the engine's.
+    // Is prepared on the app's own SQLite drivers too, which are the app's, not the engine's.
     const target = dialect === "sqlite" ? sqlitePath(url, root) : url;
     const c = await this.#engine.open(target);
     let drivers: SqliteDriver[] | undefined;
     try {
       drivers = dialect === "sqlite" ? await (await import("./sqlite-drivers.ts")).openProjectDrivers(root, target) : undefined;
-    } catch (e) {
+    } catch (error) {
       await c.close();
-      throw e;
+      throw error;
     }
     return {
       analyze: (sql) => c.analyze(sql),
@@ -510,7 +513,7 @@ export async function releaseConnections(): Promise<void> {
 const sha256 = (text: string) => createHash("sha256").update(text).digest("hex");
 
 function readEntry(file: string): Entry | undefined {
-  if (!existsSync(file)) return undefined;
+  if (!existsSync(file)) {return undefined;}
   try {
     const entry = JSON.parse(readFileSync(file, "utf8")) as Entry;
     return entry.version === ENTRY_VERSION ? entry : undefined;
@@ -520,18 +523,18 @@ function readEntry(file: string): Entry | undefined {
 }
 
 // Several processes write `.reylo/` at once (an editor's type check, a dev server, a build), so an
-// entry is written to a file of its own and renamed into place: a reader sees a whole entry or
-// none. `.reylo/.gitignore` keeps the directory out of git, as pytest's and ruff's caches do. The
-// cache is only for speed, so a directory that cannot be written (a read-only checkout) is not an
-// error.
+// Entry is written to a file of its own and renamed into place: a reader sees a whole entry or
+// None. `.reylo/.gitignore` keeps the directory out of git, as pytest's and ruff's caches do. The
+// Cache is only for speed, so a directory that cannot be written (a read-only checkout) is not an
+// Error.
 function writeEntry(root: string, file: string, entry: Entry): void {
   const dir = join(root, ".reylo");
   const tmp = `${file}.${process.pid}.${Math.random().toString(36).slice(2)}.tmp`;
   try {
     mkdirSync(join(dir, "queries"), { recursive: true });
     const ignore = join(dir, ".gitignore");
-    if (!existsSync(ignore)) writeFileSync(ignore, "# reylo's cache: written by the type check, the build steps and reylo generate; never committed.\n*\n");
-    writeFileSync(tmp, JSON.stringify(entry) + "\n");
+    if (!existsSync(ignore)) {writeFileSync(ignore, "# reylo's cache: written by the type check, the build steps and reylo generate; never committed.\n*\n");}
+    writeFileSync(tmp, `${JSON.stringify(entry)  }\n`);
     renameSync(tmp, file);
   } catch {
     rmSync(tmp, { force: true });
@@ -551,13 +554,13 @@ function writeEntry(root: string, file: string, entry: Entry): void {
  * `text || "char"` is ambiguous, and a query the server refuses leaves every entry unverified.
  */
 // The Postgres query names every operator, function, type and table as pg_catalog's, and converts a
-// value to text only by a built-in cast (a name, a "char", a boolean) or by its type's output
-// function (`textin(oidout(…))`), as the upstream engine's catalog queries do (engine/postgres/src/postgres.rs):
-// under a search path that puts a user's schema before pg_catalog, a user's `||` that answers NULL
-// would leave every row NULL, and the fingerprint would never move. Each row is the text the plain
+// Value to text only by a built-in cast (a name, a "char", a boolean) or by its type's output
+// Function (`textin(oidout(…))`), as the upstream engine's catalog queries do (engine/postgres/src/postgres.rs):
+// Under a search path that puts a user's schema before pg_catalog, a user's `||` that answers NULL
+// Would leave every row NULL, and the fingerprint would never move. Each row is the text the plain
 // `||` of each field makes. The server's own `pg_get_viewdef` and `pg_get_ruledef` read a rule
-// through a query of bare operators, which a user's `=` of oids answers too: a view's or a rule's
-// row is then NULL, and left out.
+// Through a query of bare operators, which a user's `=` of oids answers too: a view's or a rule's
+// Row is then NULL, and left out.
 const NS = `not (n.nspname operator(pg_catalog.=) any ('{pg_catalog,information_schema}'::pg_catalog.name[])) and n.nspname operator(pg_catalog.!~) '^pg_(toast|temp)'::pg_catalog.text`;
 const cat = (...parts: string[]) => parts.join(" operator(pg_catalog.||) ");
 const lit = (s: string) => `'${s}'::pg_catalog.text`;
@@ -605,7 +608,7 @@ const FINGERPRINT: Record<ResolvedProject["dialect"], string> = {
   sqlite: `select type, name, tbl_name, coalesce(sql, '') from sqlite_schema
     union all select 'function', name, type, narg from pragma_function_list order by 1, 2, 3, 4`,
   // The columns, keys, views, types and macros of every attached database, and the version, whose
-  // functions and binder an analysis reads.
+  // Functions and binder an analysis reads.
   duckdb: `select md5(coalesce(string_agg(x, chr(10) order by x), '')) from (
     select concat_ws(' ', 'v', version()) as x
     union all select concat_ws(' ', 'c', database_name, schema_name, table_name, column_index, column_name, data_type, is_nullable, coalesce(column_default, ''), md5(coalesce(comment, ''))) from duckdb_columns() where not internal

@@ -14,9 +14,10 @@ test("get_user finds ada, and null for an id nobody has", async () => {
 });
 
 test("create_post returns the new row, which list_posts then lists", async () => {
-  // a transaction rolled back at the end, so the test leaves no row behind
+  // A transaction rolled back at the end, so the test leaves no row behind
   db.run("begin");
   try {
+    // oxlint-disable-next-line rules/no-effect-runtime-run -- Reylo's public runSync executes SQLite through the native driver without Effect.
     const post = createPost.runSync(db, { user_id: 1, title: "From the test", body: "draft" });
     expect(post.title).toBe("From the test");
 

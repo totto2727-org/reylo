@@ -1,6 +1,8 @@
+// oxlint-disable-next-line rules/no-node-imports, vitest/no-import-node-test -- Nub runs this suite with Node's test runner and provides the runtime used by the SQLite integration tests.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { existsSync, mkdirSync, mkdtempSync, symlinkSync, writeFileSync } from "node:fs";
+import { writeFile } from "node:fs/promises";
 import { DatabaseSync } from "node:sqlite";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -9,20 +11,20 @@ import { placeRefusal, projectDrivers } from "../src/sqlite-drivers.ts";
 import { DRIVERS } from "./helpers.ts";
 
 // The drivers are the labs' (lab/drivers), linked into each project as an install would put them.
-// libSQL carries SQLite 3.45.1, better-sqlite3 3.53 and sqlite3 3.52: `json_pretty` came in 3.46
-// and `iif` with two arguments in 3.48.
+// LibSQL carries SQLite 3.45.1, better-sqlite3 3.53 and sqlite3 3.52: `json_pretty` came in 3.46
+// And `iif` with two arguments in 3.48.
 const missing = ["better-sqlite3", "@libsql/client", "sqlite3"].find((d) => !existsSync(join(DRIVERS, d)));
 const skip = missing ? `lab/drivers is not installed (no ${missing})` : false;
 
-function project(drivers: string[]): { root: string; env: Record<string, string> } {
+const project = function (drivers: string[]): { root: string; env: Record<string, string> } {
   const root = mkdtempSync(join(tmpdir(), "reylo-drivers-"));
   writeFileSync(join(root, "package.json"), JSON.stringify({ dependencies: Object.fromEntries(drivers.map((d) => [d, "*"])) }));
-  for (const d of drivers) link(root, d);
+  for (const d of drivers) {link(root, d);}
   const db = new DatabaseSync(join(root, "app.db"));
   db.exec("create table notes (id integer primary key, body text not null, meta text)");
   db.close();
   return { root, env: { DATABASE_URL: "file:./app.db" } };
-}
+};
 
 function link(root: string, driver: string) {
   const to = join(root, "node_modules", driver);
@@ -30,7 +32,7 @@ function link(root: string, driver: string) {
   symlinkSync(join(DRIVERS, driver), to);
 }
 
-async function analyze(root: string, env: Record<string, string>, sql: string) {
+const analyze = async function (root: string, env: Record<string, string>, sql: string) {
   const session = await Session.open(root, env);
   try {
     const outcome = await session.analyze(sql);
@@ -39,11 +41,12 @@ async function analyze(root: string, env: Record<string, string>, sql: string) {
   } finally {
     await session.close();
   }
-}
+};
 
 const PRETTY = "select id, json_pretty(meta) as meta from notes where id = :id";
 const IIF = "select id, iif(id > 1, 'big') as size from notes";
 
+// oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
 test("a statement the app's SQLite refuses fails the type check at the call, with that SQLite's message", { skip }, async () => {
   const { root, env } = project(["@libsql/client"]);
   const pretty = await analyze(root, env, PRETTY);
@@ -58,26 +61,29 @@ test("a statement the app's SQLite refuses fails the type check at the call, wit
   assert.deepEqual((await analyze(root, env, "select id, iif(id > 1, 'big', 'small') as size from notes")).analysis.diagnostics, []);
 });
 
+// oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
 test("drivers whose SQLite has the function prepare it, and a project that lists no driver is not checked", { skip }, async () => {
   for (const drivers of [["better-sqlite3", "sqlite3"], []]) {
     const { root, env } = project(drivers);
     assert.deepEqual(projectDrivers(root), drivers);
-    for (const sql of [PRETTY, IIF]) assert.deepEqual((await analyze(root, env, sql)).analysis.diagnostics, [], `${drivers.join(", ") || "no driver"}: ${sql}`);
+    for (const sql of [PRETTY, IIF]) {assert.deepEqual((await analyze(root, env, sql)).analysis.diagnostics, [], `${drivers.join(", ") || "no driver"}: ${sql}`);}
   }
 });
 
+// oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
 test("an analysis read from .reylo/ is checked on the drivers too", { skip }, async () => {
   const { root, env } = project([]);
   const first = await analyze(root, env, PRETTY);
   assert.deepEqual([first.source, first.analysis.diagnostics], ["database", []]);
   // The project takes libSQL: the entry still matches the schema, and the driver refuses it.
-  writeFileSync(join(root, "package.json"), JSON.stringify({ dependencies: { "@libsql/client": "*" } }));
+  await writeFile(join(root, "package.json"), JSON.stringify({ dependencies: { "@libsql/client": "*" } }));
   link(root, "@libsql/client");
   const second = await analyze(root, env, PRETTY);
   assert.equal(second.source, "cache");
   assert.match(second.analysis.diagnostics[0]?.message ?? "", /^@libsql\/client runs SQLite 3\.45\.1, which refuses this statement: no such function: json_pretty$/);
 });
 
+// oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
 test("a session whose connection was released checks a statement it reads from .reylo/ all the same", { skip }, async () => {
   const { root, env } = project(["@libsql/client"]);
   const session = await Session.open(root, env);
@@ -95,26 +101,28 @@ test("a session whose connection was released checks a statement it reads from .
   }
 });
 
+// oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
 test("a refusal is placed at the call or the text it names, in UTF-8 bytes", () => {
   const sql = "-- café\nselect n.id from notes n right join notes m on m.id = n.id";
   const bytes = (s: string) => new TextEncoder().encode(s).length;
   assert.deepEqual(placeRefusal(sql, 'near "right": syntax error'), { start: bytes(sql.slice(0, sql.indexOf("right"))), length: 5 });
-  assert.deepEqual(placeRefusal("select JSON_PRETTY (x) from t", "no such function: json_pretty"), { start: 7, length: 11 });
+  assert.deepEqual(placeRefusal("select JSON_PRETTY (x) from t", "no such function: json_pretty"), { length: 11, start: 7 });
   // A message that names nothing in the statement points at its first word.
-  assert.deepEqual(placeRefusal("  select 1", "unrecognized token"), { start: 2, length: 6 });
+  assert.deepEqual(placeRefusal("  select 1", "unrecognized token"), { length: 6, start: 2 });
 });
 
 // Cloudflare D1 through the project's wrangler, which runs it locally in workerd: D1 refuses
-// functions its SQLite has (`json_pretty`, the alias `ceiling` where `ceil` is allowed), and says so
-// only when a statement compiles.
+// Functions its SQLite has (`json_pretty`, the alias `ceiling` where `ceil` is allowed), and says so
+// Only when a statement compiles.
 const d1 = skip || (!existsSync(join(DRIVERS, "wrangler")) && "lab/drivers has no wrangler installed");
 
-function worker(root: string, d1Binding: boolean) {
+const worker = function (root: string, d1Binding: boolean) {
   const config = { name: "reylo-test", main: "worker.js", compatibility_date: "2026-10-01", ...(d1Binding && { d1_databases: [{ binding: "DB", database_name: "reylo-test", database_id: "00000000-0000-0000-0000-000000000000" }] }) };
   writeFileSync(join(root, "wrangler.jsonc"), JSON.stringify(config));
   writeFileSync(join(root, "worker.js"), "export default { fetch() { return new Response(''); } };\n");
-}
+};
 
+// oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
 test("a statement Cloudflare D1 refuses fails the type check at the call, with D1's message", { skip: d1, timeout: 120_000 }, async () => {
   const { root, env } = project(["wrangler"]);
   worker(root, true);
@@ -140,6 +148,7 @@ test("a statement Cloudflare D1 refuses fails the type check at the call, with D
   }
 });
 
+// oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
 test("a project whose wrangler config binds no D1 database is not asked, until its config binds one", { skip: d1, timeout: 120_000 }, async () => {
   const { root, env } = project(["wrangler"]);
   worker(root, false);
@@ -150,6 +159,7 @@ test("a project whose wrangler config binds no D1 database is not asked, until i
   assert.match((await analyze(root, env, PRETTY)).analysis.diagnostics[0]?.message ?? "", /refuses this statement: not authorized to use function: json_pretty$/);
 });
 
+// oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
 test("D1 compiles each statement against the schema as it is now, after a migration and in a later session", { skip: d1, timeout: 120_000 }, async () => {
   const { root, env } = project(["wrangler"]);
   worker(root, true);

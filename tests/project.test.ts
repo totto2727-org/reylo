@@ -1,3 +1,4 @@
+// oxlint-disable-next-line rules/no-node-imports, vitest/no-import-node-test -- Nub runs this suite with Node's test runner and provides the runtime used by the SQLite integration tests.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
@@ -10,18 +11,19 @@ import { Session } from "../src/analyze.ts";
 // Any installed engine reads the shared project-file format.
 
 // A project tree: `files` maps a path under a fresh directory to its text.
-function tree(files: Record<string, string>): string {
+const tree = function (files: Record<string, string>): string {
   const root = mkdtempSync(join(tmpdir(), "reylo-project-"));
-  for (const [path, text] of Object.entries(files)) {
+  Object.entries(files).forEach(([path, text]) => {
     mkdirSync(join(root, path, ".."), { recursive: true });
     writeFileSync(join(root, path), text);
-  }
+  });
   return root;
-}
+};
 
 // A project file's command runs in the system's shell, cmd.exe on Windows, and these tests write theirs for a POSIX shell.
 const posixShell = process.platform === "win32" && "its command is written for a POSIX shell, and Windows runs it in cmd.exe";
 
+// oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
 test("without a project file, DATABASE_URL comes from the environment, then .env.local, then .env", async () => {
   const e = await engine("sqlite");
   const root = tree({ "app/package.json": "{}", "app/.env": "DATABASE_URL=postgres://from-env-file/db\n", "app/.env.local": "DATABASE_URL=postgres://from-local/db\n" });
@@ -41,6 +43,7 @@ test("without a project file, DATABASE_URL comes from the environment, then .env
   assert.equal(resolveProject(e, tree({ "package.json": "{}", ".reylo.yaml": "direct_url: file:./x.db\nsqlcommenter: false\n" }), {}).sqlcommenter, false);
 });
 
+// oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
 test("the project file sits beside package.json, and its direct_url, env files and strict_params apply", async () => {
   const e = await engine("sqlite");
   const root = tree({
@@ -70,6 +73,7 @@ test("the project file sits beside package.json, and its direct_url, env files a
   assert.equal(resolveProject(e, join(root, "src/db"), { REYLO_CONFIG: join(other, "elsewhere.yaml") }).dialect, "sqlite");
 });
 
+// oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
 test("the project file may be named .reylo.yml, and both names beside one package.json are an error", async () => {
   const e = await engine("sqlite");
   const yml = tree({ "package.json": "{}", ".reylo.yml": "direct_url: file:./x.db\n" });
@@ -79,13 +83,14 @@ test("the project file may be named .reylo.yml, and both names beside one packag
   assert.ok(r.watched.includes(join(yml, ".reylo.yaml")));
   const none = resolveProject(e, tree({ "package.json": "{}" }), {});
   assert.equal(none.file, undefined);
-  assert.equal(none.watched.filter((path) => /\.reylo\.ya?ml$/.test(path)).length, 2);
+  assert.equal(none.watched.filter((path) => /\.reylo\.ya?ml$/u.test(path)).length, 2);
   const both = tree({ "package.json": "{}", ".reylo.yaml": "direct_url: file:./a.db\n", ".reylo.yml": "direct_url: file:./b.db\n" });
   assert.equal(resolveProject(e, both, {}).error, ".reylo.yaml and .reylo.yml are both project files; keep one.");
   // REYLO_CONFIG names the one file, whatever sits beside it.
   assert.equal(resolveProject(e, both, { REYLO_CONFIG: join(both, ".reylo.yml") }).error, undefined);
 });
 
+// oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
 test("a types section, removed on 2026-10-20, is refused where it stands, whatever it holds; package.json decides no type", async () => {
   const e = await engine("sqlite");
   for (const types of ["types:\n  dates: temporal\n", "types: {}\n", "types:\n  datez: Date\n"]) {
@@ -100,6 +105,7 @@ test("a types section, removed on 2026-10-20, is refused where it stands, whatev
   assert.equal(resolveProject(e, nested, {}).error, undefined);
 });
 
+// oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
 test("a key the library does not know, and a variable nothing sets, are errors that say where", async () => {
   const e = await engine("sqlite");
   const typo = tree({ "package.json": "{}", ".reylo.yaml": "direct_url: postgres://x/db\n\nstirct: true\n" });
@@ -116,6 +122,7 @@ test("a key the library does not know, and a variable nothing sets, are errors t
   assert.match(resolveProject(e, odd, {}).error!, /^Cannot tell the database from the URL \("direct_url" in \.reylo\.yaml\)/);
 });
 
+// oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
 test("a $(command) in direct_url is replaced by what it prints, once per process, percent-encoded in the user or password", { skip: posixShell }, async () => {
   const e = await engine("sqlite");
   // The command counts its runs in a file beside it, and prints a password a URL cannot hold as it is.
@@ -124,7 +131,7 @@ test("a $(command) in direct_url is replaced by what it prints, once per process
   const r = resolveProject(e, root, {});
   assert.equal(r.error, undefined);
   assert.equal(r.url, "postgres://app:p%40ss%2Fw%3Frd%26x@db.internal:5432/app");
-  assert.equal(decodeURIComponent(new URL(r.url!).password), "p@ss/w?rd&x");
+  assert.equal(decodeURIComponent(new URL(r.url).password), "p@ss/w?rd&x");
   // Where the URL came from, never what the command printed.
   assert.equal(r.urlSource, '"direct_url" in .reylo.yaml');
   assert.equal(r.dialect, "postgres");
@@ -141,6 +148,7 @@ test("a $(command) in direct_url is replaced by what it prints, once per process
   assert.deepEqual([resolveProject(e, whole, {}).url, resolveProject(e, whole, {}).dialect], ["mysql://root:p@ss@127.0.0.1:3306/app", "mysql"]);
 });
 
+// oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
 test("a command's variables are its shell's, from the environment and the env files, and no value is read as shell syntax", { skip: posixShell }, async () => {
   const e = await engine("sqlite");
   const root = tree({
@@ -157,6 +165,7 @@ test("a command's variables are its shell's, from the environment and the env fi
   assert.equal(existsSync(join(text, "pwned")), false);
 });
 
+// oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
 test("a command that fails, prints nothing or is left open is an error that names it, and runs nothing more", { skip: posixShell }, async () => {
   const e = await engine("sqlite");
   const failing = tree({ "package.json": "{}", ".reylo.yaml": "direct_url: postgres://app:$(echo 'no item matches' >&2; exit 3)@h/app\n" });
@@ -176,9 +185,10 @@ test("a command that fails, prints nothing or is left open is an error that name
 // The type check never reads url, and a file that sets it alone is told to set direct_url.
 const NOTICE = ".reylo.yaml: Reylo does not read url; set direct_url to the dev database Reylo reads your types from (it uses DATABASE_URL meanwhile)";
 
+// oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
 test("url is never the type check's connection: alone, it draws a notice and DATABASE_URL is used; direct_url wins; both draw nothing", async () => {
   const e = await engine("sqlite");
-  // url alone: DATABASE_URL, from the environment or an env file, and one notice that names direct_url.
+  // Url alone: DATABASE_URL, from the environment or an env file, and one notice that names direct_url.
   const alone = tree({ "package.json": "{}", ".reylo.yaml": "url: postgres://prod-pooler/app\n", ".env": "DATABASE_URL=postgres://dev/app\n" });
   const fromFile = resolveProject(e, alone, {});
   assert.deepEqual([fromFile.url, fromFile.urlSource, fromFile.error, fromFile.notice], ["postgres://dev/app", "DATABASE_URL in .env", undefined, NOTICE]);
@@ -192,7 +202,7 @@ test("url is never the type check's connection: alone, it draws a notice and DAT
   assert.equal(none.url, undefined);
   assert.equal(none.error, undefined);
   assert.equal(none.missingUrl, "No database URL: .reylo.yaml sets url, which Reylo does not read; set direct_url there, or DATABASE_URL in the environment, .env.local or .env.");
-  // direct_url wins over DATABASE_URL, and with url beside it nothing is said.
+  // Direct_url wins over DATABASE_URL, and with url beside it nothing is said.
   const both = resolveProject(e, tree({ "package.json": "{}", ".reylo.yaml": "url: postgres://prod-pooler/app\ndirect_url: postgres://dev/app\n" }), { DATABASE_URL: "postgres://elsewhere/app" });
   assert.deepEqual([both.url, both.urlSource, both.notice], ["postgres://dev/app", '"direct_url" in .reylo.yaml', undefined]);
   // Without a project file, or without url in it, nothing is said either.
@@ -201,15 +211,16 @@ test("url is never the type check's connection: alone, it draws a notice and DAT
   assert.equal(resolveProject(e, tree({ "package.json": "{}" }), {}).missingUrl, 'No database URL: set DATABASE_URL in the environment, .env.local or .env, or "direct_url" in .reylo.yaml.');
 });
 
+// oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
 test(".reylo/ names an entry by its statement, then its server: never by url or a password", async () => {
   const entry = async (yaml: string, env: Record<string, string>) => {
     const session = await Session.open(tree({ "package.json": "{}", ".reylo.yaml": yaml }), env);
     await session.close();
-    return basename(session.entryFile("select 1")).replace(/\.json$/, "").split("-");
+    return basename(session.entryFile("select 1")).replace(/\.json$/u, "").split("-");
   };
   const [statement, dev] = await entry("strict_params: true\n", { DATABASE_URL: "postgres://dev/app" });
-  // url alone names it like no url at all, and like a direct_url that names the same database;
-  // the password is not part of it.
+  // Url alone names it like no url at all, and like a direct_url that names the same database;
+  // The password is not part of it.
   assert.deepEqual(await entry("url: postgres://prod-pooler/app\n", { DATABASE_URL: "postgres://dev/app" }), [statement, dev]);
   assert.deepEqual(await entry("direct_url: postgres://:secret@dev/app\n", {}), [statement, dev]);
   // Another database of the dialect: the same statement, another server.

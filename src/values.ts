@@ -1,29 +1,30 @@
 // How Reylo represents a SQL value in JavaScript: one table, which the type renderer
 // (src/render.ts), the JSON Schema writer (src/schema.ts) and the run time's decoders
 // (src/decode.ts, src/decode-mysql.ts, src/decode-sqlite.ts) all read, so that the type a module
-// declares and the value `run` returns cannot drift apart. Reylo sets
-// every value's type itself, on every driver, whatever the app configured its driver to return:
-// one representation per SQL type.
+// Declares and the value `run` returns cannot drift apart. Reylo sets
+// Every value's type itself, on every driver, whatever the app configured its driver to return:
+// One representation per SQL type.
 //
 // A value's representation is its kind, which the build writes into the module for each output
-// column (`columns`, as `[name, kind]`): `bool` is a boolean; `int` and `float` a number; `int8` a
+// Column (`columns`, as `[name, kind]`): `bool` is a boolean; `int` and `float` a number; `int8` a
 // BigInt; `decimal` the exact decimal text; `date` the text `YYYY-MM-DD`; `timestamp` the server's
-// wall-clock text with `T` between the date and the time (a year of either outside 0000–9999 in
+// Wall-clock text with `T` between the date and the time (a year of either outside 0000–9999 in
 // ISO 8601's extended form, `+012345` or `-000001` for 2 BC); `timestamptz` the instant's ISO 8601 text
-// in UTC, with `Z` and the server's fraction; `interval` an ISO 8601 duration with its sign in
-// front; `json` the parsed value; `bytes` a Uint8Array (a Buffer is one); `vector` pgvector's
+// In UTC, with `Z` and the server's fraction; `interval` an ISO 8601 duration with its sign in
+// Front; `json` the parsed value; `bytes` a Uint8Array (a Buffer is one); `vector` pgvector's
 // `vector` or `halfvec` as an array of its numbers; `hstore` an hstore's keys as an object, each
-// value a string or null; `text` the server's text, which every other type is (time, uuid, an
-// enum's label, a range, a row value); `unknown` whatever the driver gives (a SQLite column with no
-// declared type). A DuckDB STRUCT, MAP or UNION is decoded by the result's own types
+// Value a string or null; `text` the server's text, which every other type is (time, uuid, an
+// Enum's label, a range, a row value); `unknown` whatever the driver gives (a SQLite column with no
+// Declared type). A DuckDB STRUCT, MAP or UNION is decoded by the result's own types
 // (src/decode-duckdb.ts), each of its values in its own kind's form. `k[]` is an array of `k`, a NULL element `null`, and `a|b` either (a MySQL
-// expression whose type the bound value decides). No kind is a JavaScript Date. An array's text
-// separates its elements with a comma, or with its element type's own delimiter (`:` for PostGIS's
+// Expression whose type the bound value decides). No kind is a JavaScript Date. An array's text
+// Separates its elements with a comma, or with its element type's own delimiter (`:` for PostGIS's
 // `geometry`), which a column carries beside its kind.
 //
 // This module runs in every generated module's process, so it names no Node type: a Buffer is
-// reached through `globalThis` where one exists.
+// Reached through `globalThis` where one exists.
 import type { EngineType } from "./engine-type.ts";
+import { hasObjectType, matchesBigInt, matchesBoolean, matchesNull, matchesNumber, matchesString, matchesUndefined } from "./native-predicates.ts";
 
 export type Dialect = "postgres" | "mysql" | "sqlite" | "duckdb";
 
@@ -32,7 +33,7 @@ export type ScalarKind = "bool" | "int" | "float" | "int8" | "decimal" | "text" 
 /** A column's kind as a module carries it: a scalar kind, `k[]` for an array of `k`, `a|b` for either. */
 export type Kind = string;
 /** The output columns a module carries, in the statement's order; an array's `delimiter` where it is not a comma. */
-export type Columns = readonly (readonly [name: string, kind: Kind, delimiter?: string])[];
+export type Columns = Readonly<(Readonly<[name: string, kind: Kind, delimiter?: string]>)[]>;
 
 /** The TypeScript type of each scalar kind: what a value of that kind is at run time. */
 export const TS_TYPE: Readonly<Record<ScalarKind, string>> = {
@@ -152,28 +153,34 @@ export function arrayDelimiter(t: EngineType): string | undefined {
 /** The kind of a value of the engine's type `t`, standing in a result row (not inside a JSON document). */
 export function columnKind(t: EngineType, dialect: Dialect): Kind {
   switch (t.kind) {
-    case "scalar":
+    case "scalar": {
       return scalarKind(t.name, dialect);
-    case "enum":
+    }
+    case "enum": {
       return "text";
-    case "array":
+    }
+    case "array": {
       // A row value's array is the text Postgres prints, as a row value is.
-      if ((t.of.kind === "scalar" && t.of.name === "record") || t.of.kind === "composite") return "text";
+      if ((t.of.kind === "scalar" && t.of.name === "record") || t.of.kind === "composite") {return "text";}
       return `${columnKind(t.of, dialect)}[]`;
+    }
     case "object":
     case "list":
     case "json":
-    case "rows":
+    case "rows": {
       return "json";
-    case "composite":
+    }
+    case "composite": {
       return "text";
+    }
     // Decoded by the result's own types (src/decode-duckdb.ts).
     case "struct":
     case "map":
     case "union":
     case "tuple":
-    case "unknown":
+    case "unknown": {
       return "unknown";
+    }
   }
 }
 
@@ -185,7 +192,7 @@ export function kindType(kind: Kind): string {
 
 // ---------------------------------------------------------------------------------------------
 // The value of each kind from the server's text, as every Postgres driver but Bun.sql hands it
-// over (pg, pg-promise, Neon, PGlite, and postgres.js through `.raw()`), at the server's default
+// Over (pg, pg-promise, Neon, PGlite, and postgres.js through `.raw()`), at the server's default
 // DateStyle (ISO), IntervalStyle and bytea_output, which the drivers' own parsers read too.
 
 export type Decoder = (text: string) => unknown;
@@ -199,14 +206,14 @@ const number: Decoder = (x) => +x;
  * `Temporal.PlainDate.from` refuses, so `12345-01-01` is `+012345-01-01` and `0002-06-01 BC` is
  * `-000001-06-01`. A four-digit year after 1 BC, `infinity` and `-infinity` are left as they are.
  */
-function isoDate(x: string): string {
+const isoDate = function (x: string): string {
   const dash = x.indexOf("-");
   const bc = x.endsWith(" BC");
-  if (dash < 4 || (dash === 4 && !bc)) return x;
+  if (dash < 4 || (dash === 4 && !bc)) {return x;}
   const digits = x.slice(0, dash);
-  if (!/^\d+$/.test(digits)) return x;
+  if (!/^\d+$/u.test(digits)) {return x;}
   return isoYear(bc ? 1 - +digits : +digits) + x.slice(dash, bc ? -3 : undefined);
-}
+};
 
 /** `2026-10-20` as it is; `0002-06-01 BC` → `-000001-06-01` and `12345-01-01` → `+012345-01-01` (`isoDate`). */
 const date: Decoder = isoDate;
@@ -214,36 +221,36 @@ const date: Decoder = isoDate;
 /** `2026-10-20 10:00:00.123456` → `2026-10-20T10:00:00.123456`, its year as a date's (`isoDate`); `infinity` as written. */
 const timestamp: Decoder = (x) => isoDate(x.replace(" ", "T"));
 
-// timestamptz in DateStyle ISO: `2026-10-20 03:03:00.123456-07`, offsets with seconds before
-// standard time (`-07:52:58`), years past 9999, ` BC`. `new Date(text)`, which postgres.js and
+// Timestamptz in DateStyle ISO: `2026-10-20 03:03:00.123456-07`, offsets with seconds before
+// Standard time (`-07:52:58`), years past 9999, ` BC`. `new Date(text)`, which postgres.js and
 // PGlite use, returns Invalid Date for the last three and reads year 0001 as 2001
 // (wiki/driver-decoding/spike/postgres.md); and a Date holds milliseconds, not the server's
-// microseconds. So Reylo moves the wall-clock time to UTC itself, in whole seconds on a day count,
-// and keeps the fraction as the server wrote it.
+// Microseconds. So Reylo moves the wall-clock time to UTC itself, in whole seconds on a day count,
+// And keeps the fraction as the server wrote it.
 const TSTZ = /^(\d{4,})-(\d\d)-(\d\d) (\d\d):(\d\d):(\d\d)(\.\d{1,6})?([+-])(\d\d)(?::(\d\d))?(?::(\d\d))?( BC)?$/;
 
 /** Days from 1970-01-01 to a date of the proleptic Gregorian calendar, year 0 being 1 BC (Howard Hinnant's days_from_civil). */
-function daysFromCivil(y: number, m: number, d: number): number {
+const daysFromCivil = function (y: number, m: number, d: number): number {
   y -= m <= 2 ? 1 : 0;
   const era = Math.floor(y / 400);
   const yoe = y - era * 400;
   const doy = Math.floor((153 * (m + (m > 2 ? -3 : 9)) + 2) / 5) + d - 1;
   const doe = yoe * 365 + Math.floor(yoe / 4) - Math.floor(yoe / 100) + doy;
-  return era * 146097 + doe - 719468;
-}
+  return era * 146_097 + doe - 719_468;
+};
 
 /** The date `days` after 1970-01-01, the inverse of `daysFromCivil`. */
-function civilFromDays(days: number): [number, number, number] {
-  const z = days + 719468;
-  const era = Math.floor(z / 146097);
-  const doe = z - era * 146097;
-  const yoe = Math.floor((doe - Math.floor(doe / 1460) + Math.floor(doe / 36524) - Math.floor(doe / 146096)) / 365);
+const civilFromDays = function (days: number): [number, number, number] {
+  const z = days + 719_468;
+  const era = Math.floor(z / 146_097);
+  const doe = z - era * 146_097;
+  const yoe = Math.floor((doe - Math.floor(doe / 1460) + Math.floor(doe / 36_524) - Math.floor(doe / 146_096)) / 365);
   const doy = doe - (365 * yoe + Math.floor(yoe / 4) - Math.floor(yoe / 100));
   const mp = Math.floor((5 * doy + 2) / 153);
   const d = doy - Math.floor((153 * mp + 2) / 5) + 1;
   const m = mp + (mp < 10 ? 3 : -9);
   return [era * 400 + yoe + (m <= 2 ? 1 : 0), m, d];
-}
+};
 
 const pad = (n: number, width = 2) => String(n).padStart(width, "0");
 
@@ -266,7 +273,7 @@ const isoYear = (y: number) => (y >= 0 && y <= 9999 ? pad(y, 4) : `${y < 0 ? "-"
  */
 export function postgresYear(text: string): string {
   const m = /^([+-]\d{6,}|0000)(-.*)$/.exec(text);
-  if (m === null || /\sbc$/i.test(text)) return text;
+  if (matchesNull(m) || /\sbc$/i.test(text)) {return text;}
   const year = +m[1]!;
   return year > 0 ? `${pad(year, 4)}${m[2]}` : `${pad(1 - year, 4)}${m[2]} BC`;
 }
@@ -279,12 +286,12 @@ export function postgresYear(text: string): string {
  */
 export function instant(x: string): string {
   const m = TSTZ.exec(x);
-  if (m === null) return x;
-  const year = m[12] === undefined ? +m[1]! : 1 - +m[1]!;
-  const offset = (m[8] === "-" ? -1 : 1) * (+m[9]! * 3600 + (m[10] === undefined ? 0 : +m[10] * 60) + (m[11] === undefined ? 0 : +m[11]));
-  const seconds = daysFromCivil(year, +m[2]!, +m[3]!) * 86400 + +m[4]! * 3600 + +m[5]! * 60 + +m[6]! - offset;
-  const days = Math.floor(seconds / 86400);
-  const s = seconds - days * 86400;
+  if (matchesNull(m)) {return x;}
+  const year = matchesUndefined(m[12]) ? +m[1]! : 1 - +m[1]!;
+  const offset = (m[8] === "-" ? -1 : 1) * (+m[9]! * 3600 + (matchesUndefined(m[10]) ? 0 : +m[10] * 60) + (matchesUndefined(m[11]) ? 0 : +m[11]));
+  const seconds = daysFromCivil(year, +m[2]!, +m[3]!) * 86_400 + +m[4]! * 3600 + +m[5]! * 60 + +m[6]! - offset;
+  const days = Math.floor(seconds / 86_400);
+  const s = seconds - days * 86_400;
   const [y, mo, d] = civilFromDays(days);
   return `${isoYear(y)}-${pad(mo)}-${pad(d)}T${pad(Math.floor(s / 3600))}:${pad(Math.floor(s / 60) % 60)}:${pad(s % 60)}${m[7] ?? ""}Z`;
 }
@@ -296,12 +303,12 @@ export function instant(x: string): string {
  */
 export function instantOfDate(d: Date, column: string): string {
   validDate(d, column);
-  return d.toISOString().replace(/\.?0+Z$/, "Z");
+  return d.toISOString().replace(/\.?0+Z$/u, "Z");
 }
 
-// interval in IntervalStyle postgres: `1 year 2 mons 3 days 04:05:06.789`. Postgres keeps three
-// parts, each signed on its own: months (written as years and months), days, and a time that may
-// pass 24 hours; a part after a negative one carries `+` (`-1 days +01:00:00`).
+// Interval in IntervalStyle postgres: `1 year 2 mons 3 days 04:05:06.789`. Postgres keeps three
+// Parts, each signed on its own: months (written as years and months), days, and a time that may
+// Pass 24 hours; a part after a negative one carries `+` (`-1 days +01:00:00`).
 const INTERVAL = /^(?:([+-]?\d+) years? ?)?(?:([+-]?\d+) mons? ?)?(?:([+-]?\d+) days? ?)?(?:([+-]?)(\d+):(\d\d):(\d\d)(?:\.(\d+))?)?$/;
 
 /**
@@ -315,19 +322,19 @@ const INTERVAL = /^(?:([+-]?\d+) years? ?)?(?:([+-]?\d+) mons? ?)?(?:([+-]?\d+) 
  */
 export function duration(x: string): string {
   const m = INTERVAL.exec(x);
-  if (m === null || x === "") return x;
+  if (matchesNull(m) || x === "") {return x;}
   const time = m[4] === "-" ? -1 : 1;
   // Each designator Postgres writes, its magnitude and its sign; a zero is left out.
   const parts: [designator: string, magnitude: string, sign: number][] = [];
   for (const [designator, digits] of [["Y", m[1]], ["M", m[2]], ["D", m[3]]] as const) {
-    if (digits !== undefined && +digits !== 0) parts.push([designator, String(Math.abs(+digits)), digits.startsWith("-") ? -1 : 1]);
+    if (!matchesUndefined(digits) && +digits !== 0) {parts.push([designator, String(Math.abs(+digits)), digits.startsWith("-") ? -1 : 1]);}
   }
   const date = parts.length;
-  if (+(m[5] ?? 0) !== 0) parts.push(["H", String(+m[5]!), time]);
-  if (+(m[6] ?? 0) !== 0) parts.push(["M", String(+m[6]!), time]);
-  const fraction = (m[8] ?? "").replace(/0+$/, "");
-  if (+(m[7] ?? 0) !== 0 || fraction !== "") parts.push(["S", `${+(m[7] ?? 0)}${fraction && `.${fraction}`}`, time]);
-  if (parts.length === 0) return "PT0S";
+  if (+(m[5] ?? 0) !== 0) {parts.push(["H", String(+m[5]!), time]);}
+  if (+(m[6] ?? 0) !== 0) {parts.push(["M", String(+m[6]!), time]);}
+  const fraction = (m[8] ?? "").replace(/0+$/u, "");
+  if (+(m[7] ?? 0) !== 0 || fraction !== "") {parts.push(["S", `${+(m[7] ?? 0)}${fraction && `.${fraction}`}`, time]);}
+  if (parts.length === 0) {return "PT0S";}
   const negative = parts.every(([, , sign]) => sign < 0);
   const write = ([designator, magnitude, sign]: [string, string, number]) => `${sign < 0 && !negative ? "-" : ""}${magnitude}${designator}`;
   const clock = parts.slice(date).map(write).join("");
@@ -342,14 +349,14 @@ export function duration(x: string): string {
  */
 export function postgresInterval(text: string): string {
   const m = /^\s*([+-])(P[^+-]*)$/i.exec(text);
-  if (m === null) return text;
+  if (matchesNull(m)) {return text;}
   return m[1] === "+" ? m[2]! : m[2]!.replace(/(\d+(?:[.,]\d+)?)([YMWDHS])/gi, "-$1$2");
 }
 
 type BufferClass = { from(data: string, encoding: string): Uint8Array; isBuffer(v: unknown): boolean };
 const NodeBuffer = (globalThis as { Buffer?: BufferClass }).Buffer;
 // TextDecoder is a global in every runtime Reylo supports; it is typed here rather than through
-// the DOM lib or Node's, which a project that type-checks Reylo's sources need not have.
+// The DOM lib or Node's, which a project that type-checks Reylo's sources need not have.
 const Utf8 = (globalThis as unknown as { TextDecoder: new (label?: string) => { decode(bytes: Uint8Array): string } }).TextDecoder;
 const utf8Decoder = new Utf8("utf-8");
 
@@ -359,21 +366,21 @@ export function utf8(bytes: Uint8Array): string {
 }
 const fromHex = (Uint8Array as unknown as { fromHex?: (hex: string) => Uint8Array }).fromHex;
 
-/** bytea's text: hex (`\x0102ff`, the server's default) or the escape format (`bytea_output = escape`). */
+/** Bytea's text: hex (`\x0102ff`, the server's default) or the escape format (`bytea_output = escape`). */
 export function bytea(x: string): Uint8Array {
   if (x.charCodeAt(0) === 92 && x.charCodeAt(1) === 120) {
     const hex = x.slice(2);
-    if (NodeBuffer) return NodeBuffer.from(hex, "hex");
-    if (fromHex) return fromHex(hex);
+    if (NodeBuffer) {return NodeBuffer.from(hex, "hex");}
+    if (fromHex) {return fromHex(hex);}
     const out = new Uint8Array(hex.length / 2);
-    for (let i = 0; i < out.length; i++) out[i] = parseInt(hex.slice(2 * i, 2 * i + 2), 16);
+    for (let i = 0; i < out.length; i++) {out[i] = parseInt(hex.slice(2 * i, 2 * i + 2), 16);}
     return out;
   }
   const out: number[] = [];
   for (let i = 0; i < x.length; i++) {
-    if (x[i] !== "\\") out.push(x.charCodeAt(i));
-    else if (x[i + 1] === "\\") out.push(92), i++;
-    else out.push(parseInt(x.slice(i + 1, i + 4), 8)), (i += 3);
+    if (x[i] !== "\\") {out.push(x.charCodeAt(i));}
+    else if (x[i + 1] === "\\") {out.push(92), i++;}
+    else {out.push(parseInt(x.slice(i + 1, i + 4), 8)), (i += 3);}
   }
   return Uint8Array.from(out);
 }
@@ -391,19 +398,19 @@ export function hstore(x: string): Record<string, string | null> {
     let s = "";
     let from = ++i;
     while (i < n && x[i] !== '"') {
-      if (x[i] === "\\") (s += x.slice(from, i)), (from = ++i);
+      if (x[i] === "\\") {(s += x.slice(from, i)), (from = ++i);}
       i++;
     }
     s += x.slice(from, i++);
     return s;
   };
   while (i < n) {
-    while (x[i] === " " || x[i] === ",") i++;
-    if (i >= n || x[i] !== '"') break;
+    while (x[i] === " " || x[i] === ",") {i++;}
+    if (i >= n || x[i] !== '"') {break;}
     const key = quoted();
     i += 2;
-    if (x[i] === '"') pairs.push([key, quoted()]);
-    else (pairs.push([key, null]), (i += 4));
+    if (x[i] === '"') {pairs.push([key, quoted()]);}
+    else {(pairs.push([key, null]), (i += 4));}
   }
   return Object.fromEntries(pairs);
 }
@@ -415,18 +422,18 @@ export function hstore(x: string): Record<string, string | null> {
  */
 export function hstoreText(v: object, fail: (message: string) => never): string {
   // Only a plain object's own keys are its pairs: a Map, a Set or a class instance would be written
-  // as an empty hstore, so anything else is refused, its constructor named.
+  // As an empty hstore, so anything else is refused, its constructor named.
   const proto = Object.getPrototypeOf(v);
-  if (proto !== Object.prototype && proto !== null) {
+  if (proto !== Object.prototype && !matchesNull(proto)) {
     const name = Array.isArray(v) || v instanceof Date || ArrayBuffer.isView(v) ? undefined : (v.constructor as { name?: unknown } | undefined)?.name;
-    return fail(`is an hstore, an object of its keys whose values are strings or null; got ${typeof name === "string" && name ? `a ${name}` : describe(v)}.`);
+    return fail(`is an hstore, an object of its keys whose values are strings or null; got ${matchesString(name) && name ? `a ${name}` : describe(v)}.`);
   }
   const quote = (s: string) => `"${s.replace(/[\\"]/g, "\\$&")}"`;
   const pairs: string[] = [];
   for (const [key, value] of Object.entries(v)) {
-    if (value === undefined) continue;
-    if (value !== null && typeof value !== "string") fail(`is an hstore, whose values are strings or null, and its key ${JSON.stringify(key)} holds ${describe(value)}.`);
-    pairs.push(`${quote(key)}=>${value === null ? "NULL" : quote(value)}`);
+    if (matchesUndefined(value)) {continue;}
+    if (!matchesNull(value) && !matchesString(value)) {fail(`is an hstore, whose values are strings or null, and its key ${JSON.stringify(key)} holds ${describe(value)}.`);}
+    pairs.push(`${quote(key)}=>${matchesNull(value) ? "NULL" : quote(value)}`);
   }
   return pairs.join(", ");
 }
@@ -444,7 +451,7 @@ const TEXT_DECODERS: Readonly<Record<ScalarKind, Decoder>> = {
   interval: duration,
   json: (x) => JSON.parse(x),
   bytes: bytea,
-  // pgvector prints the shortest text of each float, `[1,2.5,1e-07]`, which JSON reads exactly.
+  // Pgvector prints the shortest text of each float, `[1,2.5,1e-07]`, which JSON reads exactly.
   vector: (x) => JSON.parse(x),
   hstore,
   unknown: identity,
@@ -461,24 +468,24 @@ export function parseArray(text: string, element: (text: string) => unknown, del
   const level = (): unknown[] => {
     const out: unknown[] = [];
     i++;
-    if (text[i] === "}") return i++, out;
+    if (text[i] === "}") {return i++, out;}
     while (i < n) {
-      if (text[i] === "{") out.push(level());
+      if (text[i] === "{") {out.push(level());}
       else if (text[i] === '"') {
         let s = "";
         let from = ++i;
         while (i < n && text[i] !== '"') {
-          if (text[i] === "\\") (s += text.slice(from, i)), (from = ++i);
+          if (text[i] === "\\") {(s += text.slice(from, i)), (from = ++i);}
           i++;
         }
         out.push(element(s + text.slice(from, i++)));
       } else {
         const from = i;
-        while (i < n && text[i] !== delim && text[i] !== "}") i++;
+        while (i < n && text[i] !== delim && text[i] !== "}") {i++;}
         const s = text.slice(from, i);
         out.push(s === "NULL" ? null : element(s));
       }
-      if (text[i++] === "}") return out;
+      if (text[i++] === "}") {return out;}
     }
     return out;
   };
@@ -496,9 +503,9 @@ export function textDecoder(kind: Kind, delim = ","): Decoder {
 
 // ---------------------------------------------------------------------------------------------
 // The value of each kind from whatever a driver decoded it to: for the drivers that take no
-// decoder (Bun.sql; the SQLite drivers, whose JSON is text and whose truth values are integers),
-// and for the rare value a driver decoded before Reylo could name its type. Each converts the
-// forms a driver is measured to give (wiki/driver-decoding/spike/) and leaves a value already in
+// Decoder (Bun.sql; the SQLite drivers, whose JSON is text and whose truth values are integers),
+// And for the rare value a driver decoded before Reylo could name its type. Each converts the
+// Forms a driver is measured to give (wiki/driver-decoding/spike/) and leaves a value already in
 // Reylo's form as it is.
 
 /** Why a value cannot be given its kind: Reylo's error, naming the column. */
@@ -515,13 +522,13 @@ export const zoned = /(?:\d:\d\d(?::\d\d(?:\.\d+)?)?(?:\s*(?:z|[+-]\d\d?(?::?\d\
 
 /** A value as a message about a parameter names it: its kind, or a short form of itself. */
 export function describe(v: unknown): string {
-  if (v === null) return "null";
-  if (v instanceof Date) return "a Date";
-  if (Array.isArray(v)) return "an array";
-  if (v instanceof Uint8Array) return "binary data";
-  if (typeof v === "bigint") return `${v}n`;
-  if (typeof v === "string") return JSON.stringify(v.length > 60 ? `${v.slice(0, 57)}...` : v);
-  if (typeof v === "object") return "an object";
+  if (matchesNull(v)) {return "null";}
+  if (v instanceof Date) {return "a Date";}
+  if (Array.isArray(v)) {return "an array";}
+  if (v instanceof Uint8Array) {return "binary data";}
+  if (matchesBigInt(v)) {return `${v}n`;}
+  if (matchesString(v)) {return JSON.stringify(v.length > 60 ? `${v.slice(0, 57)}...` : v);}
+  if (hasObjectType(v)) {return "an object";}
   return String(v);
 }
 
@@ -529,16 +536,16 @@ const MAX_SAFE = Number.MAX_SAFE_INTEGER;
 
 /** An integer as a number, refused where a number cannot hold it exactly. */
 export function exactInteger(v: number | bigint, column: string): number {
-  if (typeof v === "bigint") {
+  if (matchesBigInt(v)) {
     // Exact: a BigInt past ±(2^53 - 1) converts to a number at least 2^53 in magnitude, since
-    // rounding keeps the order and 2^53 is a number. Comparing BigInts instead took a five-column
-    // row with a SQLite BIGINT, beside which better-sqlite3 reads every integer as a BigInt, from
+    // Rounding keeps the order and 2^53 is a number. Comparing BigInts instead took a five-column
+    // Row with a SQLite BIGINT, beside which better-sqlite3 reads every integer as a BigInt, from
     // 3.3 to 5.2 ms per 10,000 rows.
     const n = Number(v);
-    if (n > MAX_SAFE || n < -MAX_SAFE) throw outOfRange(String(v), column);
+    if (n > MAX_SAFE || n < -MAX_SAFE) {throw outOfRange(String(v), column);}
     return n;
   }
-  if (v > MAX_SAFE || v < -MAX_SAFE) throw outOfRange(String(v), column, true);
+  if (v > MAX_SAFE || v < -MAX_SAFE) {throw outOfRange(String(v), column, true);}
   return v;
 }
 
@@ -558,10 +565,10 @@ const INTEGER = /^[+-]?\d+$/;
  * refused. Anything else (a SQLite REAL a column of INTEGER affinity kept) is left as it is.
  */
 export function bigInteger(v: number | bigint | string, column: string): unknown {
-  if (typeof v === "bigint") return v;
-  if (typeof v === "string") return INTEGER.test(v) ? BigInt(v) : v;
-  if (Number.isSafeInteger(v)) return BigInt(v);
-  if (Number.isInteger(v)) throw new DecodeError(`Column "${column}" is a 64-bit integer, and the driver already rounded its value to ${v}, past ±(2^53 - 1): Reylo refuses it rather than return a BigInt of a rounded value.`);
+  if (matchesBigInt(v)) {return v;}
+  if (matchesString(v)) {return INTEGER.test(v) ? BigInt(v) : v;}
+  if (Number.isSafeInteger(v)) {return BigInt(v);}
+  if (Number.isInteger(v)) {throw new DecodeError(`Column "${column}" is a 64-bit integer, and the driver already rounded its value to ${v}, past ±(2^53 - 1): Reylo refuses it rather than return a BigInt of a rounded value.`);}
   return v;
 }
 
@@ -573,23 +580,28 @@ export function bigInteger(v: number | bigint | string, column: string): unknown
  */
 export function truth(v: unknown, column: string): boolean {
   switch (typeof v) {
-    case "boolean":
+    case "boolean": {
       return v;
-    case "number":
-      if (v === 0 || v === 1) return v === 1;
+    }
+    case "number": {
+      if (v === 0 || v === 1) {return v === 1;}
       break;
-    case "bigint":
-      if (v === BigInt(0) || v === BigInt(1)) return v === BigInt(1);
+    }
+    case "bigint": {
+      if (v === BigInt(0) || v === BigInt(1)) {return v === BigInt(1);}
       break;
-    case "string":
-      if (v === "t" || v === "true" || v === "1") return true;
-      if (v === "f" || v === "false" || v === "0") return false;
+    }
+    case "string": {
+      if (v === "t" || v === "true" || v === "1") {return true;}
+      if (v === "f" || v === "false" || v === "0") {return false;}
       break;
-    case "object":
-      if (v instanceof Uint8Array && v.length === 1 && v[0]! <= 1) return v[0] === 1;
+    }
+    case "object": {
+      if (v instanceof Uint8Array && v.length === 1 && v[0]! <= 1) {return v[0] === 1;}
       break;
+    }
   }
-  const shown = v instanceof Uint8Array ? `the bytes 0x${Array.from(v, (b) => b.toString(16).padStart(2, "0")).join("")}` : typeof v === "string" ? JSON.stringify(v) : String(v);
+  const shown = v instanceof Uint8Array ? `the bytes 0x${Array.from(v, (b) => b.toString(16).padStart(2, "0")).join("")}` : matchesString(v) ? JSON.stringify(v) : String(v);
   return refuseTruth(column, shown);
 }
 
@@ -606,7 +618,7 @@ export function refuseTruth(column: string, shown: string): never {
  * is a value the driver lost, and Reylo refuses it rather than return a wrong one.
  */
 function validDate(d: Date, column: string): void {
-  if (Number.isNaN(d.getTime())) throw new DecodeError(`Column "${column}": the driver returned an Invalid Date, which is how Bun.sql decodes a date or timestamp before 1 AD. Reylo refuses it rather than return a wrong value.`);
+  if (Number.isNaN(d.getTime())) {throw new DecodeError(`Column "${column}": the driver returned an Invalid Date, which is how Bun.sql decodes a date or timestamp before 1 AD. Reylo refuses it rather than return a wrong value.`);}
 }
 
 /**
@@ -614,13 +626,13 @@ function validDate(d: Date, column: string): void {
  * decode to: `YYYY-MM-DD`, or with `T` and the fraction the driver kept, the year as `isoYear`
  * writes it.
  */
-function utcText(d: Date, kind: "date" | "timestamp", column: string): string {
+const utcText = function (d: Date, kind: "date" | "timestamp", column: string): string {
   validDate(d, column);
   const date = `${isoYear(d.getUTCFullYear())}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())}`;
-  if (kind === "date") return date;
+  if (kind === "date") {return date;}
   const ms = d.getUTCMilliseconds();
-  return `${date}T${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}:${pad(d.getUTCSeconds())}${ms ? `.${pad(ms, 3).replace(/0+$/, "")}` : ""}`;
-}
+  return `${date}T${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}:${pad(d.getUTCSeconds())}${ms ? `.${pad(ms, 3).replace(/0+$/u, "")}` : ""}`;
+};
 
 const isBytes = (v: unknown): v is Uint8Array => v instanceof Uint8Array;
 
@@ -629,7 +641,7 @@ const isBytes = (v: unknown): v is Uint8Array => v instanceof Uint8Array;
  * hand over as they are (mysql2 decodes them itself).
  */
 export function float32s(bytes: Uint8Array, column: string): number[] {
-  if (bytes.byteLength % 4 !== 0) throw new DecodeError(`Column "${column}" is a VECTOR, whose value is 4 bytes per 32-bit float, and holds ${bytes.byteLength} bytes.`);
+  if (bytes.byteLength % 4 !== 0) {throw new DecodeError(`Column "${column}" is a VECTOR, whose value is 4 bytes per 32-bit float, and holds ${bytes.byteLength} bytes.`);}
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
   return Array.from({ length: bytes.byteLength / 4 }, (_, i) => view.getFloat32(i * 4, true));
 }
@@ -640,68 +652,80 @@ export function float32s(bytes: Uint8Array, column: string): number[] {
  * `delim` is an array's, where its text is what the driver gave.
  */
 export function coerce(kind: Kind, v: unknown, column: string, delim = ","): unknown {
-  if (v === null || v === undefined) return null;
+  if (matchesNull(v) || matchesUndefined(v)) {return null;}
   if (kind.endsWith("[]")) {
     const element = kind.slice(0, -2);
-    if (typeof v === "string") return parseArray(v, (s) => coerce(element, s, column), delim);
-    if (Array.isArray(v)) return v.map((e) => (Array.isArray(e) ? coerce(kind, e, column, delim) : coerce(element, e, column)));
+    if (matchesString(v)) {return parseArray(v, (s) => coerce(element, s, column), delim);}
+    if (Array.isArray(v)) {return v.map((e) => (Array.isArray(e) ? coerce(kind, e, column, delim) : coerce(element, e, column)));}
     // A MySQL VECTOR's bytes: no driver gives any other array of floats as bytes.
-    if (element === "float" && isBytes(v)) return float32s(v, column);
+    if (element === "float" && isBytes(v)) {return float32s(v, column);}
     // Bun.sql's int4[] and float4[] are typed arrays.
-    if (ArrayBuffer.isView(v) && !(v instanceof DataView)) return Array.from(v as unknown as ArrayLike<unknown>, (e) => coerce(element, e, column));
+    if (ArrayBuffer.isView(v) && !(v instanceof DataView)) {return Array.from(v as unknown as ArrayLike<unknown>, (e) => coerce(element, e, column));}
     return v;
   }
-  if (kind.includes("|")) return coerceEither(kind, v, column);
+  if (kind.includes("|")) {return coerceEither(kind, v, column);}
   switch (kind as ScalarKind) {
-    case "bool":
+    case "bool": {
       return truth(v, column);
+    }
     case "int":
-    case "float":
-      if (typeof v === "number") return kind === "int" ? exactInteger(v, column) : v;
-      if (typeof v === "bigint") return exactInteger(v, column);
-      if (typeof v === "string" && v !== "" && !Number.isNaN(+v)) return kind === "int" && /^[+-]?\d+$/.test(v) ? exactInteger(BigInt(v), column) : +v;
+    case "float": {
+      if (matchesNumber(v)) {return kind === "int" ? exactInteger(v, column) : v;}
+      if (matchesBigInt(v)) {return exactInteger(v, column);}
+      if (matchesString(v) && v !== "" && !Number.isNaN(+v)) {return kind === "int" && /^[+-]?\d+$/u.test(v) ? exactInteger(BigInt(v), column) : +v;}
       return v;
-    case "int8":
-      if (typeof v === "bigint" || typeof v === "number" || typeof v === "string") return bigInteger(v, column);
+    }
+    case "int8": {
+      if (matchesBigInt(v) || matchesNumber(v) || matchesString(v)) {return bigInteger(v, column);}
       return v;
-    case "decimal":
-      if (typeof v === "bigint" || typeof v === "number") return String(v);
+    }
+    case "decimal": {
+      if (matchesBigInt(v) || matchesNumber(v)) {return String(v);}
       return v;
+    }
     case "date":
-    case "timestamp":
-      if (v instanceof Date) return utcText(v, kind as "date" | "timestamp", column);
+    case "timestamp": {
+      if (v instanceof Date) {return utcText(v, kind as "date" | "timestamp", column);}
       // Bun.sql's `infinity`.
-      if (v === Infinity || v === -Infinity) return v > 0 ? "infinity" : "-infinity";
+      if (v === Infinity || v === -Infinity) {return v > 0 ? "infinity" : "-infinity";}
       return v;
-    case "timestamptz":
-      if (typeof v === "string") return instant(v);
-      if (v instanceof Date) return instantOfDate(v, column);
+    }
+    case "timestamptz": {
+      if (matchesString(v)) {return instant(v);}
+      if (v instanceof Date) {return instantOfDate(v, column);}
       // Bun.sql's `infinity`.
-      if (v === Infinity || v === -Infinity) return v > 0 ? "infinity" : "-infinity";
+      if (v === Infinity || v === -Infinity) {return v > 0 ? "infinity" : "-infinity";}
       return v;
-    case "interval":
-      return typeof v === "string" ? duration(v) : v;
+    }
+    case "interval": {
+      return matchesString(v) ? duration(v) : v;
+    }
     case "json":
-    case "vector":
-      return typeof v === "string" ? JSON.parse(v) : v;
-    case "hstore":
-      return typeof v === "string" ? hstore(v) : v;
-    case "bytes":
-      if (isBytes(v)) return v;
-      if (v instanceof ArrayBuffer) return new Uint8Array(v);
+    case "vector": {
+      return matchesString(v) ? JSON.parse(v) : v;
+    }
+    case "hstore": {
+      return matchesString(v) ? hstore(v) : v;
+    }
+    case "bytes": {
+      if (isBytes(v)) {return v;}
+      if (v instanceof ArrayBuffer) {return new Uint8Array(v);}
       // D1's BLOB is an array of numbers; mariadb's and Bun.sql's BIT(1) a truth value.
-      if (Array.isArray(v)) return Uint8Array.from(v as number[]);
-      if (typeof v === "boolean") return Uint8Array.of(v ? 1 : 0);
-      if (typeof v === "string") return bytea(v);
+      if (Array.isArray(v)) {return Uint8Array.from(v as number[]);}
+      if (matchesBoolean(v)) {return Uint8Array.of(v ? 1 : 0);}
+      if (matchesString(v)) {return bytea(v);}
       return v;
-    case "text":
-      if (typeof v === "string") return v;
-      // mariadb's SET is an array of its members.
-      if (Array.isArray(v)) return v.join(",");
-      if (typeof v === "number" || typeof v === "bigint") return String(v);
+    }
+    case "text": {
+      if (matchesString(v)) {return v;}
+      // Mariadb's SET is an array of its members.
+      if (Array.isArray(v)) {return v.join(",");}
+      if (matchesNumber(v) || matchesBigInt(v)) {return String(v);}
       return v;
-    default:
+    }
+    default: {
       return v;
+    }
   }
 }
 
@@ -713,14 +737,14 @@ export function coerce(kind: Kind, v: unknown, column: string, delim = ","): unk
 function coerceEither(kind: Kind, v: unknown, column: string): unknown {
   const kinds = kind.split("|");
   // A MySQL BIGINT is a BigInt; a SQLite INTEGER a number, exact or refused.
-  if (typeof v === "bigint") return kinds.includes("int8") ? v : exactInteger(v, column);
-  if (typeof v === "number") {
+  if (matchesBigInt(v)) {return kinds.includes("int8") ? v : exactInteger(v, column);}
+  if (matchesNumber(v)) {
     // Where the column may hold a float, a number past 2^53 may be one.
-    if (kinds.includes("float") || !Number.isInteger(v)) return v;
-    if (kinds.includes("int")) return exactInteger(v, column);
+    if (kinds.includes("float") || !Number.isInteger(v)) {return v;}
+    if (kinds.includes("int")) {return exactInteger(v, column);}
     return kinds.includes("int8") ? bigInteger(v, column) : v;
   }
-  if (v instanceof Date) return kinds.includes("timestamp") ? utcText(v, "timestamp", column) : kinds.includes("date") ? utcText(v, "date", column) : kinds.includes("timestamptz") ? instantOfDate(v, column) : v;
-  if (v instanceof ArrayBuffer || (Array.isArray(v) && kinds.includes("bytes"))) return coerce("bytes", v, column);
+  if (v instanceof Date) {return kinds.includes("timestamp") ? utcText(v, "timestamp", column) : kinds.includes("date") ? utcText(v, "date", column) : kinds.includes("timestamptz") ? instantOfDate(v, column) : v;}
+  if (v instanceof ArrayBuffer || (Array.isArray(v) && kinds.includes("bytes"))) {return coerce("bytes", v, column);}
   return v;
 }

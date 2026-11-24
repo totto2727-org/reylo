@@ -1,7 +1,9 @@
+import { matchesUndefined } from "./native-predicates.ts";
+
 // A TypeScript type as the docs' Inference cards (site/lib/remark-mapper.ts) and `reylo play` show
-// it: the one-line type a statement's module declares (src/render.ts's form: object literals,
-// unions, arrays, string literals and names, and a column's comment as the doc comment before its
-// field, src/module-types.ts), broken over lines where it is wider than the column.
+// It: the one-line type a statement's module declares (src/render.ts's form: object literals,
+// Unions, arrays, string literals and names, and a column's comment as the doc comment before its
+// Field, src/module-types.ts), broken over lines where it is wider than the column.
 
 type Node =
   | { kind: "name"; text: string }
@@ -17,7 +19,7 @@ export function parseType(text: string): Node {
   const peek = () => tokens[at];
   const take = (expected?: string) => {
     const token = tokens[at++];
-    if (token === undefined || (expected !== undefined && token !== expected)) throw new Error(`type-format: expected ${expected ?? "a token"} at ${at - 1} in ${text}`);
+    if (matchesUndefined(token) || (!matchesUndefined(expected) && token !== expected)) {throw new Error(`type-format: expected ${expected ?? "a token"} at ${at - 1} in ${text}`);}
     return token;
   };
   const union = (): Node => {
@@ -44,7 +46,7 @@ export function parseType(text: string): Node {
       take(")");
       return inner;
     }
-    if (token === "{") return object();
+    if (token === "{") {return object();}
     return { kind: "name", text: take() };
   };
   const object = (): Node => {
@@ -62,22 +64,22 @@ export function parseType(text: string): Node {
         const of = take();
         take("]");
         key = `[${name}: ${of}]`;
-      } else key = take();
-      if (peek() === "?") key += take("?");
+      } else {key = take();}
+      if (peek() === "?") {key += take("?");}
       take(":");
       members.push({ key, type: union(), ...(doc ? { doc } : {}) });
-      if (peek() === ";") take(";");
+      if (peek() === ";") {take(";");}
     }
     take("}");
     return { kind: "object", members };
   };
   const node = union();
-  if (at !== tokens.length) throw new Error(`type-format: unread text after ${tokens.slice(0, at).join(" ")} in ${text}`);
+  if (at !== tokens.length) {throw new Error(`type-format: unread text after ${tokens.slice(0, at).join(" ")} in ${text}`);}
   return node;
 }
 
 /** A doc comment on one line: `/** line one line two *\/`. */
-const oneLineDoc = (doc: string) => doc.replace(/\n\s*\*\/$/, " */").replace(/(?:\n[ \t]*\*[ \t]*)+/g, " ").replace(/^\/\*\*\s*/, "/** ");
+const oneLineDoc = (doc: string) => doc.replace(/\n\s*\*\/$/u, " */").replace(/(?:\n[ \t]*\*[ \t]*)+/g, " ").replace(/^\/\*\*\s*/u, "/** ");
 
 /** Whether an object in the type has a field with a doc comment. */
 const hasDoc = (node: Node): boolean =>
@@ -85,14 +87,18 @@ const hasDoc = (node: Node): boolean =>
 
 const flat = (node: Node): string => {
   switch (node.kind) {
-    case "name":
+    case "name": {
       return node.text;
-    case "object":
+    }
+    case "object": {
       return node.members.length ? `{ ${node.members.map((m) => `${m.doc ? `${oneLineDoc(m.doc)} ` : ""}${m.key}: ${flat(m.type)}`).join("; ")} }` : "{}";
-    case "union":
+    }
+    case "union": {
       return node.of.map(flat).join(" | ");
-    case "array":
+    }
+    case "array": {
       return node.of.kind === "union" ? `(${flat(node.of)})[]` : `${flat(node.of)}[]`;
+    }
   }
 };
 
@@ -101,13 +107,14 @@ const flat = (node: Node): string => {
  * and before the `reserve` columns that must follow it there, else with each object's members on
  * lines of their own, indented two spaces past `indent`, the indentation of the line it starts on.
  */
-function print(node: Node, indent: number, lead: number, width: number, reserve = 0): string {
+const print = function (node: Node, indent: number, lead: number, width: number, reserve = 0): string {
   const one = flat(node);
   // A type with a doc comment is broken over lines at any finite width, each comment on the lines before its field, as TypeScript reads one.
-  if (lead + one.length + reserve <= width && (width === Infinity || !hasDoc(node))) return one;
+  if (lead + one.length + reserve <= width && (width === Infinity || !hasDoc(node))) {return one;}
   switch (node.kind) {
-    case "name":
+    case "name": {
       return one;
+    }
     case "object": {
       const inner = " ".repeat(indent + 2);
       const doc = (text: string | undefined) => (text ? `${text.split("\n").map((line) => inner + line).join("\n")}\n` : "");
@@ -125,10 +132,11 @@ function print(node: Node, indent: number, lead: number, width: number, reserve 
         })
         .join(" | ");
     }
-    case "array":
+    case "array": {
       return node.of.kind === "union" ? `(${print(node.of, indent, lead + 1, width, reserve + 3)})[]` : `${print(node.of, indent, lead, width, reserve + 2)}[]`;
+    }
   }
-}
+};
 
 /** The type's text, its objects broken over lines where it is wider than `width`. */
 export function formatType(text: string, width: number): string {
@@ -137,9 +145,9 @@ export function formatType(text: string, width: number): string {
 
 /** What `.run()` resolves to for a statement's row type and cardinality, as the module's `Query` reads them. */
 export function resultType(row: string, cardinality: string): string {
-  if (cardinality === "none" || row === "never") return "void";
-  const wrapped = /\|/.test(row.replace(/\{[^{}]*\}/g, "")) ? `(${row})` : row;
-  if (cardinality === "one") return row;
-  if (cardinality === "maybeOne") return `${row} | null`;
+  if (cardinality === "none" || row === "never") {return "void";}
+  const wrapped = /\|/u.test(row.replace(/\{[^{}]*\}/g, "")) ? `(${row})` : row;
+  if (cardinality === "one") {return row;}
+  if (cardinality === "maybeOne") {return `${row} | null`;}
   return `${wrapped}[]`;
 }

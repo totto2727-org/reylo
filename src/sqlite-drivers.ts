@@ -1,25 +1,32 @@
 // The SQLite the app runs on. The type check prepares each statement in Reylo's own SQLite, but
-// the app runs it on its driver's, which may be older or another engine: libSQL carries SQLite
+// The app runs it on its driver's, which may be older or another engine: libSQL carries SQLite
 // 3.45.1, which has no `json_pretty` and takes `iif` with three arguments or more. So each statement
-// is also prepared on every SQLite driver the project depends on that this Node can load, on a
-// read-only connection to the same database, and a driver that refuses it fails the type check
-// with that SQLite's own message. Preparing compiles the statement without running it.
+// Is also prepared on every SQLite driver the project depends on that this Node can load, on a
+// Read-only connection to the same database, and a driver that refuses it fails the type check
+// With that SQLite's own message. Preparing compiles the statement without running it.
 //
 // A driver is the project's when its package.json lists it. One this Node cannot load (a native
-// module built for another Node) or that cannot open the database (Turso's engine refuses a
-// schema with an FTS5 table) is left out, as is bun:sqlite, which runs in another runtime.
+// Module built for another Node) or that cannot open the database (Turso's engine refuses a
+// Schema with an FTS5 table) is left out, as is bun:sqlite, which runs in another runtime.
 //
 // Cloudflare D1 is asked through the project's wrangler, which runs D1 locally: D1 refuses
-// functions its SQLite has (an allowlist it applies as SQLite compiles a statement, which nothing
-// lists: it refuses `pragma_function_list` too) and lacks others (FTS4, Geopoly), so the only way
-// to know is to compile the statement there (src/d1-proxy.ts).
+// Functions its SQLite has (an allowlist it applies as SQLite compiles a statement, which nothing
+// Lists: it refuses `pragma_function_list` too) and lacks others (FTS4, Geopoly), so the only way
+// To know is to compile the statement there (src/d1-proxy.ts).
+// oxlint-disable-next-line rules/no-node-imports -- The D1 worker must use Node's fork IPC channel.
 import { fork } from "node:child_process";
+// oxlint-disable-next-line rules/no-node-imports -- Read package metadata during synchronous driver discovery.
 import { existsSync, readFileSync, statSync } from "node:fs";
+// oxlint-disable-next-line rules/no-node-imports -- Resolve the optional drivers from the consumer's Node package.
 import { createRequire } from "node:module";
+// oxlint-disable-next-line rules/no-node-imports -- Resolve consumer package and driver paths without loading Effect.
 import { dirname, join } from "node:path";
+// oxlint-disable-next-line rules/no-node-imports -- Compare statements with Node's built-in SQLite engine and its synchronous driver.
 import { DatabaseSync } from "node:sqlite";
+// oxlint-disable-next-line rules/no-node-imports -- Convert native driver and worker module URLs for Node's loader.
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { packageDir } from "./project.ts";
+import { matchesUndefined } from "./native-predicates.ts";
 
 export interface SqliteDriver {
   /** The package the project lists. */
@@ -34,13 +41,13 @@ export interface SqliteDriver {
 type Require = NodeJS.Require;
 type Open = (require: Require, path: string) => Promise<SqliteDriver>;
 
-/** better-sqlite3's API, which the `libsql` package and Turso's compat module copy. */
+/** Better-sqlite3's API, which the `libsql` package and Turso's compat module copy. */
 interface SyncDatabase {
   prepare(sql: string): { get(): unknown };
   close(): void;
 }
 
-function sync(name: string, db: SyncDatabase): SqliteDriver {
+const sync = function (name: string, db: SyncDatabase): SqliteDriver {
   const row = db.prepare("select sqlite_version() as v").get() as { v: string };
   return {
     name,
@@ -49,15 +56,15 @@ function sync(name: string, db: SyncDatabase): SqliteDriver {
       try {
         db.prepare(sql);
         return undefined;
-      } catch (e) {
-        return (e as Error).message;
+      } catch (error) {
+        return (error as Error).message;
       }
     },
     async close() {
       db.close();
     },
   };
-}
+};
 
 /** The drivers, in the order a message lists them. */
 const DRIVERS: [string, Open][] = [
@@ -102,9 +109,9 @@ const DRIVERS: [string, Open][] = [
         refuses: (sql) =>
           new Promise((done) => {
             const statement = db.prepare(sql, (e) => {
-              if (!e) statement.finalize();
-              // node-sqlite3 writes the result code before SQLite's message.
-              done(e ? e.message.replace(/^SQLITE_\w+: /, "") : undefined);
+              if (!e) {statement.finalize();}
+              // Node-sqlite3 writes the result code before SQLite's message.
+              done(e ? e.message.replace(/^SQLITE_\w+: /u, "") : undefined);
             });
           }),
         close: () => new Promise<void>((done) => db.close(() => done())),
@@ -142,7 +149,7 @@ interface D1Process {
 const d1s = new Map<string, { config: string; started: Promise<D1Process> }>();
 
 /** The wrangler config files of the project in `dir`, as they are now: their names, sizes and times. */
-function wranglerConfig(dir: string): string {
+const wranglerConfig = function (dir: string): string {
   return ["wrangler.json", "wrangler.jsonc", "wrangler.toml"]
     .map((name) => {
       try {
@@ -153,7 +160,7 @@ function wranglerConfig(dir: string): string {
       }
     })
     .join("\0");
-}
+};
 
 /**
  * D1 as the project's wrangler runs it locally, in a child process (src/d1-proxy.ts), given the
@@ -169,7 +176,7 @@ async function openD1(require: Require, path: string): Promise<SqliteDriver> {
   if (held?.config !== config) {
     held?.started.then((d) => d.close(), () => {});
     const started = startD1(entry, dir, () => {
-      if (d1s.get(key)?.started === started) d1s.delete(key);
+      if (d1s.get(key)?.started === started) {d1s.delete(key);}
     });
     started.catch(() => {});
     d1s.set(key, (held = { config, started }));
@@ -181,7 +188,7 @@ async function openD1(require: Require, path: string): Promise<SqliteDriver> {
     says: (refusal) => `Cloudflare D1, as wrangler ${d1.version} runs it locally, refuses this statement: ${refusal}`,
     async refuses(sql, params) {
       // The schema is read for each statement, so D1 compiles it against the tables the analysis
-      // read, after a migration too.
+      // Read, after a migration too.
       let ddl: string[];
       try {
         ddl = schemaDdl(schema);
@@ -228,30 +235,30 @@ async function startD1(entry: string, dir: string, ended: () => void): Promise<D
   const gone = new Promise<never>((_, fail) => child.once("exit", () => fail(new Error("D1's process ended"))));
   gone.catch(() => {});
   // The channel keeps this process alive only while a statement waits on its answer, so a type
-  // check or a build ends when its own work does; the child ends with this process.
+  // Check or a build ends when its own work does; the child ends with this process.
   child.on("message", (m: Reply) => {
-    if (m.kind !== "explain") return;
+    if (m.kind !== "explain") {return;}
     pending.get(m.id)?.(m.error);
     pending.delete(m.id);
-    if (!pending.size) child.channel?.unref();
+    if (!pending.size) {child.channel?.unref();}
   });
   let running = false;
   child.once("exit", () => {
-    if (running) ended();
-    for (const settle of pending.values()) settle(undefined);
+    if (running) {ended();}
+    for (const settle of pending.values()) {settle(undefined);}
     pending.clear();
   });
   const stop = () => {
-    if (child.connected) child.send({ kind: "close" });
-    setTimeout(() => child.kill(), 2_000).unref();
+    if (child.connected) {child.send({ kind: "close" });}
+    setTimeout(() => child.kill(), 2000).unref();
   };
   try {
     const timeout = new Promise<never>((_, fail) => setTimeout(() => fail(new Error("workerd did not start")), D1_START).unref());
     const ready = await Promise.race([gone, timeout, new Promise<Extract<Reply, { kind: "ready" }>>((done) => child.once("message", done))]);
-    if (!ready.d1) throw new Error("the wrangler config binds no D1 database");
-  } catch (e) {
+    if (!ready.d1) {throw new Error("the wrangler config binds no D1 database");}
+  } catch (error) {
     stop();
-    throw e;
+    throw error;
   }
   running = true;
   child.channel?.unref();
@@ -260,13 +267,13 @@ async function startD1(entry: string, dir: string, ended: () => void): Promise<D
     close: stop,
     explain: (sql, params, ddl) =>
       new Promise((done) => {
-        if (!child.connected) return done(undefined);
+        if (!child.connected) {return done(undefined);}
         const id = next++;
         pending.set(id, (error) => {
           // D1 wraps SQLite's message: "D1_ERROR: no such function: x at offset 7: SQLITE_ERROR".
-          const message = error?.replace(/^D1_ERROR: /, "").replace(/ at offset \d+/, "").replace(/: SQLITE_\w+$/, "");
+          const message = error?.replace(/^D1_ERROR: /u, "").replace(/ at offset \d+/u, "").replace(/: SQLITE_\w+$/u, "");
           // A count of bindings D1 reads otherwise than the analysis is no refusal of the statement.
-          done(message && !/^Wrong number of parameter bindings/.test(message) ? message : undefined);
+          done(message && !/^Wrong number of parameter bindings/u.test(message) ? message : undefined);
         });
         child.channel?.ref();
         const text = JSON.stringify(ddl);
@@ -283,9 +290,9 @@ async function startD1(entry: string, dir: string, ended: () => void): Promise<D
 function wranglerVersion(entry: string): string {
   for (let dir = dirname(entry); dirname(dir) !== dir; dir = dirname(dir)) {
     const file = join(dir, "package.json");
-    if (!existsSync(file)) continue;
+    if (!existsSync(file)) {continue;}
     const pkg = JSON.parse(readFileSync(file, "utf8")) as { name?: string; version?: string };
-    if (pkg.name === "wrangler") return pkg.version ?? "";
+    if (pkg.name === "wrangler") {return pkg.version ?? "";}
   }
   return "";
 }
@@ -293,7 +300,7 @@ function wranglerVersion(entry: string): string {
 /** The SQLite drivers the project's package.json lists, by package name. */
 export function projectDrivers(root: string): string[] {
   const file = join(packageDir(root), "package.json");
-  if (!existsSync(file)) return [];
+  if (!existsSync(file)) {return [];}
   let listed: Set<string>;
   try {
     const pkg = JSON.parse(readFileSync(file, "utf8")) as Record<string, Record<string, string> | undefined>;
@@ -306,12 +313,12 @@ export function projectDrivers(root: string): string[] {
 
 /** Opens each of the project's drivers on the database at `path`, read-only; one that cannot load or open it is left out. */
 export async function openProjectDrivers(root: string, path: string): Promise<SqliteDriver[]> {
-  if (path === ":memory:") return [];
+  if (path === ":memory:") {return [];}
   const names = projectDrivers(root);
-  if (!names.length) return [];
+  if (!names.length) {return [];}
   const require = createRequire(join(packageDir(root), "package.json"));
   const opened = await Promise.all(DRIVERS.filter(([name]) => names.includes(name)).map(([, open]) => open(require, path).catch(() => undefined)));
-  return opened.filter((d): d is SqliteDriver => d !== undefined);
+  return opened.filter((d): d is SqliteDriver => !matchesUndefined(d));
 }
 
 const utf8 = new TextEncoder();

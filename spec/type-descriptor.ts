@@ -1,3 +1,4 @@
+/* oxlint-disable eslint/max-lines -- Keep the upstream descriptor contract and its checked examples together. */
 /** The result of introspecting one SQL statement (`StatementDescriptor`, below) and the type descriptor of each parameter and column in it: which values the position can hold, across relational databases. Every kind, from everyday to advanced; a union lists its members in this order, and a new kind is appended, so the order never changes. The TypeScript is notation: a descriptor is data, written as JSON, YAML or anything else that carries objects, lists, strings, numbers and booleans.
  *
  * The spec is a living document, and every part of it was weighed against the databases it covers. A change to it is a design decision: agree it with a maintainer before writing it, and where implementing it shows a limitation, raise the limitation rather than working around it. */
@@ -466,6 +467,7 @@ export interface Dialect {
 //
 // Checked against the types above by `nub run typecheck`, which includes this directory.
 
+/* oxlint-disable eslint/sort-keys -- Preserve the upstream examples’ serialized key order and field grouping. */
 const int8: IntegerType = { kind: "integer", bits: 64, name: "int8" };
 
 /** A first example, on Postgres, over `create table users (id int8 primary key, email varchar(255) not null, bio text); comment on column users.bio is 'Shown on the profile page';`:
@@ -503,7 +505,7 @@ const sqlite_text: TextType = { kind: "text", ill_formed: "utf8" };
  */
 export const postgres_columns: Column[] = [
   { name: "price", nullable: true, type: { kind: "decimal", precision: 10, min_scale: 2, max_scale: 2, nan: true, name: "numeric" } },
-  { name: "total", nullable: true, type: { kind: "decimal", min_scale: 0, max_scale: 16383, exclusive_min: "-1e131072", exclusive_max: "1e131072", infinity: true, nan: true, name: "numeric" } },
+  { name: "total", nullable: true, type: { kind: "decimal", min_scale: 0, max_scale: 16_383, exclusive_min: "-1e131072", exclusive_max: "1e131072", infinity: true, nan: true, name: "numeric" } },
   { name: "at", nullable: true, type: timestamptz },
   { name: "day", nullable: true, type: { kind: "date", min: "-4713-11-24", max: "+5874897-12-31", infinity: true, name: "date" } },
   { name: "span", nullable: true, type: { kind: "duration", months: { max: "P2147483648M" }, days: { max: "P2147483648D" }, time: { tick: "1/1000000", max: "PT2562047788H54.775808S" }, infinity: true, name: "interval" } },
@@ -546,7 +548,8 @@ export const mysql_columns: Column[] = [
   { name: "status", type: { kind: "text", enum: ["b", "a"], name: "enum" } },
   { name: "born", nullable: true, type: { kind: "date", name: "date" } },
   { name: "name", nullable: true, type: { kind: "text", size: { max: 100 }, name: "varchar" } },
-  { name: "body", nullable: true, type: { kind: "text", size: { unit: "byte", encoding: "UTF-8", max: 65535 }, name: "text" } },
+  // oxlint-disable-next-line unicorn/text-encoding-identifier-case -- The descriptor specifies the serialized label UTF-8.
+  { name: "body", nullable: true, type: { kind: "text", size: { unit: "byte", encoding: "UTF-8", max: 65_535 }, name: "text" } },
   { name: "tags", nullable: true, type: { kind: "set", size: { max: 2 }, name: "set", element: { type: { kind: "text", enum: ["a", "b"] } } } },
   { name: "next", nullable: true, type: { kind: "union", per: "execution", members: [int64, { kind: "float", exponent_bits: 11, mantissa_bits: 52 }, { kind: "decimal" }] } },
 ];
@@ -594,3 +597,4 @@ export const structured_param: Param = {
     { name: "at", nullable: true, optional: true, type: timestamptz },
   ] } } },
 };
+/* oxlint-enable eslint/sort-keys */

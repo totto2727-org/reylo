@@ -1,7 +1,7 @@
 // Each query Reylo runs is published on Node's tracing channel "reylo:query"
 // (https://nodejs.org/api/diagnostics_channel.html#class-tracingchannel), where a tracer or a logger
-// subscribes. The module is looked up at run time, never imported, so a bundle for a runtime
-// without it (a Worker without nodejs_compat, a browser) still builds, and its queries run untraced.
+// Subscribes. The module is looked up at run time, never imported, so a bundle for a runtime
+// Without it (a Worker without nodejs_compat, a browser) still builds, and its queries run untraced.
 import type { Dialect } from "./execute.ts";
 import type { Cardinality, Query } from "./index.ts";
 
@@ -27,7 +27,7 @@ export type QueryTrace = {
   error?: unknown;
 };
 
-type Channel = { readonly hasSubscribers: boolean };
+type Channel = Readonly<{ hasSubscribers: boolean }>;
 type Tracing = {
   readonly start: Channel;
   readonly end: Channel;

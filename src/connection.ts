@@ -1,7 +1,7 @@
 // The ways a describer fails before it describes anything, which the analysis tells apart from a
-// statement's own error. The build-time half is loaded apart from the run time (src/tooling-loader.ts),
-// and a bundler may copy either, so each copy may have these classes of its own, and `instanceof`
-// reads a mark from the global symbol registry instead of comparing classes.
+// Statement's own error. The build-time half is loaded apart from the run time (src/tooling-loader.ts),
+// And a bundler may copy either, so each copy may have these classes of its own, and `instanceof`
+// Reads a mark from the global symbol registry instead of comparing classes.
 
 const UNREACHABLE = Symbol.for("reylo.unreachable");
 const NOT_MYSQL = Symbol.for("reylo.not-mysql");
@@ -13,11 +13,11 @@ const NOT_MYSQL = Symbol.for("reylo.not-mysql");
  * for minutes.
  */
 export class Unreachable extends Error {
-  readonly [UNREACHABLE] = true;
-  constructor(cause: unknown) {
+  public readonly [UNREACHABLE] = true;
+  public constructor(cause: unknown) {
     super(reason(cause), { cause });
   }
-  static [Symbol.hasInstance](value: unknown): boolean {
+  public static [Symbol.hasInstance](value: unknown): boolean {
     return (value as { [UNREACHABLE]?: unknown } | null)?.[UNREACHABLE] === true;
   }
 }
@@ -44,13 +44,13 @@ export function reason(e: unknown): string {
  * (wiki/dialects.md): the type check refuses it before any statement is analyzed.
  */
 export class NotMysql extends Error {
-  readonly [NOT_MYSQL] = true;
-  readonly server: string;
-  constructor(server: string) {
+  public readonly [NOT_MYSQL] = true;
+  public readonly server: string;
+  public constructor(server: string) {
     super(`the server is ${server}, not MySQL`);
     this.server = server;
   }
-  static [Symbol.hasInstance](value: unknown): boolean {
+  public static [Symbol.hasInstance](value: unknown): boolean {
     return (value as { [NOT_MYSQL]?: unknown } | null)?.[NOT_MYSQL] === true;
   }
 }
@@ -59,6 +59,6 @@ export class NotMysql extends Error {
 export function notMysql(version: unknown): string | undefined {
   const v = String(version ?? "");
   const m = /^(?:5\.5\.5-)?(\d+(?:\.\d+)*).*mariadb/i.exec(v);
-  if (m) return `MariaDB ${m[1]}`;
+  if (m) {return `MariaDB ${m[1]}`;}
   return /mariadb/i.test(v) ? "MariaDB" : undefined;
 }

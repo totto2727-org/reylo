@@ -1,7 +1,7 @@
 // What the playground's editor completes, read from the database (`reylo play`) or from the docs'
-// own PGlite at build time (site/lib/live/play-data.ts): the schema's tables and their columns with
-// their types, the functions a query can call with what they return, and the type names a cast
-// takes. Free of Node.
+// Own PGlite at build time (site/lib/live/play-data.ts): the schema's tables and their columns with
+// Their types, the functions a query can call with what they return, and the type names a cast
+// Takes. Free of Node.
 import type { Dialect } from "./engine-core.ts";
 
 export type Column = { name: string; type: string; nullable: boolean };
@@ -27,7 +27,7 @@ export const CATALOG_QUERIES: Record<Dialect, Queries> = {
   join pg_attribute a on a.attrelid = c.oid and a.attnum > 0 and not a.attisdropped
   where n.nspname = any(current_schemas(false)) and n.nspname <> 'pg_catalog' and c.relkind in ('r', 'v', 'm', 'p', 'f') order by c.relname, a.attnum`,
     // Postgres's own and the schema's, without the ones it keeps for itself (input and output,
-    // operator and planner support, aggregates' inner steps).
+    // Operator and planner support, aggregates' inner steps).
     functions: `select p.proname::text, bool_or(p.prokind = 'a'), array_agg(distinct format_type(p.prorettype, null)), bool_or(p.proretset)
   from pg_proc p join pg_namespace n on n.oid = p.pronamespace
   where (n.nspname = 'pg_catalog' or n.nspname = any(current_schemas(false))) and p.prokind in ('f', 'a', 'w')
@@ -76,11 +76,11 @@ const SPELLED: Record<Dialect, string[]> = {
 /** A type as the list shows it: Postgres's short names for the long standard ones. */
 export function shortType(type: string): string {
   return type
-    .replace(/^timestamp with time zone/, "timestamptz")
-    .replace(/^timestamp without time zone/, "timestamp")
-    .replace(/^time with time zone/, "timetz")
-    .replace(/^time without time zone/, "time")
-    .replace(/^character varying/, "varchar");
+    .replace(/^timestamp with time zone/u, "timestamptz")
+    .replace(/^timestamp without time zone/u, "timestamp")
+    .replace(/^time with time zone/u, "timetz")
+    .replace(/^time without time zone/u, "time")
+    .replace(/^character varying/u, "varchar");
 }
 
 /** The catalog from its queries' rows; a database with no query for functions or types gives none, or the names it takes. */
@@ -88,14 +88,14 @@ export function catalog(dialect: Dialect, tables: unknown[][], functions: unknow
   const byName = new Map<string, Table>();
   for (const [table, name, type, nullable] of tables as [string, string, string, unknown][]) {
     let t = byName.get(table);
-    if (!t) byName.set(table, (t = { name: table, columns: [] }));
+    if (!t) {byName.set(table, (t = { name: table, columns: [] }));}
     t.columns.push({ name, type: shortType(String(type ?? "")), nullable: Boolean(Number(nullable) || nullable === true) });
   }
   return {
     tables: [...byName.values()],
     functions: (functions as [string, unknown, string[] | null, unknown][]).map(([name, aggregate, returns, rows]) => {
       // A polymorphic or pseudo return type (anyelement, record, void) says nothing worth showing.
-      const real = returns?.length === 1 && !/^(any|record|void|"any")/.test(returns[0]!) ? shortType(returns[0]!) : undefined;
+      const real = returns?.length === 1 && !/^(any|record|void|"any")/u.test(returns[0]!) ? shortType(returns[0]!) : undefined;
       return { name, kind: Number(aggregate) || aggregate === true ? "aggregate" : "function", ...(real ? { returns: real } : {}), rows: Boolean(Number(rows) || rows === true) };
     }),
     types: [...new Set([...(types as [string][]).map(([t]) => t), ...SPELLED[dialect]])].sort(),

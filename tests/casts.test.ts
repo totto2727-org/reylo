@@ -1,6 +1,8 @@
+// oxlint-disable-next-line rules/no-node-imports, vitest/no-import-node-test -- Nub runs this suite with Node's test runner and provides the runtime used by the SQLite integration tests.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, symlinkSync, writeFileSync } from "node:fs";
+import { writeFile } from "node:fs/promises";
 import { DatabaseSync } from "node:sqlite";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -10,7 +12,7 @@ import { DRIVERS, INDEX, closeSessions, plain } from "./helpers.ts";
 
 // SQLite's parameter casts are compiled to its own syntax, and values are checked before binding.
 
-function project(driver?: string): string {
+const project = function (driver?: string): string {
   const root = mkdtempSync(join(tmpdir(), "reylo-casts-"));
   writeFileSync(join(root, "package.json"), "{}");
   if (driver) {
@@ -18,22 +20,23 @@ function project(driver?: string): string {
     symlinkSync(join(DRIVERS, driver), join(root, "node_modules", driver));
   }
   return root;
-}
+};
 
 /** The module a build step writes for `sql`, imported, and its compiled statement (the query's `sql`), which Reylo sends with its file's comment after it. */
-async function built(root: string, url: string, name: string, sql: string) {
+const built = async function (root: string, url: string, name: string, sql: string) {
   const file = join(root, `${name}.sql`);
-  writeFileSync(file, sql);
-  writeFileSync(join(root, ".env"), `DATABASE_URL=${url}\n`);
+  await writeFile(file, sql);
+  await writeFile(join(root, ".env"), `DATABASE_URL=${url}\n`);
   const { code } = await sqlModule(file, sql);
   const out = join(root, `${name}.mjs`);
-  writeFileSync(out, code.replace(`from "@totto2727/reylo"`, `from ${JSON.stringify(INDEX)}`));
+  await writeFile(out, code.replace(`from "@totto2727/reylo"`, `from ${JSON.stringify(INDEX)}`));
   const module = await import(pathToFileURL(out).href);
   const text = module.default.sql as string;
   assert.equal(module.default["~standard"].query.text, `${text} /*file='${name}.sql'*/`);
   return { query: module.default, text, code };
-}
+};
 
+// oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
 test("SQLite: a cast is SQLite's own, a date's to TEXT, JSON's through json(), and a value the cast would change is refused", async () => {
   const root = project();
   const db = new DatabaseSync(join(root, "app.db"));
@@ -53,8 +56,8 @@ test("SQLite: a cast is SQLite's own, a date's to TEXT, JSON's through json(), a
     const born = await built(root, url, "born", "select name from users where born > :since::date order by born");
     assert.equal(born.text, "select name from users where born > CAST(? AS TEXT) order by born");
     assert.deepEqual(plain(await born.query.run(db, { since: "1900-01-01" })), [{ name: "Grace" }, { name: "Alan" }]);
-    // json() makes the text a JSON value inside SQLite's JSON functions, where text alone is a
-    // string; the object json_object builds comes back parsed.
+    // Json() makes the text a JSON value inside SQLite's JSON functions, where text alone is a
+    // String; the object json_object builds comes back parsed.
     const doc = await built(root, url, "doc", "select json_extract(:doc::json, '$.a') as a, json_object('d', :inner::json, 's', :text) as d");
     assert.equal(doc.text, "select json_extract(json(?), '$.a') as a, json_object('d', json(?), 's', ?) as d");
     assert.match(doc.code, /"doc":\{"type":\{"kind":"json"/);

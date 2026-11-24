@@ -1,13 +1,41 @@
 // Shared SQLite driver fixtures and the content mapper run over its JSON-RPC protocol.
-import { spawn } from "node:child_process";
+// oxlint-disable-next-line rules/no-node-imports -- Exercise Node CLI entry points and streaming protocols in native subprocesses.
+import { execFile, spawn } from "node:child_process";
 import { createRequire } from "node:module";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
+// oxlint-disable-next-line import/no-relative-parent-imports -- The native test runner loads this private guard directly from the source tree.
+import { matchesString } from "../src/native-predicates.ts";
 
 export const ROOT = join(import.meta.dirname, "..");
 export const DRIVERS = join(ROOT, "lab", "drivers", "node_modules");
 export const MAPPER = join(ROOT, "src", "mapper.ts");
 export const INDEX = pathToFileURL(join(ROOT, "src", "index.ts")).href;
+
+interface ChildResult {
+  status: number | null;
+  stderr: string;
+  stdout: string;
+}
+
+/**
+ * @param command - The executable to run.
+ * @param args - Arguments passed directly to the executable.
+ * @param options - The fixture's working directory and optional environment.
+ * @returns The exit status and UTF-8 output from the child.
+ */
+export const runChild = (command: string, args: string[], options: { cwd: string; env?: NodeJS.ProcessEnv }): Promise<ChildResult> => {
+  const { promise, reject, resolve } = Promise.withResolvers<ChildResult>();
+  execFile(command, args, { ...options, encoding: "utf8" }, (error, stdout, stderr) => {
+    const status = error ? (error.code ?? null) : 0;
+    if (matchesString(status)) {
+      reject(error);
+    } else {
+      resolve({ status, stderr, stdout });
+    }
+  });
+  return promise;
+};
 
 /** A driver as `lab/drivers` installs it. */
 export function driver(name: string): any {
@@ -18,11 +46,11 @@ export function driver(name: string): any {
 /** Closes every session the tests opened, so that the next analysis connects afresh. */
 export async function closeSessions(): Promise<void> {
   const { Session } = await import("../src/analyze.ts");
-  for (const session of Session.opened()) await session.close();
+  for (const session of Session.opened()) {await session.close();}
 }
 
 /** Rows as plain objects, to compare with literals. */
-export const plain = (rows: readonly object[]) => [...rows].map((r) => ({ ...r }));
+export const plain = (rows: Readonly<object[]>) => [...rows].map((r) => ({ ...r }));
 
 /** A diagnostic the content mapper reports. */
 export type Diagnostic = { messageText: string; start: number; length: number; code: number };
@@ -30,10 +58,10 @@ export type Diagnostic = { messageText: string; start: number; length: number; c
 /** The declaration the content mapper writes for each file of `files` (name to content), which it must write with no diagnostic. */
 export async function declarations(root: string, files: Record<string, string>): Promise<Record<string, string>> {
   const out: Record<string, string> = {};
-  for (const [name, { text, diagnostics }] of Object.entries(await transform(root, files))) {
-    if (diagnostics.length) throw new Error(`${name}: ${JSON.stringify(diagnostics)}`);
+  Object.entries(await transform(root, files)).forEach(([name, { text, diagnostics }]) => {
+    if (diagnostics.length) {throw new Error(`${name}: ${JSON.stringify(diagnostics)}`);}
     out[name] = text;
-  }
+  });
   return out;
 }
 
@@ -46,9 +74,9 @@ export async function transform(root: string, files: Record<string, string>): Pr
     buffer = Buffer.concat([buffer, chunk]);
     for (;;) {
       const end = buffer.indexOf("\r\n\r\n");
-      if (end === -1) return;
+      if (end === -1) {return;}
       const length = Number(/Content-Length:\s*(\d+)/i.exec(buffer.subarray(0, end).toString("ascii"))![1]);
-      if (buffer.length < end + 4 + length) return;
+      if (buffer.length < end + 4 + length) {return;}
       const message = JSON.parse(buffer.subarray(end + 4, end + 4 + length).toString("utf8"));
       buffer = buffer.subarray(end + 4 + length);
       pending.get(message.id)?.(message.error ? Promise.reject(new Error(message.error.message)) : message.result);
@@ -92,14 +120,14 @@ export function languageServer(root: string) {
     buffer = Buffer.concat([buffer, chunk]);
     for (;;) {
       const end = buffer.indexOf("\r\n\r\n");
-      if (end === -1) return;
+      if (end === -1) {return;}
       const length = Number(/Content-Length:\s*(\d+)/i.exec(buffer.subarray(0, end).toString("ascii"))![1]);
-      if (buffer.length < end + 4 + length) return;
+      if (buffer.length < end + 4 + length) {return;}
       const message = JSON.parse(buffer.subarray(end + 4, end + 4 + length).toString("utf8"));
       buffer = buffer.subarray(end + 4 + length);
       // A request from the server (registerCapability, workspace/configuration) is answered as a client that has nothing to add.
-      if (message.method && message.id !== undefined) write({ id: message.id, result: message.method === "workspace/configuration" ? message.params.items.map(() => null) : null });
-      else if (message.id !== undefined) pending.get(message.id)?.(message.result);
+      if (message.method && message.id !== undefined) {write({ id: message.id, result: message.method === "workspace/configuration" ? message.params.items.map(() => null) : null });}
+      else if (message.id !== undefined) {pending.get(message.id)?.(message.result);}
     }
   });
   let id = 0;

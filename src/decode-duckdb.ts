@@ -1,21 +1,22 @@
 // The run time on DuckDB, over @duckdb/node-api's DuckDBConnection: `runAndReadAll(sql, values)`
-// runs the statement, and each value is given its type's one representation (src/values.ts) by
-// the result's own column types, which hold every field of a STRUCT and every element of a LIST:
-// a BIGINT or HUGEINT is a BigInt, a DECIMAL its exact text, a DATE `YYYY-MM-DD`, a TIMESTAMP its
-// wall-clock text with `T`, a TIMESTAMPTZ its ISO 8601 instant in UTC, an INTERVAL an ISO 8601
-// duration, a BLOB a Uint8Array, a JSON its value, a LIST an array, a STRUCT an object of its
-// fields, a MAP its entries as `{ key, value }`, and a UNION `{ tag, value }`. A year outside 0000
-// to 9999 is written as ISO 8601 extends it (`+010000`, `-000044`), and an infinite date or
-// timestamp as `infinity` or `-infinity`.
+// Runs the statement, and each value is given its type's one representation (src/values.ts) by
+// The result's own column types, which hold every field of a STRUCT and every element of a LIST:
+// A BIGINT or HUGEINT is a BigInt, a DECIMAL its exact text, a DATE `YYYY-MM-DD`, a TIMESTAMP its
+// Wall-clock text with `T`, a TIMESTAMPTZ its ISO 8601 instant in UTC, an INTERVAL an ISO 8601
+// Duration, a BLOB a Uint8Array, a JSON its value, a LIST an array, a STRUCT an object of its
+// Fields, a MAP its entries as `{ key, value }`, and a UNION `{ tag, value }`. A year outside 0000
+// To 9999 is written as ISO 8601 extends it (`+010000`, `-000044`), and an infinite date or
+// Timestamp as `infinity` or `-infinity`.
 //
-// node-api binds a string, a number, a BigInt and a boolean as it is, and DuckDB casts each to its
-// parameter's type, checking its range. A list, a struct, a map or binary data it binds only as
-// a value of its own classes with its type said, so the run time builds those with node-api's own
-// constructors, loaded from the app beside the connection: each element a type node-api takes
-// from JavaScript (an integer a HUGEINT, a decimal or a date its text), which DuckDB casts in turn.
+// Node-api binds a string, a number, a BigInt and a boolean as it is, and DuckDB casts each to its
+// Parameter's type, checking its range. A list, a struct, a map or binary data it binds only as
+// A value of its own classes with its type said, so the run time builds those with node-api's own
+// Constructors, loaded from the app beside the connection: each element a type node-api takes
+// From JavaScript (an integer a HUGEINT, a decimal or a date its text), which DuckDB casts in turn.
 import { DecodeError, duration, ParameterError } from "./values.ts";
 import type { EngineType } from "./engine-type.ts";
 import type { Columns } from "./values.ts";
+import { hasFunctionType, hasObjectType, matchesBigInt, matchesNull, matchesNumber, matchesString, matchesUndefined } from "./native-predicates.ts";
 
 /** @duckdb/node-api's DuckDBConnection, a connection of a DuckDBInstance: `run` takes it. */
 export type DuckdbClient = {
@@ -57,8 +58,8 @@ type Api = {
 };
 
 // Named in a variable and loaded with a `require`, so that a bundler leaves it to the run time: only
-// a DuckDB app has the package, and it loads it itself. An `import()` of it is wrapped by tsc in a
-// helper of its own, which moves a `webpackIgnore` comment where Rspack no longer reads it.
+// A DuckDB app has the package, and it loads it itself. An `import()` of it is wrapped by tsc in a
+// Helper of its own, which moves a `webpackIgnore` comment where Rspack no longer reads it.
 const NODE_API = "@duckdb/node-api";
 /** The module path of node-api's entry, as Node's CommonJS cache keys it. */
 const NODE_API_ENTRY = /[\\/]@duckdb[\\/]node-api[\\/]lib[\\/]index\.js$/;
@@ -78,25 +79,25 @@ type NodeProcess = { argv?: string[]; cwd(): string; getBuiltinModule?(id: strin
  * the one loaded where there is one, else the copy the app's install resolves, which is refused only
  * when `c` is another copy's DuckDBConnection.
  */
-function nodeApiOf(c: DuckdbClient): Promise<Api> {
+const nodeApiOf = function (c: DuckdbClient): Promise<Api> {
   // A connection's class decides its copy; an object that only wraps one is its own.
   const proto = Object.getPrototypeOf(c) as object | null;
-  const own = proto === null || proto === Object.prototype ? c : proto;
+  const own = matchesNull(proto) || proto === Object.prototype ? c : proto;
   let found = apis.get(own);
-  if (found === undefined) {
+  if (matchesUndefined(found)) {
     found = loadNodeApi(c);
     apis.set(own, found);
     found.catch(() => apis.delete(own));
   }
   return found;
-}
+};
 
 /** The classes on `c`'s prototype chain. */
-function classesOf(c: object): unknown[] {
+const classesOf = function (c: object): unknown[] {
   const out: unknown[] = [];
-  for (let p = Object.getPrototypeOf(c) as { constructor?: unknown } | null; p !== null && p !== Object.prototype; p = Object.getPrototypeOf(p)) out.push(p.constructor);
+  for (let p = Object.getPrototypeOf(c) as { constructor?: unknown } | null; !matchesNull(p) && p !== Object.prototype; p = Object.getPrototypeOf(p)) {out.push(p.constructor);}
   return out;
-}
+};
 
 async function loadNodeApi(c: DuckdbClient): Promise<Api> {
   const classes = classesOf(c);
@@ -108,24 +109,24 @@ async function loadNodeApi(c: DuckdbClient): Promise<Api> {
   const loaded: Api[] = [];
   for (const [path, m] of Object.entries(cache ?? {})) {
     const exports = NODE_API_ENTRY.test(path) ? (m?.exports as Api | undefined) : undefined;
-    if (exports?.DuckDBConnection === undefined) continue;
-    if (classes.includes(exports.DuckDBConnection)) return exports;
+    if (matchesUndefined(exports?.DuckDBConnection)) {continue;}
+    if (classes.includes(exports.DuckDBConnection)) {return exports;}
     loaded.push(exports);
   }
-  if (loaded.length === 1) return loaded[0]!;
+  if (loaded.length === 1) {return loaded[0]!;}
   let imported: Api | undefined;
   let failure: unknown;
   const createRequire = proc?.getBuiltinModule?.("node:module")?.createRequire;
   for (const from of [proc?.argv?.[1], proc && `${proc.cwd()}/`]) {
-    if (!from || !createRequire) continue;
+    if (!from || !createRequire) {continue;}
     try {
       imported = createRequire(from)(NODE_API) as Api;
       break;
-    } catch (e) {
-      failure ??= e;
+    } catch (error) {
+      failure ??= error;
     }
   }
-  if (imported === undefined) {
+  if (matchesUndefined(imported)) {
     throw new TypeError(`A list, a struct, a map or binary data is bound with @duckdb/node-api's own values, and the copy the connection came from cannot be found, nor one installed in the project: ${(failure as Error | undefined)?.message ?? "this runtime has no process.getBuiltinModule"}`);
   }
   const another = classes.some((k) => k !== imported.DuckDBConnection && (k as { name?: unknown })?.name === "DuckDBConnection");
@@ -138,7 +139,7 @@ async function loadNodeApi(c: DuckdbClient): Promise<Api> {
 
 /** Whether a client is @duckdb/node-api's DuckDBConnection. */
 export function isDuckdb(c: { [key: string]: unknown } | null | undefined): boolean {
-  return c != null && typeof c.runAndReadAll === "function" && typeof c.prepare === "function" && typeof c.run === "function";
+  return c != null && hasFunctionType(c.runAndReadAll) && hasFunctionType(c.prepare) && hasFunctionType(c.run);
 }
 
 // DuckDB's type ids (duckdb_type), which node-api's types carry.
@@ -156,18 +157,18 @@ const T = {
 export async function runDuckdb(c: DuckdbClient, text: string, values: unknown[], types: (EngineType | undefined)[], columns: Columns | undefined): Promise<unknown[]> {
   let bound = values;
   let bindTypes: unknown[] | undefined;
-  if (values.some((v) => v !== null && typeof v === "object")) {
+  if (values.some((v) => !matchesNull(v) && hasObjectType(v))) {
     const a = await nodeApiOf(c);
-    bindTypes = values.map((v, i) => (v !== null && typeof v === "object" ? bindType(a, types[i], v) : undefined));
-    bound = values.map((v, i) => (v !== null && typeof v === "object" ? bindValue(a, types[i], v) : v));
+    bindTypes = values.map((v, i) => (!matchesNull(v) && hasObjectType(v) ? bindType(a, types[i], v) : undefined));
+    bound = values.map((v, i) => (!matchesNull(v) && hasObjectType(v) ? bindValue(a, types[i], v) : v));
   }
   const reader = (await c.runAndReadAll(text, bound, bindTypes)) as Reader;
-  if (columns !== undefined && columns.length === 0) return [];
+  if (!matchesUndefined(columns) && columns.length === 0) {return [];}
   const names = reader.columnNames();
   const kinds = reader.columnTypes();
   return reader.getRows().map((row) => {
     const out: Record<string, unknown> = {};
-    for (let i = 0; i < names.length; i++) out[names[i]!] = decode(row[i], kinds[i]!, names[i]!);
+    for (let i = 0; i < names.length; i++) {out[names[i]!] = decode(row[i], kinds[i]!, names[i]!);}
     return out;
   });
 }
@@ -181,23 +182,23 @@ export async function runDuckdb(c: DuckdbClient, text: string, values: unknown[]
  * exactly and checking its range, so no integer is narrowed to a type node-api picks.
  */
 function bindType(a: Api, t: EngineType | undefined, v: unknown): unknown {
-  if (v instanceof Uint8Array) return a.BLOB;
-  if (t?.kind === "tuple" && Array.isArray(v)) return a.TUPLE(t.items.map((item, i) => bindType(a, item, v[i])));
+  if (v instanceof Uint8Array) {return a.BLOB;}
+  if (t?.kind === "tuple" && Array.isArray(v)) {return a.TUPLE(t.items.map((item, i) => bindType(a, item, v[i])));}
   if (Array.isArray(v)) {
-    if (t?.kind === "map") return a.MAP(bindType(a, t.key, firstOf(v, "key")), bindType(a, t.value, firstOf(v, "value")));
+    if (t?.kind === "map") {return a.MAP(bindType(a, t.key, firstOf(v, "key")), bindType(a, t.value, firstOf(v, "value")));}
     return a.LIST(bindType(a, t?.kind === "array" ? t.of : undefined, v.find((e) => e != null)));
   }
-  if (t?.kind === "struct" && v !== null && typeof v === "object") {
+  if (t?.kind === "struct" && !matchesNull(v) && hasObjectType(v)) {
     return a.STRUCT(Object.fromEntries(t.fields.map((f) => [f.name, bindType(a, f.type, (v as Record<string, unknown>)[f.name])])));
   }
-  if (t?.kind === "union" && v !== null && typeof v === "object") {
+  if (t?.kind === "union" && !matchesNull(v) && hasObjectType(v)) {
     return a.UNION(Object.fromEntries(t.members.map((m) => [m.name, bindType(a, m.type, (v as { tag?: unknown; value?: unknown }).tag === m.name ? (v as { value?: unknown }).value : undefined)])));
   }
   return a.VARCHAR;
 }
 
 function firstOf(entries: unknown[], key: "key" | "value"): unknown {
-  for (const e of entries) if (e !== null && typeof e === "object" && (e as Record<string, unknown>)[key] != null) return (e as Record<string, unknown>)[key];
+  for (const e of entries) {if (!matchesNull(e) && hasObjectType(e) && (e as Record<string, unknown>)[key] != null) {return (e as Record<string, unknown>)[key];}}
   return undefined;
 }
 
@@ -205,15 +206,15 @@ const INTEGERS = new Set(["tinyint", "smallint", "integer", "bigint", "hugeint",
 
 /** `v` as node-api builds it for `bindType`'s type: a scalar its text, a JSON value its JSON. */
 function bindValue(a: Api, t: EngineType | undefined, v: unknown): unknown {
-  if (v === null || v === undefined) return null;
-  if (v instanceof Uint8Array) return a.blobValue(v);
-  if (t?.kind === "tuple" && Array.isArray(v)) return a.tupleValue(t.items.map((item, i) => bindValue(a, item, v[i])));
+  if (matchesNull(v) || matchesUndefined(v)) {return null;}
+  if (v instanceof Uint8Array) {return a.blobValue(v);}
+  if (t?.kind === "tuple" && Array.isArray(v)) {return a.tupleValue(t.items.map((item, i) => bindValue(a, item, v[i])));}
   if (Array.isArray(v)) {
-    if (t?.kind === "map") return a.mapValue(v.map((e) => ({ key: bindValue(a, t.key, (e as { key?: unknown } | null)?.key), value: bindValue(a, t.value, (e as { value?: unknown } | null)?.value) })));
+    if (t?.kind === "map") {return a.mapValue(v.map((e) => ({ key: bindValue(a, t.key, (e as { key?: unknown } | null)?.key), value: bindValue(a, t.value, (e as { value?: unknown } | null)?.value) })));}
     return a.listValue(v.map((e) => bindValue(a, t?.kind === "array" ? t.of : undefined, e)));
   }
-  if (typeof v === "object") {
-    if (t?.kind === "struct") return a.structValue(Object.fromEntries(t.fields.map((f) => [f.name, bindValue(a, f.type, (v as Record<string, unknown>)[f.name])])));
+  if (hasObjectType(v)) {
+    if (t?.kind === "struct") {return a.structValue(Object.fromEntries(t.fields.map((f) => [f.name, bindValue(a, f.type, (v as Record<string, unknown>)[f.name])])));}
     if (t?.kind === "union") {
       const { tag, value } = v as { tag?: unknown; value?: unknown };
       return a.unionValue(String(tag), bindValue(a, t.members.find((m) => m.name === tag)?.type, value));
@@ -230,37 +231,37 @@ function bindValue(a: Api, t: EngineType | undefined, v: unknown): unknown {
  * text. An array's elements and a struct's fields are checked by their own types.
  */
 export function encodeDuckdb(type: EngineType | undefined, v: unknown, name: string): unknown {
-  if (type === undefined || v == null) return v;
-  if (type.kind === "array" && Array.isArray(v)) return v.map((e) => encodeDuckdb(type.of, e, name));
-  if (type.kind === "tuple" && Array.isArray(v)) return v.map((e, i) => encodeDuckdb(type.items[i], e, name));
-  if (type.kind === "map" && Array.isArray(v)) return v.map((e) => (e !== null && typeof e === "object" ? { ...e, key: encodeDuckdb(type.key, (e as { key?: unknown }).key, name), value: encodeDuckdb(type.value, (e as { value?: unknown }).value, name) } : e));
-  if (type.kind === "struct" && typeof v === "object" && !Array.isArray(v)) {
+  if (matchesUndefined(type) || v == null) {return v;}
+  if (type.kind === "array" && Array.isArray(v)) {return v.map((e) => encodeDuckdb(type.of, e, name));}
+  if (type.kind === "tuple" && Array.isArray(v)) {return v.map((e, i) => encodeDuckdb(type.items[i], e, name));}
+  if (type.kind === "map" && Array.isArray(v)) {return v.map((e) => (!matchesNull(e) && hasObjectType(e) ? { ...e, key: encodeDuckdb(type.key, (e as { key?: unknown }).key, name), value: encodeDuckdb(type.value, (e as { value?: unknown }).value, name) } : e));}
+  if (type.kind === "struct" && hasObjectType(v) && !Array.isArray(v)) {
     const out: Record<string, unknown> = { ...(v as Record<string, unknown>) };
-    for (const f of type.fields) out[f.name] = encodeDuckdb(f.type, out[f.name], name);
+    for (const f of type.fields) {out[f.name] = encodeDuckdb(f.type, out[f.name], name);}
     return out;
   }
   // A UNION takes `{ tag, value }`, its tag one of its members and its value that member's.
-  // node-api cannot build a union whose member is NULL, which DuckDB keeps apart from a NULL union.
+  // Node-api cannot build a union whose member is NULL, which DuckDB keeps apart from a NULL union.
   if (type.kind === "union") {
-    const { tag, value } = (typeof v === "object" ? v : {}) as { tag?: unknown; value?: unknown };
+    const { tag, value } = (hasObjectType(v) ? v : {}) as { tag?: unknown; value?: unknown };
     const member = type.members.find((m) => m.name === tag);
     const tags = type.members.map((m) => JSON.stringify(m.name)).join(", ");
-    if (member === undefined) throw new ParameterError(`Parameter "${name}" is a UNION, so it takes { tag, value } with the tag one of ${tags}; got ${JSON.stringify(v)}.`);
-    if (value == null) throw new ParameterError(`Parameter "${name}" is a UNION, and @duckdb/node-api cannot bind one whose ${JSON.stringify(tag)} member is null: pass null for the whole parameter, or a value of the member.`);
+    if (matchesUndefined(member)) {throw new ParameterError(`Parameter "${name}" is a UNION, so it takes { tag, value } with the tag one of ${tags}; got ${JSON.stringify(v)}.`);}
+    if (value == null) {throw new ParameterError(`Parameter "${name}" is a UNION, and @duckdb/node-api cannot bind one whose ${JSON.stringify(tag)} member is null: pass null for the whole parameter, or a value of the member.`);}
     return { tag, value: encodeDuckdb(member.type, value, name) };
   }
-  if (type.kind !== "scalar") return v;
+  if (type.kind !== "scalar") {return v;}
   if (INTEGERS.has(type.name)) {
-    if (typeof v === "number" && !Number.isInteger(v)) throw new ParameterError(`Parameter "${name}" is an integer, and ${v} has a fraction, which DuckDB would round away.`);
-    if (typeof v === "string" && !/^\s*[+-]?\d+\s*$/.test(v)) throw new ParameterError(`Parameter "${name}" is an integer, so a string for it holds the digits alone; got ${JSON.stringify(v)}.`);
+    if (matchesNumber(v) && !Number.isInteger(v)) {throw new ParameterError(`Parameter "${name}" is an integer, and ${v} has a fraction, which DuckDB would round away.`);}
+    if (matchesString(v) && !/^\s*[+-]?\d+\s*$/u.test(v)) {throw new ParameterError(`Parameter "${name}" is an integer, so a string for it holds the digits alone; got ${JSON.stringify(v)}.`);}
   }
-  if (type.name === "interval" && typeof v === "string") return duckdbInterval(v);
+  if (type.name === "interval" && matchesString(v)) {return duckdbInterval(v);}
   // A number goes as its text, which DuckDB casts to the parameter's type exactly: bound as it
-  // is, node-api would type a whole number as an integer (a float's 3.4e38 overflows a BIGINT)
-  // and a BigInt as a signed HUGEINT (a UHUGEINT's maximum overflows it).
-  if (typeof v === "number" || typeof v === "bigint") return String(v);
+  // Is, node-api would type a whole number as an integer (a float's 3.4e38 overflows a BIGINT)
+  // And a BigInt as a signed HUGEINT (a UHUGEINT's maximum overflows it).
+  if (matchesNumber(v) || matchesBigInt(v)) {return String(v);}
   // DuckDB reads a year past 9999 without the sign ISO 8601 writes before it (`+10000-01-01`).
-  if (typeof v === "string" && TIMES.has(type.name)) return v.replace(/^\+0*(\d{4,})/, "$1");
+  if (matchesString(v) && TIMES.has(type.name)) {return v.replace(/^\+0*(\d{4,})/u, "$1");}
   return v;
 }
 
@@ -273,15 +274,15 @@ const TIMES = new Set(["date", "timestamp", "timestamp_s", "timestamp_ms", "time
 export function duckdbInterval(text: string): string {
   const n = "([+-]?\\d+(?:[.,]\\d+)?)";
   const m = new RegExp(`^\\s*([+-])?P(?:${n}Y)?(?:${n}M)?(?:${n}W)?(?:${n}D)?(?:T(?:${n}H)?(?:${n}M)?(?:${n}S)?)?\\s*$`, "i").exec(text);
-  if (m === null || !/\d/.test(text)) return text;
+  if (matchesNull(m) || !/\d/u.test(text)) {return text;}
   const negate = m[1] === "-";
   const units = ["years", "months", "weeks", "days", "hours", "minutes", "seconds"];
   const parts: string[] = [];
   units.forEach((unit, i) => {
     const value = m[i + 2];
-    if (value === undefined) return;
+    if (matchesUndefined(value)) {return;}
     const number = value.replace(",", ".");
-    parts.push(`${negate ? (number.startsWith("-") ? number.slice(1) : `-${number.replace(/^\+/, "")}`) : number} ${unit}`);
+    parts.push(`${negate ? (number.startsWith("-") ? number.slice(1) : `-${number.replace(/^\+/u, "")}`) : number} ${unit}`);
   });
   return parts.length ? parts.join(" ") : "0 seconds";
 }
@@ -294,72 +295,74 @@ const pad = (n: number | bigint, width = 2) => String(n).padStart(width, "0");
 const isoYear = (y: number) => (y >= 0 && y <= 9999 ? pad(y, 4) : `${y < 0 ? "-" : "+"}${pad(Math.abs(y), 6)}`);
 
 /** The date `days` after 1970-01-01 in the proleptic Gregorian calendar, year 0 being 1 BC. */
-function civil(days: number): string {
-  const z = days + 719468;
-  const era = Math.floor(z / 146097);
-  const doe = z - era * 146097;
-  const yoe = Math.floor((doe - Math.floor(doe / 1460) + Math.floor(doe / 36524) - Math.floor(doe / 146096)) / 365);
+const civil = function (days: number): string {
+  const z = days + 719_468;
+  const era = Math.floor(z / 146_097);
+  const doe = z - era * 146_097;
+  const yoe = Math.floor((doe - Math.floor(doe / 1460) + Math.floor(doe / 36_524) - Math.floor(doe / 146_096)) / 365);
   const doy = doe - (365 * yoe + Math.floor(yoe / 4) - Math.floor(yoe / 100));
   const mp = Math.floor((5 * doy + 2) / 153);
   const d = doy - Math.floor((153 * mp + 2) / 5) + 1;
   const m = mp + (mp < 10 ? 3 : -9);
   return `${isoYear(era * 400 + yoe + (m <= 2 ? 1 : 0))}-${pad(m)}-${pad(d)}`;
-}
+};
 
 /** A count of `unit`ths of a second since 1970 as `YYYY-MM-DDTHH:MM:SS[.fraction]`, the fraction's trailing zeros dropped. */
-function wallClock(count: bigint, perSecond: bigint, digits: number): string {
-  const perDay = 86400n * perSecond;
+const wallClock = function (count: bigint, perSecond: bigint, digits: number): string {
+  const perDay = BigInt("86400") * perSecond;
   let days = count / perDay;
   let rest = count % perDay;
-  if (rest < 0n) {
+  if (rest < BigInt("0")) {
     rest += perDay;
-    days -= 1n;
+    days -= BigInt("1");
   }
   const seconds = Number(rest / perSecond);
-  const fraction = (rest % perSecond).toString().padStart(digits, "0").replace(/0+$/, "");
+  const fraction = (rest % perSecond).toString().padStart(digits, "0").replace(/0+$/u, "");
   return `${civil(Number(days))}T${pad(Math.floor(seconds / 3600))}:${pad(Math.floor(seconds / 60) % 60)}:${pad(seconds % 60)}${fraction && `.${fraction}`}`;
-}
+};
 
 // DuckDB's infinite date and timestamps.
-const DATE_INFINITY = 2147483647;
-const TS_INFINITY = 9223372036854775807n;
+const DATE_INFINITY = 2_147_483_647;
+const TS_INFINITY = BigInt("9223372036854775807");
 
-function timestamp(count: bigint, perSecond: bigint, digits: number, zone: string): string {
-  if (count === TS_INFINITY) return "infinity";
-  if (count === -TS_INFINITY) return "-infinity";
+const timestamp = function (count: bigint, perSecond: bigint, digits: number, zone: string): string {
+  if (count === TS_INFINITY) {return "infinity";}
+  if (count === -TS_INFINITY) {return "-infinity";}
   return wallClock(count, perSecond, digits) + zone;
-}
+};
 
 /** An interval's months, days and microseconds as an ISO 8601 duration, as `.run()` returns a Postgres one (src/values.ts). */
-function interval(months: number, days: number, micros: bigint): string {
+const interval = function (months: number, days: number, micros: bigint): string {
   const years = Math.trunc(months / 12);
   const mons = months - years * 12;
-  const sign = micros < 0n ? "-" : "";
-  const abs = micros < 0n ? -micros : micros;
-  const seconds = abs / 1000000n;
-  const fraction = (abs % 1000000n).toString().padStart(6, "0");
-  return duration(`${years} years ${mons} mons ${days} days ${sign}${seconds / 3600n}:${pad((seconds / 60n) % 60n)}:${pad(seconds % 60n)}.${fraction}`);
-}
+  const sign = micros < BigInt("0") ? "-" : "";
+  const abs = micros < BigInt("0") ? -micros : micros;
+  const seconds = abs / BigInt("1000000");
+  const fraction = (abs % BigInt("1000000")).toString().padStart(6, "0");
+  return duration(`${years} years ${mons} mons ${days} days ${sign}${seconds / BigInt("3600")}:${pad((seconds / BigInt("60")) % BigInt("60"))}:${pad(seconds % BigInt("60"))}.${fraction}`);
+};
 
 /** A DECIMAL's unscaled value as its exact text. */
-function decimal(value: bigint, scale: number): string {
-  if (scale === 0) return value.toString();
-  const negative = value < 0n;
+const decimal = function (value: bigint, scale: number): string {
+  if (scale === 0) {return value.toString();}
+  const negative = value < BigInt("0");
   const digits = (negative ? -value : value).toString().padStart(scale + 1, "0");
   return `${negative ? "-" : ""}${digits.slice(0, -scale)}.${digits.slice(-scale)}`;
-}
+};
 
 /** A value of DuckDB's type `t`, as node-api reads it, in its kind's form; `column` names it in an error. */
 function decode(v: unknown, t: DuckType, column: string): unknown {
-  if (v === null || v === undefined) return null;
+  if (matchesNull(v) || matchesUndefined(v)) {return null;}
   const o = v as Record<string, any>;
   switch (t.typeId) {
-    case T.BOOLEAN: case T.TINYINT: case T.SMALLINT: case T.INTEGER: case T.UTINYINT: case T.USMALLINT: case T.UINTEGER: case T.FLOAT: case T.DOUBLE:
+    case T.BOOLEAN: case T.TINYINT: case T.SMALLINT: case T.INTEGER: case T.UTINYINT: case T.USMALLINT: case T.UINTEGER: case T.FLOAT: case T.DOUBLE: {
       return v;
-    case T.BIGINT: case T.UBIGINT: case T.HUGEINT: case T.UHUGEINT: case T.BIGNUM:
-      return typeof v === "bigint" ? v : BigInt(v as number);
-    case T.VARCHAR:
-      if (t.alias?.toUpperCase() === "JSON" && typeof v === "string") {
+    }
+    case T.BIGINT: case T.UBIGINT: case T.HUGEINT: case T.UHUGEINT: case T.BIGNUM: {
+      return matchesBigInt(v) ? v : BigInt(v as number);
+    }
+    case T.VARCHAR: {
+      if (t.alias?.toUpperCase() === "JSON" && matchesString(v)) {
         try {
           return JSON.parse(v);
         } catch {
@@ -367,44 +370,53 @@ function decode(v: unknown, t: DuckType, column: string): unknown {
         }
       }
       return v;
-    case T.ENUM: case T.UUID: case T.BIT: case T.TIME: case T.TIME_NS: case T.TIME_TZ:
+    }
+    case T.ENUM: case T.UUID: case T.BIT: case T.TIME: case T.TIME_NS: case T.TIME_TZ: {
       return String(v);
-    case T.BLOB:
+    }
+    case T.BLOB: {
       return o.bytes instanceof Uint8Array ? o.bytes : v;
-    case T.DECIMAL:
-      return typeof o.value === "bigint" && typeof o.scale === "number" ? decimal(o.value, o.scale) : String(v);
-    case T.DATE:
-      if (o.days === DATE_INFINITY) return "infinity";
-      if (o.days === -DATE_INFINITY) return "-infinity";
-      return typeof o.days === "number" ? civil(o.days) : String(v);
-    case T.TIMESTAMP: return timestamp(o.micros, 1000000n, 6, "");
-    case T.TIMESTAMP_S: return timestamp(o.seconds, 1n, 0, "");
-    case T.TIMESTAMP_MS: return timestamp(o.millis, 1000n, 3, "");
-    case T.TIMESTAMP_NS: return timestamp(o.nanos, 1000000000n, 9, "");
-    case T.TIMESTAMP_TZ: return timestamp(o.micros, 1000000n, 6, "Z");
-    case T.TIMESTAMP_TZ_NS: return timestamp(o.nanos, 1000000000n, 9, "Z");
-    case T.INTERVAL: return interval(o.months, o.days, o.micros);
-    case T.LIST: case T.ARRAY:
+    }
+    case T.DECIMAL: {
+      return matchesBigInt(o.value) && matchesNumber(o.scale) ? decimal(o.value, o.scale) : String(v);
+    }
+    case T.DATE: {
+      if (o.days === DATE_INFINITY) {return "infinity";}
+      if (o.days === -DATE_INFINITY) {return "-infinity";}
+      return matchesNumber(o.days) ? civil(o.days) : String(v);
+    }
+    case T.TIMESTAMP: { return timestamp(o.micros, BigInt("1000000"), 6, ""); }
+    case T.TIMESTAMP_S: { return timestamp(o.seconds, BigInt("1"), 0, ""); }
+    case T.TIMESTAMP_MS: { return timestamp(o.millis, BigInt("1000"), 3, ""); }
+    case T.TIMESTAMP_NS: { return timestamp(o.nanos, BigInt("1000000000"), 9, ""); }
+    case T.TIMESTAMP_TZ: { return timestamp(o.micros, BigInt("1000000"), 6, "Z"); }
+    case T.TIMESTAMP_TZ_NS: { return timestamp(o.nanos, BigInt("1000000000"), 9, "Z"); }
+    case T.INTERVAL: { return interval(o.months, o.days, o.micros); }
+    case T.LIST: case T.ARRAY: {
       return (o.items as unknown[]).map((e) => decode(e, t.valueType!, column));
+    }
     case T.STRUCT: {
       // A tuple, a struct whose fields have no names, is its values in order.
-      if (Array.isArray(o.items)) return (o.items as unknown[]).map((e, i) => decode(e, t.entryTypes![i]!, column));
+      if (Array.isArray(o.items)) {return (o.items as unknown[]).map((e, i) => decode(e, t.entryTypes![i]!, column));}
       const out: Record<string, unknown> = {};
       t.entryNames!.forEach((name, i) => (out[name] = decode(o.entries[name], t.entryTypes![i]!, column)));
       return out;
     }
-    case T.MAP:
+    case T.MAP: {
       return (o.entries as { key: unknown; value: unknown }[]).map((e) => ({ key: decode(e.key, t.keyType!, column), value: decode(e.value, t.valueType!, column) }));
+    }
     case T.UNION: {
       const at = t.memberTags!.indexOf(o.tag);
       return { tag: o.tag, value: at < 0 ? o.value : decode(o.value, t.memberTypes![at]!, column) };
     }
-    case T.VARIANT:
+    case T.VARIANT: {
       // A VARIANT holds a value of any type, which it carries beside it.
       return decode(o.value, (o.type ?? { typeId: 0 }) as DuckType, column);
-    default:
+    }
+    default: {
       // A type an extension adds (GEOMETRY): its text, where node-api gives a value of its own.
-      if (v instanceof Uint8Array) return v;
-      return typeof v === "object" ? String(v) : v;
+      if (v instanceof Uint8Array) {return v;}
+      return hasObjectType(v) ? String(v) : v;
+    }
   }
 }

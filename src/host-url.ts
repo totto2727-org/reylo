@@ -1,17 +1,19 @@
 // What the host does to a database's URL before its engine opens it (src/engine.ts). The files a
 // Postgres URL names (`sslrootcert`, `sslcert`, `sslkey`) are resolved as libpq resolves them, from
-// this process's working directory, so that the engine, a process of its own, reads the same file;
-// and a URL that names a Unix socket (Postgres's `host=/dir`, or `PGHOST=/dir` where the URL names
-// no host, and mysql2's `socketPath`) is opened through a bridge, a TCP port on the loopback
-// interface that this thread pipes to the socket, since the engine connects over TCP alone
+// This process's working directory, so that the engine, a process of its own, reads the same file;
+// And a URL that names a Unix socket (Postgres's `host=/dir`, or `PGHOST=/dir` where the URL names
+// No host, and mysql2's `socketPath`) is opened through a bridge, a TCP port on the loopback
+// Interface that this thread pipes to the socket, since the engine connects over TCP alone
 // (upstream engine/native). The server sees a connection on its socket, which peer authentication
 // (Postgres's `peer`, MySQL's `auth_socket`) trusts as this process's user, so the bridge admits the
-// engine's own connections alone: each carries the bridge's token, which only the engine is given
-// and the server never sees, and any other is closed before the server reads a byte of it.
+// Engine's own connections alone: each carries the bridge's token, which only the engine is given
+// And the server never sees, and any other is closed before the server reads a byte of it.
 import { randomBytes, timingSafeEqual } from "node:crypto";
-import { createServer, connect, type AddressInfo, type Socket } from "node:net";
+import { createServer, connect } from 'node:net';
+import type { AddressInfo, Socket } from 'node:net';
 import { resolve } from "node:path";
 import { Unreachable } from "./connection.ts";
+import { matchesUndefined } from "./native-predicates.ts";
 
 /**
  * A URL as the engine opens it, the bridge's token where it goes through one, what to close with
@@ -36,16 +38,16 @@ const TOKEN_TIMEOUT = 10_000;
 export async function hostUrl(url: string, env: Record<string, string | undefined> = process.env, platform: NodeJS.Platform = process.platform): Promise<HostUrl> {
   const postgres = /^postgres(ql)?:\/\//i.test(url);
   const mysql = /^mysql:\/\//i.test(url);
-  if (!postgres && !mysql) return { url, close: () => {} };
+  if (!postgres && !mysql) {return { url, close: () => {} };}
   const [base, query = ""] = splitQuery(url);
   let pairs = query ? query.split("&") : [];
-  if (postgres) pairs = pairs.map((pair) => {
+  if (postgres) {pairs = pairs.map((pair) => {
     const [key, value] = splitPair(pair);
-    if (!FILES.includes(key) || value === "" || value === "system") return pair;
+    if (!FILES.includes(key) || value === "" || value === "system") {return pair;}
     return `${key}=${encodeURIComponent(resolve(value))}`;
-  });
+  });}
   const socket = postgres ? postgresSocket(base, pairs, env) : mysqlSocket(pairs);
-  if (!socket) return { url: join(base, pairs), close: () => {} };
+  if (!socket) {return { url: join(base, pairs), close: () => {} };}
   if (postgres && platform === "win32") {
     throw new Unreachable(new Error(`the URL names the Unix socket ${socket.path}, which Node cannot open on Windows: name the server's host and port, as host=localhost&port=5432`));
   }
@@ -65,9 +67,9 @@ function postgresSocket(base: string, pairs: string[], env: Record<string, strin
   const authority = /^[a-z]+:\/\/(?:[^@/?]*@)?([^/?]*)/i.exec(base)?.[1] ?? "";
   const [, encodedHost = "", authorityPort] = /^(.*?)(?::(\d+))?$/.exec(authority) ?? [];
   const host = params.host ?? (encodedHost ? decodeURIComponent(encodedHost) : params.hostaddr ? undefined : env.PGHOST);
-  if (!host?.startsWith("/") || host.includes(",")) return undefined;
+  if (!host?.startsWith("/") || host.includes(",")) {return undefined;}
   const port = params.port || authorityPort || env.PGPORT || "5432";
-  return { path: `${host.replace(/\/$/, "")}/.s.PGSQL.${port}`, params: ["host", "port", "sslmode"] };
+  return { path: `${host.replace(/\/$/u, "")}/.s.PGSQL.${port}`, params: ["host", "port", "sslmode"] };
 }
 
 /** The socket file a mysql2 URL names: `socketPath`, or `socket`. */
@@ -130,11 +132,11 @@ async function openBridge(path: string, dialect: "postgres" | "mysql", token: st
     client.on("close", () => clearTimeout(refused));
     const pipe = (upstream: Socket, toServer: Buffer[]) => {
       clearTimeout(refused);
-      for (const chunk of toServer) upstream.write(chunk);
+      for (const chunk of toServer) {upstream.write(chunk);}
       client.pipe(upstream).pipe(client);
     };
-    if (dialect === "postgres") gatePostgres(client, token, () => openUpstream(path, client, track, failed), pipe);
-    else gateMysql(client, token, openUpstream(path, client, track, failed), pipe);
+    if (dialect === "postgres") {gatePostgres(client, token, () => openUpstream(path, client, track, failed), pipe);}
+    else {gateMysql(client, token, openUpstream(path, client, track, failed), pipe);}
   });
   await new Promise<void>((done, fail) => {
     server.once("error", fail);
@@ -145,7 +147,7 @@ async function openBridge(path: string, dialect: "postgres" | "mysql", token: st
     port: (server.address() as AddressInfo).port,
     close: () => {
       server.close();
-      for (const socket of open) socket.destroy();
+      for (const socket of open) {socket.destroy();}
     },
     failure: () => failure,
   };
@@ -156,11 +158,11 @@ function openUpstream(path: string, client: Socket, track: (socket: Socket) => v
   const upstream = connect(path);
   track(upstream);
   // Only a socket that never opened is the bridge's failure: an error after it opened (a reset once
-  // the server refused the login) leaves the engine's own answer, which names the refusal.
+  // The server refused the login) leaves the engine's own answer, which names the refusal.
   let opened = false;
   upstream.once("connect", () => (opened = true));
   upstream.on("error", (e) => {
-    if (!opened) failed(e);
+    if (!opened) {failed(e);}
     upstream.destroy();
     client.destroy();
   });
@@ -175,10 +177,10 @@ function gatePostgres(client: Socket, token: string, upstream: () => Socket, pip
   let head = Buffer.alloc(0);
   const read = (chunk: Buffer) => {
     head = Buffer.concat([head, chunk]);
-    if (head.length < expected.length) return;
+    if (head.length < expected.length) {return;}
     client.off("data", read);
     client.pause();
-    if (!timingSafeEqual(head.subarray(0, expected.length), expected)) return void client.destroy();
+    if (!timingSafeEqual(head.subarray(0, expected.length), expected)) {return void client.destroy();}
     pipe(upstream(), [head.subarray(expected.length)]);
     client.resume();
   };
@@ -196,7 +198,7 @@ function gateMysql(client: Socket, token: string, upstream: Socket, pipe: (upstr
   const greeting = (chunk: Buffer) => {
     fromServer = Buffer.concat([fromServer, chunk]);
     const packet = whole(fromServer);
-    if (!packet) return;
+    if (!packet) {return;}
     upstream.off("data", greeting);
     upstream.pause();
     withoutTls(packet.payload);
@@ -205,11 +207,11 @@ function gateMysql(client: Socket, token: string, upstream: Socket, pipe: (upstr
     const login = (chunk: Buffer) => {
       fromClient = Buffer.concat([fromClient, chunk]);
       const answer = whole(fromClient);
-      if (!answer) return;
+      if (!answer) {return;}
       client.off("data", login);
       client.pause();
       const taken = takeAttribute(answer.payload, MYSQL_ATTRIBUTE);
-      if (taken?.value !== token) return void client.destroy();
+      if (taken?.value !== token) {return void client.destroy();}
       const header = Buffer.alloc(4);
       header.writeUIntLE(taken.login.length, 0, 3);
       header[3] = fromClient[3]!;
@@ -224,7 +226,7 @@ function gateMysql(client: Socket, token: string, upstream: Socket, pipe: (upstr
 
 /** The first whole packet of a MySQL stream, its payload in place, or undefined while it is still arriving. */
 function whole(stream: Buffer): { payload: Buffer } | undefined {
-  if (stream.length < 4) return undefined;
+  if (stream.length < 4) {return undefined;}
   const length = stream.readUIntLE(0, 3);
   return stream.length < 4 + length ? undefined : { payload: stream.subarray(4, 4 + length) };
 }
@@ -232,57 +234,57 @@ function whole(stream: Buffer): { payload: Buffer } | undefined {
 /** The greeting (HandshakeV10) with CLIENT_SSL cleared from its capabilities, in place. */
 function withoutTls(greeting: Buffer): void {
   const at = greeting.indexOf(0, 1) + 1 + 4 + 8 + 1;
-  if (greeting[0] === 10 && at + 2 <= greeting.length) greeting.writeUInt16LE(greeting.readUInt16LE(at) & ~0x0800, at);
+  if (greeting[0] === 10 && at + 2 <= greeting.length) {greeting.writeUInt16LE(greeting.readUInt16LE(at) & ~0x08_00, at);}
 }
 
 /** A length-encoded integer, as MySQL's protocol writes one. */
-function lenenc(n: number): Buffer {
-  if (n < 0xfb) return Buffer.from([n]);
-  const size = n < 0x10000 ? 2 : n < 0x1000000 ? 3 : 8;
+const lenenc = function (n: number): Buffer {
+  if (n < 0xFB) {return Buffer.from([n]);}
+  const size = n < 0x1_00_00 ? 2 : n < 0x1_00_00_00 ? 3 : 8;
   const out = Buffer.alloc(1 + size);
-  out[0] = size === 2 ? 0xfc : size === 3 ? 0xfd : 0xfe;
+  out[0] = size === 2 ? 0xFC : size === 3 ? 0xFD : 0xFE;
   out.writeUIntLE(n, 1, Math.min(size, 6));
   return out;
-}
+};
 
 /**
  * A connection attribute of a login (HandshakeResponse41), and the login without it, its
  * attributes' length written again; undefined where the login carries no such attribute.
  */
 export function takeAttribute(login: Buffer, name: string): { value: string; login: Buffer } | undefined {
-  const CONNECT_WITH_DB = 0x8, SSL = 0x800, SECURE_CONNECTION = 0x8000, PLUGIN_AUTH = 0x80000, CONNECT_ATTRS = 0x100000, LENENC_AUTH = 0x200000;
-  if (login.length < 32) return undefined;
+  const CONNECT_WITH_DB = 0x8; const SSL = 0x8_00; const SECURE_CONNECTION = 0x80_00; const PLUGIN_AUTH = 0x8_00_00; const CONNECT_ATTRS = 0x10_00_00; const LENENC_AUTH = 0x20_00_00;
+  if (login.length < 32) {return undefined;}
   const capabilities = login.readUInt32LE(0);
-  if (capabilities & SSL || !(capabilities & CONNECT_ATTRS)) return undefined;
+  if (capabilities & SSL || !(capabilities & CONNECT_ATTRS)) {return undefined;}
   // Capabilities, the largest packet, the character set and 23 bytes of filler.
   let at = 32;
   const int = (): number => {
     const first = login[at++];
-    if (first === undefined) throw new RangeError("short");
-    if (first < 0xfb) return first;
-    const size = first === 0xfc ? 2 : first === 0xfd ? 3 : 8;
+    if (matchesUndefined(first)) {throw new RangeError("short");}
+    if (first < 0xFB) {return first;}
+    const size = first === 0xFC ? 2 : first === 0xFD ? 3 : 8;
     const value = login.readUIntLE(at, Math.min(size, 6));
     at += size;
     return value;
   };
   const bytes = (n: number): Buffer => {
-    if (at + n > login.length) throw new RangeError("short");
+    if (at + n > login.length) {throw new RangeError("short");}
     const value = login.subarray(at, at + n);
     at += n;
     return value;
   };
   const cstring = (): void => {
     const end = login.indexOf(0, at);
-    if (end < 0) throw new RangeError("unterminated");
+    if (end < 0) {throw new RangeError("unterminated");}
     at = end + 1;
   };
   try {
-    cstring(); // the user
-    if (capabilities & LENENC_AUTH) bytes(int());
-    else if (capabilities & SECURE_CONNECTION) bytes(bytes(1)[0]!);
-    else cstring();
-    if (capabilities & CONNECT_WITH_DB) cstring();
-    if (capabilities & PLUGIN_AUTH) cstring();
+    cstring(); // The user
+    if (capabilities & LENENC_AUTH) {bytes(int());}
+    else if (capabilities & SECURE_CONNECTION) {bytes(bytes(1)[0]!);}
+    else {cstring();}
+    if (capabilities & CONNECT_WITH_DB) {cstring();}
+    if (capabilities & PLUGIN_AUTH) {cstring();}
     const lengthAt = at;
     const length = int();
     const start = at;
@@ -291,7 +293,7 @@ export function takeAttribute(login: Buffer, name: string): { value: string; log
       const pairAt = at;
       const key = bytes(int()).toString("utf8");
       const value = bytes(int()).toString("utf8");
-      if (key !== name) continue;
+      if (key !== name) {continue;}
       const rest = Buffer.concat([login.subarray(start, pairAt), login.subarray(at, end)]);
       return { value, login: Buffer.concat([login.subarray(0, lengthAt), lenenc(rest.length), rest, login.subarray(end)]) };
     }

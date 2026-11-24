@@ -1,6 +1,8 @@
+// oxlint-disable-next-line rules/no-node-imports, vitest/no-import-node-test -- Nub runs this suite with Node's test runner and provides the runtime used by the SQLite integration tests.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, readFileSync, realpathSync, symlinkSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync, symlinkSync, writeFileSync } from "node:fs";
+import { readFile } from "node:fs/promises";
 import { DatabaseSync } from "node:sqlite";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -8,15 +10,15 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { ROOT, languageServer } from "./helpers.ts";
 
 // Go-to-definition from what a `.sql` module declares opens the `.sql` file at its statement, through
-// the span map the content mapper returns (src/mapper.ts), and a hover shows the file's comment and
-// statement, from the doc comments the module carries (src/doc-comment.ts). The language server
-// runs as an editor runs it, `tsc --lsp --stdio` with runExternalCode on, over a SQLite project, so
-// no server is needed.
+// The span map the content mapper returns (src/mapper.ts), and a hover shows the file's comment and
+// Statement, from the doc comments the module carries (src/doc-comment.ts). The language server
+// Runs as an editor runs it, `tsc --lsp --stdio` with runExternalCode on, over a SQLite project, so
+// No server is needed.
 
 type Position = { line: number; character: number };
 type Range = { start: Position; end: Position };
 
-function project(): string {
+const project = function (): string {
   const root = realpathSync(mkdtempSync(join(tmpdir(), "reylo-definition-")));
   writeFileSync(join(root, "package.json"), `{ "type": "module" }`);
   writeFileSync(join(root, ".env"), "DATABASE_URL=file:./app.db\n");
@@ -34,12 +36,13 @@ function project(): string {
   writeFileSync(join(root, "queries", "add_post.sql"), "insert into posts (title, body)\nvalues (\n  @title,\n  @body\n)\n");
   writeFileSync(join(root, "main.ts"), `import posts from "@/queries/posts.sql";\nimport type { Row } from "@/queries/posts.sql";\nexport const query = posts;\nexport type Title = Row["title"];\nexport const sent = posts.sql;\nimport addPost from "@/queries/add_post.sql";\nexport const add = addPost;\n`);
   return root;
-}
+};
 
+// oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
 test("go-to-definition on a query, its import's path, its Row and a column opens the .sql file at its statement, and a hover shows its comment and statement", async () => {
   const root = project();
   const main = join(root, "main.ts");
-  const text = readFileSync(main, "utf8");
+  const text = await readFile(main, "utf8");
   const at = (needle: string, offset: number): Position => {
     const before = text.slice(0, text.indexOf(needle) + offset).split("\n");
     return { line: before.length - 1, character: before.at(-1)!.length };
@@ -53,15 +56,15 @@ test("go-to-definition on a query, its import's path, its Row and a column opens
     // The mapper analyzed the statement: the query's hover carries the row's columns.
     let hover = "";
     for (let i = 0; i < 100 && !hover.includes("title: string"); i++) {
-      if (i) await new Promise((resolve) => setTimeout(resolve, 200));
+      if (i) {await new Promise((resolve) => setTimeout(resolve, 200));}
       hover = (await lsp.request("textDocument/hover", { textDocument: { uri }, position: at("query = posts", 0) }))?.contents?.value ?? "";
     }
     assert.match(hover, /title: string;\s+body: string \| null;/);
 
     // The hover over the import shows the comment at the top of the file as prose, then the
-    // statement as written; the one over its `.sql` the compiled statement, once, as its type,
-    // without the comment naming the file. The doc comment's lines in the module move nothing the
-    // definitions below land on.
+    // Statement as written; the one over its `.sql` the compiled statement, once, as its type,
+    // Without the comment naming the file. The doc comment's lines in the module move nothing the
+    // Definitions below land on.
     const hoverAt = async (position: Position): Promise<string> => (await lsp.request("textDocument/hover", { textDocument: { uri }, position }))?.contents?.value ?? "";
     const statementBlock = "```sql\nselect id, title, body\nfrom posts\nwhere id > :after\n```";
     const imported = await hoverAt(at("posts from", 0));
@@ -72,13 +75,13 @@ test("go-to-definition on a query, its import's path, its Row and a column opens
     // A line of the statement that starts with `@` stays in the code block, not a tag after it.
     let added = "";
     for (let i = 0; i < 100 && !added.includes("```sql"); i++) {
-      if (i) await new Promise((resolve) => setTimeout(resolve, 200));
+      if (i) {await new Promise((resolve) => setTimeout(resolve, 200));}
       added = await hoverAt(at("addPost from", 0));
     }
     assert.ok(added.endsWith("\n```sql\ninsert into posts (title, body)\nvalues (\n  @title,\n  @body\n)\n```"), added);
 
     // A file URI read back as its path: on Windows the server writes the drive in lowercase with its
-    // colon encoded (`file:///c%3A/…`), and the system matches a path's letters without regard to case.
+    // Colon encoded (`file:///c%3A/…`), and the system matches a path's letters without regard to case.
     const path = (uri: string) => (process.platform === "win32" ? fileURLToPath(uri).toLowerCase() : fileURLToPath(uri));
     const sql = path(pathToFileURL(join(root, "queries", "posts.sql")).href);
     // Lines 2 to 5 of the file: the comment above the statement, through `:after`.

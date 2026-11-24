@@ -1,14 +1,14 @@
 // The Next.js integration, `export default withReylo(nextConfig)` in next.config.ts: the loader on
-// the server for Turbopack and webpack, and a type check that runs the content mapper inside
+// The server for Turbopack and webpack, and a type check that runs the content mapper inside
 // `next build`.
 //
 // Since 16.3, `next build` type-checks with the project's own `tsc` (`experimental.useTypeScriptCli`,
-// on by default), which TypeScript 7 is, but with arguments of its own and no `--runExternalCode`
-// among them, and TypeScript takes that flag from the command line alone. So its check never runs
-// the mapper and fails on every `.sql` import (TS2307, and TS18068 on tsconfig.json). The wrapper
-// turns that check off and runs the same one with the flag in `compiler.runAfterProductionCompile`,
-// which runs under Turbopack and webpack alike, after the compile and before Next's own type check
-// and the prerender (wiki/nextjs.md).
+// On by default), which TypeScript 7 is, but with arguments of its own and no `--runExternalCode`
+// Among them, and TypeScript takes that flag from the command line alone. So its check never runs
+// The mapper and fails on every `.sql` import (TS2307, and TS18068 on tsconfig.json). The wrapper
+// Turns that check off and runs the same one with the flag in `compiler.runAfterProductionCompile`,
+// Which runs under Turbopack and webpack alike, after the compile and before Next's own type check
+// And the prerender (wiki/nextjs.md).
 import { spawn } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { createRequire } from "node:module";
@@ -18,11 +18,11 @@ type AfterCompile = (metadata: { projectDir: string; distDir: string }) => Promi
 
 // The part of Next's config the wrapper reads or sets, so that reylo has no dependency on next.
 // Each field's type admits Next's own, and the rest of the config passes through as it is. Every
-// level is intersected with `object`: one whose properties are all optional is a weak type, which
-// a literal sharing none of them, as `{ reactStrictMode: true }` or `{ turbopack: { root } }`,
-// fails, reported as excess properties. An index signature would not do: Next's own `NextConfig`
-// and its parts are interfaces, which have none, so they are assignable to one only when its value
-// is `any`, which lets any value through.
+// Level is intersected with `object`: one whose properties are all optional is a weak type, which
+// A literal sharing none of them, as `{ reactStrictMode: true }` or `{ turbopack: { root } }`,
+// Fails, reported as excess properties. An index signature would not do: Next's own `NextConfig`
+// And its parts are interfaces, which have none, so they are assignable to one only when its value
+// Is `any`, which lets any value through.
 type NextConfig = object & {
   typescript?: object & { ignoreBuildErrors?: boolean; tsconfigPath?: string };
   turbopack?: object & { rules?: Record<string, unknown> };
@@ -39,12 +39,12 @@ export function withReylo<Config extends NextConfig>(config: Config = {} as Conf
     turbopack: {
       ...turbopack,
       // Each .sql file becomes a module that runs its statement, on the server only: a client
-      // component that imports one fails the build. A rule of the project's own for *.sql wins.
+      // Component that imports one fails the build. A rule of the project's own for *.sql wins.
       rules: { "*.sql": { condition: { not: "browser" }, loaders: ["@totto2727/reylo/turbopack"], as: "*.js" }, ...turbopack?.rules },
     },
     webpack(webpackConfig: any, context: any) {
       const out = webpack ? webpack(webpackConfig, context) : webpackConfig;
-      if (context.isServer) out.module.rules.push({ test: /\.sql$/, use: "@totto2727/reylo/webpack" });
+      if (context.isServer) {out.module.rules.push({ test: /\.sql$/, use: "@totto2727/reylo/webpack" });}
       return out;
     },
     ...(check && {
@@ -61,7 +61,7 @@ export function withReylo<Config extends NextConfig>(config: Config = {} as Conf
 }
 
 // Next's own check (`next/dist/lib/typescript/runTypeCheckCli`), with `--runExternalCode`: the
-// project's TypeScript, run with this process's Node from the project directory.
+// Project's TypeScript, run with this process's Node from the project directory.
 async function typeCheck(dir: string, tsconfig: string): Promise<void> {
   const require = createRequire(join(dir, "package.json"));
   let manifest: string;
@@ -76,23 +76,23 @@ async function typeCheck(dir: string, tsconfig: string): Promise<void> {
     throw stackless(`Reylo's type check needs TypeScript 7.1 or later, whose content mappers type .sql imports; the project has TypeScript ${version}.`);
   }
   // Next writes next-env.d.ts after this hook; `next typegen` writes it on a first build, for a
-  // project that declares an image import through it.
+  // Project that declares an image import through it.
   if (!existsSync(join(dir, "next-env.d.ts"))) {
     const next = require.resolve("next/package.json");
     const bin = (JSON.parse(readFileSync(next, "utf8")) as { bin: { next: string } }).bin.next;
     const typegen = await run([join(dirname(next), bin), "typegen", dir], dir);
-    if (typegen.code !== 0) throw stackless(`next typegen failed:\n${typegen.output}`);
+    if (typegen.code !== 0) {throw stackless(`next typegen failed:\n${typegen.output}`);}
   }
   const tsc = join(dirname(manifest), "lib", "tsc.js");
   const args = ["--project", tsconfig, "--noEmit", "--declarationMap", "false", "--emitDeclarationOnly", "false", "--runExternalCode"];
   const { code, output } = await run([tsc, ...args], dir);
   // Next's spinner pauses for console output, and not for a write to stdout.
-  if (output.trim()) console.log(output.trimEnd());
-  if (code !== 0) throw stackless("Failed to type check (tsc --runExternalCode).");
+  if (output.trim()) {console.log(output.trimEnd());}
+  if (code !== 0) {throw stackless("Failed to type check (tsc --runExternalCode).");}
 }
 
 // A child Node process's exit code and its output, stdout and stderr in the order they came. A
-// piped tsc prints no colors unless FORCE_COLOR asks, which Next sets for its own check too.
+// Piped tsc prints no colors unless FORCE_COLOR asks, which Next sets for its own check too.
 function run(args: string[], cwd: string): Promise<{ code: number; output: string }> {
   return new Promise((done, fail) => {
     const child = spawn(process.execPath, args, {
@@ -109,7 +109,7 @@ function run(args: string[], cwd: string): Promise<{ code: number; output: strin
 }
 
 // `next build` prints a failed hook's error whole: a stack would point into Reylo, not at the
-// errors, which tsc has printed above it.
+// Errors, which tsc has printed above it.
 function stackless(message: string): Error {
   const error = new Error(message);
   error.stack = message;

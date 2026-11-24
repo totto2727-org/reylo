@@ -1,6 +1,7 @@
+// oxlint-disable-next-line rules/no-node-imports, vitest/no-import-node-test -- Nub runs this suite with Node's test runner and provides the runtime used by the SQLite integration tests.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
@@ -12,8 +13,8 @@ import { ParameterError } from "../src/values.ts";
 import { INDEX } from "./helpers.ts";
 
 // Every import is a Standard Query: `~standard.query` holds the statement, its database, and the
-// two mappings a driver calls, `encode` (the input to the values it binds, each in the database's
-// raw form) and `decode` (the rows it read raw to the output), with `.run()`'s input and output.
+// Two mappings a driver calls, `encode` (the input to the values it binds, each in the database's
+// Raw form) and `decode` (the rows it read raw to the output), with `.run()`'s input and output.
 
 
 const users = defineQuery<{ id: number; tags: number[]; doc: unknown; bytes: Uint8Array; flag: boolean }, { id: number; at: string; big: bigint }, "many", "postgres">({
@@ -37,6 +38,7 @@ const users = defineQuery<{ id: number; tags: number[]; doc: unknown; bytes: Uin
   cardinality: "many",
 });
 
+// oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
 test("postgres: the statement, its database, and each value as the text the server reads", () => {
   const q = users["~standard"].query;
   assert.equal(q.dialect, "postgres");
@@ -44,7 +46,7 @@ test("postgres: the statement, its database, and each value as the text the serv
   assert.deepEqual(q.encode({ id: 7, tags: [1, 2], doc: { a: [1] }, bytes: new Uint8Array([0, 255]), flag: true }), ["7", '{"1","2"}', '{"a":[1]}', "\\x00ff", "t"]);
   // A key left out binds NULL, as `.run()` binds it; one the statement takes no null for is refused.
   assert.deepEqual(users["~standard"].query.encode({ id: 7 }), ["7", null, null, null, null]);
-  assert.throws(() => q.encode({ tags: [1] }), (e) => e instanceof ParameterError && /"id" is missing/.test(e.message));
+  assert.throws(() => q.encode({ tags: [1] }), (e) => e instanceof ParameterError && /"id" is missing/u.test(e.message));
   // The input is an object, as `.run()` takes it.
   assert.throws(() => q.encode([7]), ParameterError);
   // A driver may take `encode` off the object.
@@ -52,21 +54,23 @@ test("postgres: the statement, its database, and each value as the text the serv
   assert.deepEqual(encode({ id: 7 }), ["7", null, null, null, null]);
 });
 
+// oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
 test("postgres: decode gives each value its kind, and the output its cardinality, as .run() does", () => {
   const q = users["~standard"].query;
   assert.deepEqual(q.decode([["1", "2026-10-22 14:46:00.123456+02", "9007199254740993"], ["2", "2026-10-22 00:00:00+00", null]]), [
-    { id: 1, at: "2026-10-22T12:46:00.123456Z", big: 9007199254740993n },
+    { id: 1, at: "2026-10-22T12:46:00.123456Z", big: BigInt("9007199254740993") },
     { id: 2, at: "2026-10-22T00:00:00Z", big: null },
   ]);
   assert.throws(() => q.decode([["1", "x"]]), /selects 3 columns, and a row has 2/);
   const one = defineQuery<{}, { n: bigint }, "maybeOne", "postgres">({ dialect: "postgres", sql: "select count(*) as n from users", params: [], columns: [["n", "int8"]], cardinality: "maybeOne" });
-  assert.deepEqual(one["~standard"].query.decode([["3"]]), { n: 3n });
+  assert.deepEqual(one["~standard"].query.decode([["3"]]), { n: BigInt("3") });
   assert.equal(one["~standard"].query.decode([]), null);
   assert.throws(() => one["~standard"].query.decode([["1"], ["2"]]), /Expected at most one row, got 2/);
   const none = defineQuery<{}, never, "none", "postgres">({ dialect: "postgres", sql: "delete from users", params: [], columns: [], cardinality: "none" });
   assert.equal(none["~standard"].query.decode([]), undefined);
 });
 
+// oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
 test("mysql and sqlite: each value as a driver binds it, and decode takes every form a driver reads", () => {
   const my = defineQuery<{ id: bigint; doc: unknown }, { id: bigint; at: string; amount: string; ok: boolean }, "maybeOne", "mysql">({
     dialect: "mysql",
@@ -83,10 +87,10 @@ test("mysql and sqlite: each value as a driver binds it, and decode takes every 
     ],
     cardinality: "maybeOne",
   });
-  assert.deepEqual(my["~standard"].query.encode({ id: 5n, doc: { a: 1 } }), [5n, '{"a":1}']);
-  // mysql2's binary protocol gives a BIGINT as its digits, mariadb's text protocol as a BigInt.
-  assert.deepEqual(my["~standard"].query.decode([["9007199254740993", "2026-10-22 14:46:00.000000", "1.50", 1]]), { id: 9007199254740993n, at: "2026-10-22T14:46:00.000000", amount: "1.50", ok: true });
-  assert.deepEqual(my["~standard"].query.decode([[9007199254740993n, "2026-10-22 14:46:00", "1.50", "1"]]), { id: 9007199254740993n, at: "2026-10-22T14:46:00", amount: "1.50", ok: true });
+  assert.deepEqual(my["~standard"].query.encode({ id: BigInt("5"), doc: { a: 1 } }), [BigInt("5"), '{"a":1}']);
+  // Mysql2's binary protocol gives a BIGINT as its digits, mariadb's text protocol as a BigInt.
+  assert.deepEqual(my["~standard"].query.decode([["9007199254740993", "2026-10-22 14:46:00.000000", "1.50", 1]]), { id: BigInt("9007199254740993"), at: "2026-10-22T14:46:00.000000", amount: "1.50", ok: true });
+  assert.deepEqual(my["~standard"].query.decode([[BigInt("9007199254740993"), "2026-10-22 14:46:00", "1.50", "1"]]), { id: BigInt("9007199254740993"), at: "2026-10-22T14:46:00", amount: "1.50", ok: true });
   // A column that may be a DATETIME takes the T too, as `.run()` gives it.
   const either = defineQuery<{}, { at: string }, "many", "mysql">({ dialect: "mysql", sql: "select coalesce(at, d) as at from t", params: [], columns: [["at", "timestamp|date"]] });
   assert.deepEqual(either["~standard"].query.decode([["2026-10-22 14:46:00"]]), [{ at: "2026-10-22T14:46:00" }]);
@@ -104,11 +108,11 @@ test("mysql and sqlite: each value as a driver binds it, and decode takes every 
     ],
   });
   assert.deepEqual(lite["~standard"].query.encode({ ok: true }), [1]);
-  assert.deepEqual(lite["~standard"].query.decode([[1n, 0n]]), [{ id: 1n, ok: false }]);
+  assert.deepEqual(lite["~standard"].query.decode([[BigInt("1"), BigInt("0")]]), [{ id: BigInt("1"), ok: false }]);
 
   // SQLite decodes through `.run()`'s own normalizing: a value of a storage class the column's type
-  // does not allow, which a table that is not STRICT stores, is refused, and an integer in a column
-  // with no type is a number however the driver read it.
+  // Does not allow, which a table that is not STRICT stores, is refused, and an integer in a column
+  // With no type is a number however the driver read it.
   const loose = defineQuery<{}, { n: number; s: string; u: unknown }, "many", "sqlite">({
     dialect: "sqlite",
     sql: "select n, s, u from loose",
@@ -120,12 +124,13 @@ test("mysql and sqlite: each value as a driver binds it, and decode takes every 
     ],
   });
   const lq = loose["~standard"].query;
-  assert.deepEqual(lq.decode([[1n, "a", 2n]]), [{ n: 1, s: "a", u: 2 }]);
+  assert.deepEqual(lq.decode([[BigInt("1"), "a", BigInt("2")]]), [{ n: 1, s: "a", u: 2 }]);
   assert.throws(() => lq.decode([["abc", "a", null]]), /Column "n" is typed number and holds the text "abc"/);
   assert.throws(() => lq.decode([[1, new Uint8Array([1]), null]]), /Column "s" is typed string and holds a BLOB of 1 byte/);
-  assert.throws(() => lq.decode([[2n ** 60n, "a", null]]), /"n"/);
+  assert.throws(() => lq.decode([[BigInt("2") ** BigInt("60"), "a", null]]), /"n"/);
 });
 
+// oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
 test("a query defined by hand without its columns cannot decode, and says so", () => {
   const bare = defineQuery<{ id: number }, { id: number }, "many", "postgres">({ dialect: "postgres", sql: "select :id::int as id", params: ["id"] });
   assert.equal(bare["~standard"].query.text, "select $1::int as id");
@@ -133,15 +138,16 @@ test("a query defined by hand without its columns cannot decode, and says so", (
   assert.throws(() => bare["~standard"].query.decode([["1"]]), /without its columns/);
 });
 
+// oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
 test("sqlite: node:sqlite runs a built import as a Standard Query, with its own conversions off, to .run()'s output", async () => {
-  const root = mkdtempSync(join(tmpdir(), "reylo-standard-"));
+  const root = await mkdtemp(join(tmpdir(), "reylo-standard-"));
   const db = join(root, "app.db");
   const setup = new DatabaseSync(db);
   setup.exec("create table t (id integer primary key, name text not null, ok boolean not null, big bigint, data blob)");
   setup.exec("insert into t values (1, 'ada', 1, 9007199254740993, x'00ff'), (2, 'bob', 0, null, null)");
   setup.close();
-  writeFileSync(join(root, "package.json"), "{}");
-  writeFileSync(join(root, ".env"), `DATABASE_URL=file:${db}\n`);
+  await writeFile(join(root, "package.json"), "{}");
+  await writeFile(join(root, ".env"), `DATABASE_URL=file:${db}\n`);
   try {
     const query = await built(root, "list", "select id, name, ok, big, data from t where ok = :ok or id > :min order by id");
     const conn = new DatabaseSync(db);
@@ -153,12 +159,12 @@ test("sqlite: node:sqlite runs a built import as a Standard Query, with its own 
     const output = sq.decode(statement.all(...sq.encode(input)) as unknown as unknown[][]);
     assert.deepEqual(output, await query.run(conn, input));
     assert.deepEqual(output, [
-      { id: 1, name: "ada", ok: true, big: 9007199254740993n, data: new Uint8Array([0, 255]) },
+      { id: 1, name: "ada", ok: true, big: BigInt("9007199254740993"), data: new Uint8Array([0, 255]) },
       { id: 2, name: "bob", ok: false, big: null, data: null },
     ]);
     conn.close();
   } finally {
-    for (const session of Session.opened()) await session.close();
+    for (const session of Session.opened()) {await session.close();}
   }
 });
 
@@ -166,9 +172,9 @@ test("sqlite: node:sqlite runs a built import as a Standard Query, with its own 
 /** A module built for `sql` in `root` and imported. */
 async function built(root: string, name: string, sql: string) {
   const file = join(root, `${name}.sql`);
-  writeFileSync(file, sql);
+  await writeFile(file, sql);
   const { code } = await sqlModule(file, sql);
   const out = join(root, `${name}.mjs`);
-  writeFileSync(out, code.replace(`from "@totto2727/reylo"`, `from ${JSON.stringify(INDEX)}`));
+  await writeFile(out, code.replace(`from "@totto2727/reylo"`, `from ${JSON.stringify(INDEX)}`));
   return (await import(`${pathToFileURL(out).href}?${Math.random()}`)).default;
 }

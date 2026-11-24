@@ -1,5 +1,5 @@
 // One statement as the playground shows it, in `reylo play` and on the docs site's /play: the
-// diagnostics the content mapper would place in its file, by line and column, and its Params and
+// Diagnostics the content mapper would place in its file, by line and column, and its Params and
 // Returns as the docs print them. Free of Node, since the docs run it in the reader's tab.
 import type { Analysis, Dialect, Lexed } from "./engine-core.ts";
 import { moduleTypes } from "./module-types.ts";
@@ -36,7 +36,7 @@ export function playResult(
   const width = options.width ?? Infinity;
   const ms = options.ms ?? 0;
   const placed = (d: { message: string; start: number; length: number; code: number }) => ({ message: d.message, code: d.code, ...place(d.start, d.length) });
-  if ("error" in outcome) return { sql, params: "unknown", returns: "unknown", diagnostics: [placed({ message: outcome.error.message, start: 0, length: 1, code: outcome.error.code ?? 5 })], ms };
+  if ("error" in outcome) {return { sql, params: "unknown", returns: "unknown", diagnostics: [placed({ message: outcome.error.message, start: 0, length: 1, code: outcome.error.code ?? 5 })], ms };}
   try {
     const types = moduleTypes(sql, outcome.analysis, dialect, outcome.lexed, options.strictParams ?? true);
     return {
@@ -48,8 +48,8 @@ export function playResult(
       diagnostics: types.diagnostics.map(placed),
       ms,
     };
-  } catch (e) {
-    return { sql, params: "unknown", returns: "unknown", diagnostics: [placed({ message: (e as Error).message, start: 0, length: 1, code: 5 })], ms };
+  } catch (error) {
+    return { sql, params: "unknown", returns: "unknown", diagnostics: [placed({ message: (error as Error).message, start: 0, length: 1, code: 5 })], ms };
   }
 }
 
@@ -59,26 +59,26 @@ export function playResult(
  */
 export function placer(sql: string) {
   const bytes = new TextEncoder().encode(sql);
-  // index[b] is the UTF-16 index of the character byte b begins or sits inside.
+  // Index[b] is the UTF-16 index of the character byte b begins or sits inside.
   const index = new Uint32Array(bytes.length + 1);
   let u = 0;
   for (let b = 0; b < bytes.length; ) {
     const lead = bytes[b]!;
-    const n = lead < 0x80 ? 1 : lead < 0xe0 ? 2 : lead < 0xf0 ? 3 : 4;
-    for (let k = 0; k < n && b + k < bytes.length; k++) index[b + k] = u;
+    const n = lead < 0x80 ? 1 : lead < 0xE0 ? 2 : lead < 0xF0 ? 3 : 4;
+    for (let k = 0; k < n && b + k < bytes.length; k++) {index[b + k] = u;}
     b += n;
     u += n === 4 ? 2 : 1;
   }
   index[bytes.length] = sql.length;
   const lineStarts = [0];
-  for (let i = 0; i < sql.length; i++) if (sql.charCodeAt(i) === 10) lineStarts.push(i + 1);
+  for (let i = 0; i < sql.length; i++) {if (sql.charCodeAt(i) === 10) {lineStarts.push(i + 1);}}
   const at = (i: number) => {
     let lo = 0;
     let hi = lineStarts.length - 1;
     while (lo < hi) {
       const mid = (lo + hi + 1) >> 1;
-      if (lineStarts[mid]! <= i) lo = mid;
-      else hi = mid - 1;
+      if (lineStarts[mid]! <= i) {lo = mid;}
+      else {hi = mid - 1;}
     }
     return { line: lo + 1, column: i - lineStarts[lo]! + 1 };
   };

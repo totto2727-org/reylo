@@ -1,29 +1,30 @@
 // The error `.try()` gives: one the database raised, read from the driver's own error into one
-// shape per database, whichever driver ran the statement. The codes are the database's own, every
-// one it defines (the lists are synced from upstream Reylo). Any other error, a refused connection,
-// a client Reylo cannot run on, a value Reylo refuses or a row count the analysis got wrong, is not
-// the database's, and `.try()` throws it as `.run()` does.
+// Shape per database, whichever driver ran the statement. The codes are the database's own, every
+// One it defines (the lists are synced from upstream Reylo). Any other error, a refused connection,
+// A client Reylo cannot run on, a value Reylo refuses or a row count the analysis got wrong, is not
+// The database's, and `.try()` throws it as `.run()` does.
 //
 // The drivers keep the same facts in different places, measured on each (lab/driver-matrix):
 // - Postgres: pg, PGlite and Neon keep the server's fields under pg's names (`constraint`), and
-//   postgres.js under the protocol's (`constraint_name`, and `data type_name` with its space).
+//   Postgres.js under the protocol's (`constraint_name`, and `data type_name` with its space).
 //   Bun.sql keeps the SQLSTATE in `errno`, with a name of its own in `code`, and writes its own
-//   stack's column over `column` where the server sent none.
+//   Stack's column over `column` where the server sent none.
 // - MySQL: mysql2, mariadb and Bun.sql give the number and the state; mariadb's message starts with
-//   a header of its own, and its `sqlMessage` (`text` before 3.0) is the server's. mariadb numbers
-//   its own errors 45001 to 45999, with a state too. @planetscale/database writes the number and the
-//   state into the message.
+//   A header of its own, and its `sqlMessage` (`text` before 3.0) is the server's. mariadb numbers
+//   Its own errors 45001 to 45999, with a state too. @planetscale/database writes the number and the
+//   State into the message.
 // - SQLite: better-sqlite3 names the extended code; bun:sqlite and Bun.sql name it and give its
-//   number; node:sqlite gives the number; libsql the number and, from 0.17, the primary code's name
-//   with the extended one beside it; sqlite3 and the sqlite package only the primary code. D1 and a
+//   Number; node:sqlite gives the number; libsql the number and, from 0.17, the primary code's name
+//   With the extended one beside it; sqlite3 and the sqlite package only the primary code. D1 and a
 //   Durable Object write both codes at the end of the message, and Turso's engine none, or the
-//   primary one's number before 0.8.
+//   Primary one's number before 0.8.
 // - DuckDB: @duckdb/node-api throws a plain Error whose message names the kind of error first
 //   (`Constraint Error: Duplicate key …`), DuckDB's exception type, and nothing else.
 import type { Dialect } from "./execute.ts";
 import type { POSTGRES_CODES } from "./error-codes-postgres.ts";
 import type { MYSQL_CODES } from "./error-codes-mysql.ts";
 import { SQLITE_CODES } from "./error-codes-sqlite.ts";
+import { hasObjectType, matchesNull, matchesNumber, matchesString, matchesUndefined } from "./native-predicates.ts";
 
 /** A SQLSTATE Postgres defines, as `"23505"`. */
 export type PostgresCode = keyof typeof POSTGRES_CODES;
@@ -60,15 +61,15 @@ export interface PostgresErrorFields extends Error {
  * The names each field of an error may hold, by the error's code: what a statement that runs only
  * the server's own code writes through (its constraints, tables, columns and domains).
  */
-export type PostgresNarrowing = { readonly [C in PostgresCode]?: { readonly constraint?: string; readonly table?: string; readonly column?: string; readonly dataType?: string } };
+export type PostgresNarrowing = { readonly [C in PostgresCode]?: Readonly<{ constraint?: string; table?: string; column?: string; dataType?: string }> };
 
 /** An error of one of the codes `C`, with the names `F` narrows its fields to. */
-type PostgresMember<C extends PostgresCode, F> = Omit<PostgresErrorFields, keyof F> & {
+type PostgresMember<C extends PostgresCode, F> = Omit<PostgresErrorFields, keyof F> & Readonly<{
   /** The SQLSTATE, as `"23505"`. */
-  readonly code: C;
+  code: C;
   /** The code's condition name, as `"unique_violation"`. */
-  readonly condition: (typeof POSTGRES_CODES)[C];
-} & { readonly [K in keyof F]: F[K] | undefined };
+  condition: (typeof POSTGRES_CODES)[C];
+}> & { readonly [K in keyof F]: F[K] | undefined };
 
 /**
  * An error Postgres raised. A statement that may run a user's code (a trigger, a function) may raise
@@ -78,15 +79,15 @@ type PostgresMember<C extends PostgresCode, F> = Omit<PostgresErrorFields, keyof
  */
 export type PostgresQueryError<N extends PostgresNarrowing | undefined = undefined> = [N] extends [PostgresNarrowing]
   ? { [C in keyof N & PostgresCode]: PostgresMember<C, N[C]> }[keyof N & PostgresCode] | PostgresMember<Exclude<PostgresCode, keyof N>, {}>
-  : PostgresErrorFields & {
+  : PostgresErrorFields & Readonly<{
       /**
        * The SQLSTATE, as `"23505"`: one Postgres defines, or one a function raised itself
        * (`raise ... using errcode`), which no list holds.
        */
-      readonly code: PostgresCode | (string & {});
+      code: PostgresCode | (string & {});
       /** The code's condition name, as `"unique_violation"`; undefined for a code Postgres does not define. */
-      readonly condition: PostgresCondition | undefined;
-    };
+      condition: PostgresCondition | undefined;
+    }>;
 
 /** What an error MySQL raised holds beside its code. */
 export interface MysqlErrorFields extends Error {
@@ -110,13 +111,13 @@ export interface MysqlErrorFields extends Error {
 }
 
 /** The names each field of an error may hold, by the error's name: what a statement that runs no trigger and no stored function writes through. */
-export type MysqlNarrowing = { readonly [C in MysqlCode]?: { readonly key?: string; readonly constraint?: string; readonly table?: string; readonly column?: string } };
+export type MysqlNarrowing = { readonly [C in MysqlCode]?: Readonly<{ key?: string; constraint?: string; table?: string; column?: string }> };
 
 /** An error of one of the names `C`, with the names `F` narrows its fields to. */
-type MysqlMember<C extends MysqlCode | undefined, F> = Omit<MysqlErrorFields, keyof F> & {
+type MysqlMember<C extends MysqlCode | undefined, F> = Omit<MysqlErrorFields, keyof F> & Readonly<{
   /** The error's name, as `"ER_DUP_ENTRY"`; undefined for a number MySQL does not define. */
-  readonly code: C;
-} & { readonly [K in keyof F]: F[K] | undefined };
+  code: C;
+}> & { readonly [K in keyof F]: F[K] | undefined };
 
 /**
  * An error MySQL raised: its name from MySQL's own list, undefined for a number the list lacks, as
@@ -137,7 +138,7 @@ export interface SqliteErrorFields extends Error {
   /** The table of the columns a unique, not-null or type constraint fails on. */
   readonly table: string | undefined;
   /** The columns a unique, not-null or type constraint fails on. */
-  readonly columns: readonly string[] | undefined;
+  readonly columns: Readonly<string[]> | undefined;
   /** The check constraint the row fails (its expression, where it has no name), or the index of an expression a unique row fails. */
   readonly constraint: string | undefined;
   /** The driver's own error. */
@@ -145,17 +146,17 @@ export interface SqliteErrorFields extends Error {
 }
 
 /** The names each field of an error may hold, by the result code's name: what a statement that fires no trigger writes through. */
-export type SqliteNarrowing = { readonly [C in SqliteCode]?: { readonly table?: string; readonly columns?: readonly string[]; readonly constraint?: string } };
+export type SqliteNarrowing = { readonly [C in SqliteCode]?: Readonly<{ table?: string; columns?: Readonly<string[]>; constraint?: string }> };
 
 /** An error of one of the codes `C`, with the names `F` narrows its fields to. */
-type SqliteMember<C extends SqliteCode | undefined, F> = Omit<SqliteErrorFields, keyof F> & {
+type SqliteMember<C extends SqliteCode | undefined, F> = Omit<SqliteErrorFields, keyof F> & Readonly<{
   /**
    * The result code's name: the extended code, as `"SQLITE_CONSTRAINT_UNIQUE"`, where the driver
    * gives it; the primary code, as `"SQLITE_CONSTRAINT"`, from sqlite3 and the sqlite package,
    * which give only that; undefined where the driver gives none, as Turso's engine.
    */
-  readonly code: C;
-} & { readonly [K in keyof F]: F[K] | undefined };
+  code: C;
+}> & { readonly [K in keyof F]: F[K] | undefined };
 
 /**
  * An error SQLite raised. Where a statement fires no trigger, its module narrows the type with
@@ -196,7 +197,7 @@ export interface DuckdbQueryError extends Error {
 export type QueryError<D extends Dialect = Dialect> = D extends "postgres" ? PostgresQueryError : D extends "mysql" ? MysqlQueryError : D extends "duckdb" ? DuckdbQueryError : SqliteQueryError;
 
 class DatabaseError extends Error {
-  constructor(message: string, cause: unknown, fields: Record<string, unknown>) {
+  public constructor(message: string, cause: unknown, fields: Record<string, unknown>) {
     super(message, { cause });
     Object.assign(this, fields);
   }
@@ -204,49 +205,49 @@ class DatabaseError extends Error {
 Object.defineProperty(DatabaseError.prototype, "name", { value: "QueryError", writable: true, configurable: true });
 
 const SQLSTATE = /^[0-9A-Z]{5}$/;
-const text = (v: unknown) => (typeof v === "string" && v !== "" ? v : undefined);
-const record = (e: unknown): Record<string, unknown> | undefined => (typeof e === "object" && e !== null ? (e as Record<string, unknown>) : undefined);
+const text = (v: unknown) => (matchesString(v) && v !== "" ? v : undefined);
+const record = (e: unknown): Record<string, unknown> | undefined => (hasObjectType(e) && !matchesNull(e) ? (e as Record<string, unknown>) : undefined);
 
 /** The database's error `error` is, or undefined where it is another. */
 export async function readQueryError(dialect: Dialect, error: unknown): Promise<QueryError | undefined> {
-  if (dialect === "sqlite") return readQueryErrorSync(dialect, error);
+  if (dialect === "sqlite") {return readQueryErrorSync(dialect, error);}
   if (dialect === "duckdb") {
     // A plain Error, its message opening with the kind of error: Reylo's own errors are of classes of their own.
     const e = record(error);
-    const kind = error instanceof Error && Object.getPrototypeOf(error) === Error.prototype && typeof e?.message === "string" ? /^([A-Za-z ]+?) Error: /.exec(e.message)?.[1] : undefined;
-    if (kind === undefined) return undefined;
+    const kind = error instanceof Error && Object.getPrototypeOf(error) === Error.prototype && matchesString(e?.message) ? /^([A-Za-z ]+?) Error: /.exec(e.message)?.[1] : undefined;
+    if (matchesUndefined(kind)) {return undefined;}
     return new DatabaseError(e!.message as string, error, { code: (DUCKDB_CODES as Record<string, DuckdbCode>)[kind] }) as DuckdbQueryError;
   }
   if (dialect === "postgres") {
     // Slonik wraps pg's error in its own (InputSyntaxError, UniqueIntegrityConstraintViolationError),
-    // keeping pg's as its cause.
+    // Keeping pg's as its cause.
     const read = postgresError(error) ?? postgresError(record(error)?.cause);
-    if (!read) return undefined;
+    if (!read) {return undefined;}
     // The lists are loaded where an error needs one, so a bundle carries them apart from the run time.
     const { POSTGRES_CODES } = await import("./error-codes-postgres.ts");
     return new DatabaseError(read.message, error, { code: read.code, condition: (POSTGRES_CODES as Record<string, string>)[read.code], ...read.fields }) as PostgresQueryError;
   }
   const read = mysqlError(error);
-  if (!read) return undefined;
+  if (!read) {return undefined;}
   const { MYSQL_CODES } = await import("./error-codes-mysql.ts");
   let code: string | undefined;
-  for (const [first, names] of MYSQL_CODES) if (read.errno >= first && read.errno < first + names.length) code = names[read.errno - first];
+  for (const [first, names] of MYSQL_CODES) {if (read.errno >= first && read.errno < first + names.length) {code = names[read.errno - first];}}
   return new DatabaseError(read.message, error, { code, errno: read.errno, sqlState: read.sqlState, ...mysqlNames(read.errno, read.message) }) as MysqlQueryError;
 }
 
 /** `readQueryError` for the synchronous SQLite clients, whose list is no import away. */
 export function readQueryErrorSync(dialect: Dialect, error: unknown): QueryError | undefined {
-  if (dialect !== "sqlite") return undefined;
+  if (dialect !== "sqlite") {return undefined;}
   const read = sqliteError(error);
-  if (!read) return undefined;
+  if (!read) {return undefined;}
   return new DatabaseError(read.message, error, { code: read.code, errcode: read.errcode, ...sqliteNames(read.errcode, read.message) }) as SqliteQueryError;
 }
 
 function postgresError(error: unknown) {
   const e = record(error);
-  if (!e || typeof e.severity !== "string" || typeof e.message !== "string") return undefined;
-  const code = typeof e.code === "string" && SQLSTATE.test(e.code) ? e.code : typeof e.errno === "string" && SQLSTATE.test(e.errno) ? e.errno : undefined;
-  if (code === undefined) return undefined;
+  if (!e || !matchesString(e.severity) || !matchesString(e.message)) {return undefined;}
+  const code = matchesString(e.code) && SQLSTATE.test(e.code) ? e.code : matchesString(e.errno) && SQLSTATE.test(e.errno) ? e.errno : undefined;
+  if (matchesUndefined(code)) {return undefined;}
   const position = text(e.position);
   return {
     code,
@@ -255,7 +256,7 @@ function postgresError(error: unknown) {
       severity: e.severity,
       detail: text(e.detail),
       hint: text(e.hint),
-      position: position !== undefined && /^\d+$/.test(position) ? Number(position) : undefined,
+      position: !matchesUndefined(position) && /^\d+$/u.test(position) ? Number(position) : undefined,
       where: text(e.where),
       schema: text(e.schema ?? e.schema_name),
       table: text(e.table ?? e.table_name),
@@ -268,19 +269,19 @@ function postgresError(error: unknown) {
 
 function mysqlError(error: unknown) {
   const e = record(error);
-  if (!e || typeof e.message !== "string") return undefined;
+  if (!e || !matchesString(e.message)) {return undefined;}
   let { errno, sqlState } = e;
   let message = text(e.sqlMessage) ?? text(e.text) ?? e.message;
-  if (errno === undefined) {
+  if (matchesUndefined(errno)) {
     // `<message> (errno 1062) (sqlstate 23000) during query: …`, the message behind Vitess's
     // `target: …: desc = ` on PlanetScale itself.
     const m = /^(?:[\s\S]*?desc = )?([\s\S]*?) \(errno (\d+)\) \(sqlstate ([0-9A-Z]{5})\)/.exec(e.message);
-    if (!m) return undefined;
+    if (!m) {return undefined;}
     [message, errno, sqlState] = [m[1]!, Number(m[2]), m[3]];
   }
   // A system error's number is negative (mysql2 and mariadb give ECONNREFUSED as -61).
-  if (typeof errno !== "number" || !Number.isInteger(errno) || errno <= 0 || typeof sqlState !== "string" || !SQLSTATE.test(sqlState)) return undefined;
-  if (errno > 45000 && errno < 46000 && /^\(conn[:=]/.test(e.message)) return undefined;
+  if (!matchesNumber(errno) || !Number.isInteger(errno) || errno <= 0 || !matchesString(sqlState) || !SQLSTATE.test(sqlState)) {return undefined;}
+  if (errno > 45_000 && errno < 46_000 && /^\(conn[:=]/u.test(e.message)) {return undefined;}
   return { errno, sqlState, message };
 }
 
@@ -290,32 +291,38 @@ function mysqlNames(errno: number, message: string) {
   let m: RegExpExecArray | null;
   switch (errno) {
     case 1062: // ER_DUP_ENTRY
-    case 1586: // ER_DUP_ENTRY_WITH_KEY_NAME
-      if ((m = /^Duplicate entry '[\s\S]*' for key '([\s\S]*)'$/.exec(message))) names.key = m[1];
+    case 1586: { // ER_DUP_ENTRY_WITH_KEY_NAME
+      if ((m = /^Duplicate entry '[\s\S]*' for key '([\s\S]*)'$/.exec(message))) {names.key = m[1];}
       break;
+    }
     case 1451: // ER_ROW_IS_REFERENCED_2
-    case 1452: // ER_NO_REFERENCED_ROW_2
+    case 1452: { // ER_NO_REFERENCED_ROW_2
       if ((m = /a foreign key constraint fails \(`(?:[^`]|``)*`\.`((?:[^`]|``)*)`, CONSTRAINT `((?:[^`]|``)*)`/.exec(message))) {
         names.table = m[1]!.replaceAll("``", "`");
         names.constraint = m[2]!.replaceAll("``", "`");
       }
       break;
-    case 3819: // ER_CHECK_CONSTRAINT_VIOLATED
-      if ((m = /^Check constraint '([\s\S]*)' is violated\.$/.exec(message))) names.constraint = m[1];
+    }
+    case 3819: { // ER_CHECK_CONSTRAINT_VIOLATED
+      if ((m = /^Check constraint '([\s\S]*)' is violated\.$/.exec(message))) {names.constraint = m[1];}
       break;
-    case 1048: // ER_BAD_NULL_ERROR
-      if ((m = /^Column '([\s\S]*)' cannot be null$/.exec(message))) names.column = m[1];
+    }
+    case 1048: { // ER_BAD_NULL_ERROR
+      if ((m = /^Column '([\s\S]*)' cannot be null$/.exec(message))) {names.column = m[1];}
       break;
-    case 1364: // ER_NO_DEFAULT_FOR_FIELD
-      if ((m = /^Field '([\s\S]*)' doesn't have a default value$/.exec(message))) names.column = m[1];
+    }
+    case 1364: { // ER_NO_DEFAULT_FOR_FIELD
+      if ((m = /^Field '([\s\S]*)' doesn't have a default value$/.exec(message))) {names.column = m[1];}
       break;
+    }
     case 1264: // ER_WARN_DATA_OUT_OF_RANGE
     case 1265: // WARN_DATA_TRUNCATED
     case 1292: // ER_TRUNCATED_WRONG_VALUE
     case 1366: // ER_TRUNCATED_WRONG_VALUE_FOR_FIELD
-    case 1406: // ER_DATA_TOO_LONG
-      if ((m = / for column '([\s\S]*)' at row \d+$/.exec(message))) names.column = m[1];
+    case 1406: { // ER_DATA_TOO_LONG
+      if ((m = / for column '([\s\S]*)' at row \d+$/.exec(message))) {names.column = m[1];}
       break;
+    }
   }
   return { key: names.key, constraint: names.constraint, table: names.table, column: names.column };
 }
@@ -325,22 +332,22 @@ const SQLITE_NAME = /^SQLITE_[A-Z_]+$/;
 
 function sqliteError(error: unknown) {
   const e = record(error);
-  if (!e || typeof e.message !== "string") return undefined;
+  if (!e || !matchesString(e.message)) {return undefined;}
   let message = e.message;
   const codes: number[] = [];
   let named = false;
   const name = (v: unknown) => {
-    if (typeof v !== "string" || !SQLITE_NAME.test(v)) return;
+    if (!matchesString(v) || !SQLITE_NAME.test(v)) {return;}
     named = true;
     const code = (SQLITE_CODES as Record<string, number>)[v];
-    if (code !== undefined) codes.push(code);
+    if (!matchesUndefined(code)) {codes.push(code);}
   };
   name(e.extendedCode);
   name(e.code);
-  if (typeof e.errcode === "number" && e.code === "ERR_SQLITE_ERROR") codes.push(e.errcode);
-  if (typeof e.rawCode === "number") codes.push(e.rawCode);
-  if (typeof e.errno === "number" && named) codes.push(e.errno);
-  if (named && typeof e.code === "string" && message.startsWith(`${e.code}: `)) message = message.slice(e.code.length + 2);
+  if (matchesNumber(e.errcode) && e.code === "ERR_SQLITE_ERROR") {codes.push(e.errcode);}
+  if (matchesNumber(e.rawCode)) {codes.push(e.rawCode);}
+  if (matchesNumber(e.errno) && named) {codes.push(e.errno);}
+  if (named && matchesString(e.code) && message.startsWith(`${e.code}: `)) {message = message.slice(e.code.length + 2);}
   if (!named && !codes.length) {
     const tail = /^(?:D1_ERROR: )?([\s\S]*): (SQLITE_[A-Z_]+)(?: \(extended: (SQLITE_[A-Z_]+)\))?$/.exec(message);
     const turso = e.code === "GenericFailure" ? /^(?:prepare|step) failed: (?:Runtime error: )?([\s\S]*?)(?: \((\d+)\))?$/.exec(message) : null;
@@ -350,20 +357,20 @@ function sqliteError(error: unknown) {
       name(tail[2]);
     } else if (turso) {
       message = turso[1]!;
-      if (turso[2]) codes.push(Number(turso[2]));
-    } else return undefined;
+      if (turso[2]) {codes.push(Number(turso[2]));}
+    } else {return undefined;}
   }
   // The most specific code given: an extended one where any is.
-  const errcode = codes.find((c) => c > 0xff) ?? codes[0];
-  return { code: errcode === undefined ? undefined : SQLITE_NAMES.get(errcode), errcode, message };
+  const errcode = codes.find((c) => c > 0xFF) ?? codes[0];
+  return { code: matchesUndefined(errcode) ? undefined : SQLITE_NAMES.get(errcode), errcode, message };
 }
 
 /** What SQLite's message names, for a constraint it failed. */
 function sqliteNames(errcode: number | undefined, message: string) {
   const names: { table?: string | undefined; columns?: string[] | undefined; constraint?: string | undefined } = {};
   let m: RegExpExecArray | null;
-  if (errcode !== undefined && (errcode & 0xff) === SQLITE_CODES.SQLITE_CONSTRAINT) {
-    if ((m = /^UNIQUE constraint failed: index '([\s\S]*)'$/.exec(message))) names.constraint = m[1];
+  if (!matchesUndefined(errcode) && (errcode & 0xFF) === SQLITE_CODES.SQLITE_CONSTRAINT) {
+    if ((m = /^UNIQUE constraint failed: index '([\s\S]*)'$/.exec(message))) {names.constraint = m[1];}
     else if ((m = /^(?:UNIQUE|NOT NULL) constraint failed: ([\s\S]+)$/.exec(message))) {
       const columns = m[1]!.split(", ").map((c) => /^([^.]+)\.([\s\S]+)$/.exec(c));
       const table = columns[0]?.[1];
@@ -371,7 +378,7 @@ function sqliteNames(errcode: number | undefined, message: string) {
         names.table = table;
         names.columns = columns.map((c) => c![2]!);
       }
-    } else if ((m = /^CHECK constraint failed: ([\s\S]*)$/.exec(message))) names.constraint = m[1];
+    } else if ((m = /^CHECK constraint failed: ([\s\S]*)$/.exec(message))) {names.constraint = m[1];}
     else if ((m = /^cannot store \S+ value in \S+ column ([^.]+)\.([\s\S]+)$/.exec(message))) {
       names.table = m[1];
       names.columns = [m[2]!];

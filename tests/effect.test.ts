@@ -1,17 +1,22 @@
 import assert from "node:assert/strict";
-import { DatabaseSync, type SQLInputValue } from "node:sqlite";
-import { test, type TestContext } from "node:test";
+import { DatabaseSync } from 'node:sqlite';
+import type { SQLInputValue } from 'node:sqlite';
+// oxlint-disable-next-line rules/no-node-imports, vitest/no-import-node-test -- Nub runs this suite with Node's test runner and provides the runtime used by the SQLite integration tests.
+import { test } from 'node:test';
+// oxlint-disable-next-line rules/no-node-imports -- The Nub test runner supplies Node's TestContext and its cleanup hooks.
+import type { TestContext } from 'node:test';
 import { Cause, Effect, Exit, Layer } from "effect";
 import { defineQuery } from "@totto2727/reylo";
-import { makeQueryRunner, prepare, QueryDecodeError, QueryExecutionError, QueryExecutor, QueryPreparationError, run, type BoundQuery } from "@totto2727/reylo/effect";
+import { makeQueryRunner, prepare, QueryDecodeError, QueryExecutionError, QueryExecutor, QueryPreparationError, run } from '@totto2727/reylo/effect';
+import type { BoundQuery } from '@totto2727/reylo/effect';
 import { DecodeError, ParameterError } from "../src/values.ts";
 
-function binding(value: unknown): SQLInputValue {
-  if (value === null || typeof value === "string" || typeof value === "number" || typeof value === "bigint" || value instanceof Uint8Array) return value;
+const binding = function (value: unknown): SQLInputValue {
+  if (value === null || typeof value === "string" || typeof value === "number" || typeof value === "bigint" || value instanceof Uint8Array) {return value;}
   throw new TypeError("Unsupported SQLite binding");
-}
+};
 
-function database(t: TestContext) {
+const database = function (t: TestContext) {
   const db = new DatabaseSync(":memory:");
   t.after(() => db.close());
   const layer = Layer.succeed(QueryExecutor, {
@@ -26,7 +31,7 @@ function database(t: TestContext) {
     }),
   });
   return { db, layer };
-}
+};
 
 const lookup = defineQuery<{ id: number; active: boolean }, { id: number; active: boolean; big: bigint; doc: { name: string } }, "one", "sqlite">({
   dialect: "sqlite",
@@ -42,25 +47,26 @@ const lookup = defineQuery<{ id: number; active: boolean }, { id: number; active
   cardinality: "one",
 });
 
-function seed(db: DatabaseSync, name: string) {
+const seed = function (db: DatabaseSync, name: string) {
   db.exec("create table item(id integer primary key, active boolean, big bigint, doc json)");
-  db.prepare("insert into item values(?, ?, ?, ?)").run(7, 1, 9007199254740993n, JSON.stringify({ name }));
-}
+  db.prepare("insert into item values(?, ?, ?, ?)").run(7, 1, BigInt("9007199254740993"), JSON.stringify({ name }));
+};
 
-function failure<A, E>(effect: Effect.Effect<A, E>): E {
+const failure = function <A, E>(effect: Effect.Effect<A, E>): E {
   const exit = Effect.runSyncExit(effect);
   assert.ok(Exit.isFailure(exit));
   const error = Cause.findError(exit.cause);
   assert.equal(error._tag, "Success");
-  if (error._tag !== "Success") throw new Error("Expected a typed failure");
+  if (error._tag !== "Success") {throw new Error("Expected a typed failure");}
   return error.success;
-}
+};
 
 for (const [ErrorType, message] of [
   [QueryPreparationError, "Failed to prepare the query"],
   [QueryExecutionError, "Failed to execute the query"],
   [QueryDecodeError, "Failed to decode the query result"],
 ] as const) {
+  // oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
   test(`${ErrorType.name} supports direct Effect failure and tagged recovery`, () => {
     const cause = new Error("original query failure");
     const error = new ErrorType({ cause });
@@ -71,44 +77,54 @@ for (const [ErrorType, message] of [
     assert.equal(error.cause, cause);
     assert.equal(error.message, message);
     assert.ok(error instanceof Error);
+    // oxlint-disable-next-line rules/no-effect-runtime-run -- This test independently evaluates tagged error recovery.
     assert.equal(Effect.runSync(program.pipe(Effect.catchTag(error._tag, (failure) => Effect.succeed(failure.cause)))), cause);
   });
 }
 
-test("Effect prepares lazily, reorders and encodes inputs without executing", (t) => {
-  const { db } = database(t);
+// oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
+test("Effect prepares lazily, reorders and encodes inputs without executing", (testContext) => {
+  const { db } = database(testContext);
   seed(db, "first");
   const input = { id: 0, active: true };
   const effect = prepare(lookup, input);
   input.id = 7;
+  // oxlint-disable-next-line rules/no-effect-runtime-run -- This test evaluates preparation separately from database execution.
   const bound = Effect.runSync(effect);
   assert.equal(bound.dialect, "sqlite");
   assert.equal(bound.text, lookup["~standard"].query.text);
   assert.deepEqual(bound.values, [1, 7]);
   const statement = db.prepare(bound.text);
   statement.setReadBigInts(true);
-  assert.deepEqual(statement.all(...bound.values.map(binding)).map((row) => row.id), [7n]);
+  assert.deepEqual(statement.all(...bound.values.map(binding)).map((row) => row.id), [BigInt("7")]);
 });
 
-test("Effect decodes object rows and runs one query through independent layers", (t) => {
-  const first = database(t);
-  const second = database(t);
+// oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
+test("Effect decodes object rows and runs one query through independent layers", (testContext) => {
+  const first = database(testContext);
+  const second = database(testContext);
   seed(first.db, "first");
   seed(second.db, "second");
   const effect = run(lookup, { id: 7, active: true });
-  assert.deepEqual(Effect.runSync(Effect.provide(effect, first.layer)), { id: 7, active: true, big: 9007199254740993n, doc: { name: "first" } });
-  assert.deepEqual(Effect.runSync(Effect.provide(effect, second.layer)), { id: 7, active: true, big: 9007199254740993n, doc: { name: "second" } });
+  // oxlint-disable-next-line rules/no-effect-runtime-run -- This test evaluates the query against its first independent executor.
+  assert.deepEqual(Effect.runSync(Effect.provide(effect, first.layer)), { id: 7, active: true, big: BigInt("9007199254740993"), doc: { name: "first" } });
+  // oxlint-disable-next-line rules/no-effect-runtime-run -- This test evaluates the query against its second independent executor.
+  assert.deepEqual(Effect.runSync(Effect.provide(effect, second.layer)), { id: 7, active: true, big: BigInt("9007199254740993"), doc: { name: "second" } });
 });
 
-test("captured runner uses its construction executor with absent or conflicting context", (t) => {
-  const first = database(t);
-  const second = database(t);
+// oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
+test("captured runner uses its construction executor with absent or conflicting context", (testContext) => {
+  const first = database(testContext);
+  const second = database(testContext);
   seed(first.db, "first");
   seed(second.db, "second");
+  // oxlint-disable-next-line rules/no-effect-runtime-run -- This test constructs a runner in a separate executor scope.
   const captured = Effect.runSync(Effect.provide(makeQueryRunner, first.layer));
   const effect = captured(lookup, { id: 7, active: true });
-  const expected = { id: 7, active: true, big: 9007199254740993n, doc: { name: "first" } };
+  const expected = { id: 7, active: true, big: BigInt("9007199254740993"), doc: { name: "first" } };
+  // oxlint-disable-next-line rules/no-effect-runtime-run -- This test evaluates the captured runner without a caller-supplied executor.
   assert.deepEqual(Effect.runSync(effect), expected);
+  // oxlint-disable-next-line rules/no-effect-runtime-run -- This test checks that a second scope cannot replace the captured executor.
   assert.deepEqual(Effect.runSync(Effect.provide(effect, second.layer)), expected);
   first.db.exec("update item set doc = '{bad json'");
   const decoded = failure(effect);
@@ -116,30 +132,39 @@ test("captured runner uses its construction executor with absent or conflicting 
   assert.ok(decoded.cause instanceof SyntaxError);
 });
 
-test("Effect retains all query cardinalities and row-count failures", (t) => {
-  const { db, layer } = database(t);
+// oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
+test("Effect retains all query cardinalities and row-count failures", (testContext) => {
+  const { db, layer } = database(testContext);
+  // oxlint-disable-next-line rules/no-effect-runtime-run -- This test constructs a runner before checking its query cardinalities.
   const run = Effect.runSync(Effect.provide(makeQueryRunner, layer));
   db.exec("create table numbers(n integer); insert into numbers values(1), (2)");
   const many = defineQuery<{}, { n: number }, "many", "sqlite">({ dialect: "sqlite", sql: "select n from numbers", params: [], columns: [["n", "int"]], cardinality: "many" });
   const one = defineQuery<{}, { n: number }, "one", "sqlite">({ dialect: "sqlite", sql: "select n from numbers", params: [], columns: [["n", "int"]], cardinality: "one" });
   const maybe = defineQuery<{}, { n: number }, "maybeOne", "sqlite">({ dialect: "sqlite", sql: "select n from numbers where n = 1", params: [], columns: [["n", "int"]], cardinality: "maybeOne" });
   const none = defineQuery<{}, never, "none", "sqlite">({ dialect: "sqlite", sql: "delete from numbers", params: [], columns: [], cardinality: "none" });
+  // oxlint-disable-next-line rules/no-effect-runtime-run -- This test independently checks the many-row result.
   assert.deepEqual(Effect.runSync(Effect.provide(run(many), layer)), [{ n: 1 }, { n: 2 }]);
+  // oxlint-disable-next-line rules/no-effect-runtime-run -- This test independently checks the optional-row result.
   assert.deepEqual(Effect.runSync(Effect.provide(run(maybe), layer)), { n: 1 });
   const error = failure(Effect.provide(run(one), layer));
   assert.ok(error instanceof QueryDecodeError);
   assert.ok(error.cause instanceof Error);
   assert.match(error.cause.message, /Expected exactly one row, got 2/);
+  // oxlint-disable-next-line rules/no-effect-runtime-run -- This test independently checks the no-result statement.
   assert.equal(Effect.runSync(Effect.provide(run(none), layer)), undefined);
+  // oxlint-disable-next-line rules/no-effect-runtime-run -- This test independently checks the missing optional row.
   assert.equal(Effect.runSync(Effect.provide(run(maybe), layer)), null);
+  // oxlint-disable-next-line rules/no-effect-runtime-run -- This test independently checks the empty many-row result.
   assert.deepEqual(Effect.runSync(Effect.provide(run(many), layer)), []);
   assert.ok(failure(Effect.provide(run(one), layer)) instanceof QueryDecodeError);
   db.exec("insert into numbers values(1), (1)");
   assert.ok(failure(Effect.provide(run(maybe), layer)) instanceof QueryDecodeError);
 });
 
-test("Effect classifies encoding, decoding, and database failures with original causes", (t) => {
-  const { db, layer } = database(t);
+// oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
+test("Effect classifies encoding, decoding, and database failures with original causes", (testContext) => {
+  const { db, layer } = database(testContext);
+  // oxlint-disable-next-line rules/no-effect-runtime-run -- This test constructs a runner before checking its failure cases.
   const run = Effect.runSync(Effect.provide(makeQueryRunner, layer));
   seed(db, "first");
   const input = { id: 7, active: true };
@@ -162,6 +187,7 @@ test("Effect classifies encoding, decoding, and database failures with original 
   assert.match(executed.cause.message, /no such table/);
 });
 
+// oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
 test("Effect preserves execution failures, defects, and interruptions without remapping", () => {
   const cause = new Error("original driver failure");
   const original = new QueryExecutionError({ cause });
@@ -179,11 +205,13 @@ test("Effect preserves execution failures, defects, and interruptions without re
   assert.equal(Cause.squash(defectExit.cause), cause);
 });
 
+// oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
 test("captured runner preserves execution causes and validates dialect before execution", () => {
   const cause = new Error("original captured driver failure");
   const original = new QueryExecutionError({ cause });
   let calls = 0;
   const executor = { dialect: "sqlite" as const, execute: () => { calls++; return Effect.fail(original); } };
+  // oxlint-disable-next-line rules/no-effect-runtime-run -- This test captures the executor before testing independent failures.
   const captured = Effect.runSync(Effect.provide(makeQueryRunner, Layer.succeed(QueryExecutor, executor)));
   assert.equal(failure(captured(lookup, { id: 7, active: true })), original);
   assert.equal(original.cause, cause);
@@ -198,6 +226,7 @@ test("captured runner preserves execution causes and validates dialect before ex
   assert.equal(calls, 1);
 });
 
+// oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
 test("Effect refuses non-SQLite queries and mismatched executors before execution", () => {
   let calls = 0;
   const executor = {
@@ -212,6 +241,7 @@ test("Effect refuses non-SQLite queries and mismatched executors before executio
   assert.equal(calls, 0);
 });
 
+// oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
 test("Effect rejects array rows and missing query metadata without changing runtime APIs", () => {
   const arrays = Layer.succeed(QueryExecutor, { dialect: "sqlite", execute: () => Effect.succeed([[7, 1]]) });
   assert.ok(failure(Effect.provide(run(lookup, { id: 7, active: true }), arrays)) instanceof QueryDecodeError);
@@ -223,11 +253,14 @@ test("Effect rejects array rows and missing query metadata without changing runt
 });
 
 // Compiled by the repository typecheck, not executed. Inputs must not widen the query's inference.
-function typeContract() {
+const typeContract = function () {
   // @ts-expect-error factory requires an executor at construction
+  // oxlint-disable-next-line rules/no-effect-runtime-run -- This type-only assertion checks that the executor requirement prevents execution.
   Effect.runSync(makeQueryRunner);
+  // oxlint-disable-next-line rules/no-effect-runtime-run -- This type-only assertion checks construction with a provided executor.
   const captured = Effect.runSync(Effect.provide(makeQueryRunner, Layer.succeed(QueryExecutor, { dialect: "sqlite", execute: () => Effect.succeed([]) })));
   const capturedOne: Effect.Effect<{ id: number; active: boolean; big: bigint; doc: { name: string } }, QueryPreparationError | QueryExecutionError | QueryDecodeError> = captured(lookup, { id: 7, active: true });
+  // oxlint-disable-next-line rules/no-effect-runtime-run -- This type-only assertion checks that a captured runner needs no environment.
   Effect.runSync(capturedOne);
   // @ts-expect-error captured runner retains required inputs
   captured(lookup);
@@ -259,6 +292,7 @@ function typeContract() {
   // @ts-expect-error prepare retains the same required input
   prepare(lookup, { id: 7 });
   // @ts-expect-error executor remains an Effect environment requirement
+  // oxlint-disable-next-line rules/no-effect-runtime-run -- This type-only assertion checks that an uncaptured query still needs an executor.
   Effect.runSync(one);
   // @ts-expect-error execution errors require their original cause
   new QueryExecutionError({});
@@ -266,10 +300,10 @@ function typeContract() {
   new QueryPreparationError({});
   // @ts-expect-error decoding errors require their original cause
   new QueryDecodeError({});
-  const requiredCauses: ReadonlyArray<{ readonly cause: unknown }> = [
+  const requiredCauses: ReadonlyArray<Readonly<{ cause: unknown }>> = [
     new QueryPreparationError({ cause: null }),
     new QueryExecutionError({ cause: null }),
     new QueryDecodeError({ cause: null }),
   ];
   return { one, bound, many, maybe, none, requiredCauses };
-}
+};

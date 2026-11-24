@@ -7,17 +7,17 @@ const segmenter = new Intl.Segmenter('und', { granularity: 'grapheme' });
 const decoder = new TextDecoder('utf-8', { ignoreBOM: true });
 
 // Go source positions advance one byte for malformed UTF-8, unlike TextDecoder's
-// replacement of an incomplete multi-byte sequence as a whole. Keep this byte
-// mapping at the boundary; Unicode grapheme rules belong to Intl, not this port.
-function utf8SequenceLength(data: Uint8Array): number {
+// Replacement of an incomplete multi-byte sequence as a whole. Keep this byte
+// Mapping at the boundary; Unicode grapheme rules belong to Intl, not this port.
+const utf8SequenceLength = function (data: Uint8Array): number {
   const a = data[0]!;
-  if (a < 0x80) return 1;
-  const cont = (n: number | undefined) => n !== undefined && n >= 0x80 && n <= 0xbf;
-  if (a >= 0xc2 && a <= 0xdf && cont(data[1])) return 2;
-  if (a >= 0xe0 && a <= 0xef && cont(data[1]) && cont(data[2]) && (a !== 0xe0 || data[1]! >= 0xa0) && (a !== 0xed || data[1]! < 0xa0)) return 3;
-  if (a >= 0xf0 && a <= 0xf4 && cont(data[1]) && cont(data[2]) && cont(data[3]) && (a !== 0xf0 || data[1]! >= 0x90) && (a !== 0xf4 || data[1]! < 0x90)) return 4;
+  if (a < 0x80) {return 1;}
+  const cont = (n: number | undefined) => n !== undefined && n >= 0x80 && n <= 0xBF;
+  if (a >= 0xC2 && a <= 0xDF && cont(data[1])) {return 2;}
+  if (a >= 0xE0 && a <= 0xEF && cont(data[1]) && cont(data[2]) && (a !== 0xE0 || data[1]! >= 0xA0) && (a !== 0xED || data[1]! < 0xA0)) {return 3;}
+  if (a >= 0xF0 && a <= 0xF4 && cont(data[1]) && cont(data[2]) && cont(data[3]) && (a !== 0xF0 || data[1]! >= 0x90) && (a !== 0xF4 || data[1]! < 0x90)) {return 4;}
   return 1;
-}
+};
 
 /** Segment once per token and return original UTF-8 slices, not UTF-16 offsets. */
 export function graphemeClusters(data: Uint8Array): Uint8Array[] {

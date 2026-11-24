@@ -1,3 +1,4 @@
+// oxlint-disable-next-line rules/no-node-imports, vitest/no-import-node-test -- Nub runs this suite with Node's test runner and provides the runtime used by the SQLite integration tests.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { DatabaseSync } from "node:sqlite";
@@ -6,20 +7,21 @@ import { sqliteSchemaFromHcl } from "../src/hcl-sqlite.ts";
 const schema = (body: string) => `schema "main" {}\n${body}\n`;
 const column = (name: string, type = "text", nullable = true, extra = "") => `column ${JSON.stringify(name)} {\n type = ${type}\n null = ${nullable}\n ${extra}\n}\n`;
 const table = (body: string, name = "items") => `table ${JSON.stringify(name)} {\n schema = schema.main\n${body}\n}\n`;
-function open(source: string) {
+const open = function (source: string) {
   const db = new DatabaseSync(":memory:");
   try {
-    for (const sql of sqliteSchemaFromHcl(source, "test.hcl")) db.prepare(sql).run();
+    for (const sql of sqliteSchemaFromHcl(source, "test.hcl")) {db.prepare(sql).run();}
     return db;
   } catch (error) {
     db.close();
     throw error;
   }
-}
+};
 
+// oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
 test("static Atlas declarations preserve SQLite constraints, defaults, indexes and nullability", () => {
   const source = schema(table(
-    column("id") + column("part", "integer", false) + column("title", "varchar(80)", false, 'default = "can\'t"') + column("amount", "numeric", false, "default = -2.50") + column("created", "datetime", false, 'default = sql("CURRENT_TIMESTAMP")') + `
+    `${column("id") + column("part", "integer", false) + column("title", "varchar(80)", false, 'default = "can\'t"') + column("amount", "numeric", false, "default = -2.50") + column("created", "datetime", false, 'default = sql("CURRENT_TIMESTAMP")')  }
     primary_key { columns = [column.id, column.part] }
     index "sqlite_autoindex_items_2" {
       unique = true
@@ -53,9 +55,10 @@ test("static Atlas declarations preserve SQLite constraints, defaults, indexes a
   } finally { db.close(); }
 });
 
+// oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
 test("static Atlas references support composite foreign keys and validate all targets", () => {
-  const parent = table(column("key") + column("part", "integer", false) + "primary_key { columns = [column.key, column.part] }", "parents");
-  const child = table(column("parent") + column("part", "integer", false) + `foreign_key "parent_key" {
+  const parent = table(`${column("key") + column("part", "integer", false)  }primary_key { columns = [column.key, column.part] }`, "parents");
+  const child = table(`${column("parent") + column("part", "integer", false)  }foreign_key "parent_key" {
     columns = [column.parent, column.part]
     ref_columns = [table.parents.column.key, table.parents.column.part]
     on_update = CASCADE
@@ -70,8 +73,9 @@ test("static Atlas references support composite foreign keys and validate all ta
   assert.throws(() => sqliteSchemaFromHcl(schema(parent + child.replace("CASCADE", "UNKNOWN"))), /Unsupported foreign-key action/);
 });
 
+// oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
 test("Atlas semantic boundary rejects unsupported expressions and declarations instead of ignoring them", () => {
-  const valid = table(column("id") + "primary_key { columns = [column.id] }");
+  const valid = table(`${column("id")  }primary_key { columns = [column.id] }`);
   const cases: [string, RegExp][] = [
     [schema(valid).replace("type = text", "type = dynamic_type"), /Unsupported Atlas SQLite column type/],
     [schema(valid).replace("type = text", "type = var.type"), /Unsupported Atlas SQLite column type/],
@@ -83,15 +87,15 @@ test("Atlas semantic boundary rejects unsupported expressions and declarations i
     [schema(valid).replace("schema.main", "schema.other"), /schema.main/],
     [schema(valid + valid), /Duplicate table/],
     [schema(table(column("id") + column("id"))), /Duplicate column/],
-    [schema(valid) + 'view "ignored" {}\n', /Unsupported Atlas SQLite block view/],
+    [`${schema(valid)  }view "ignored" {}\n`, /Unsupported Atlas SQLite block view/],
     [schema(valid).replace("null = true", 'null = true\n default = env("SECRET")'), /Only sql/],
     [schema(valid).replace("null = true", 'null = true\n default = "${var.secret}"'), /static HCL string|Unsupported Atlas SQLite default/],
     [schema(valid).replace("null = true", "null = true\n default = [1, 2]"), /Unsupported Atlas SQLite default/],
-    [schema(table(column("id") + 'index "bad" {\n columns = [column.id]\n on { column = column.id }\n}')), /either columns or on/],
-    [schema(table(column("id") + 'index "sqlite_autoindex_bad" { columns = [column.id] }')), /implicit SQLite autoindex/],
-    [schema(table(column("id") + 'check { expr = var.check }')), /static HCL string/],
+    [schema(table(`${column("id")  }index "bad" {\n columns = [column.id]\n on { column = column.id }\n}`)), /either columns or on/],
+    [schema(table(`${column("id")  }index "sqlite_autoindex_bad" { columns = [column.id] }`)), /implicit SQLite autoindex/],
+    [schema(table(`${column("id")  }check { expr = var.check }`)), /static HCL string/],
     ['schema "other" {}\n', /schema "main"/],
     [schema(valid).replace("type = text", "type = varchar(-1)"), /nonnegative integer/],
   ];
-  for (const [source, expected] of cases) assert.throws(() => sqliteSchemaFromHcl(source, "invalid.hcl"), expected, source);
+  for (const [source, expected] of cases) {assert.throws(() => sqliteSchemaFromHcl(source, "invalid.hcl"), expected, source);}
 });
