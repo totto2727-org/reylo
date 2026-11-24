@@ -30,34 +30,29 @@ type NextConfig = object & {
   compiler?: object & { runAfterProductionCompile?: AfterCompile };
 };
 
-export function withReylo<Config extends NextConfig>(config: Config = {} as Config): Config {
-  const { typescript, turbopack, webpack, compiler } = config;
-  // A project that turned Next's type check off has turned Reylo's off with it.
-  const check = !typescript?.ignoreBuildErrors;
-  return {
-    ...config,
-    turbopack: {
-      ...turbopack,
-      // Each .sql file becomes a module that runs its statement, on the server only: a client
-      // Component that imports one fails the build. A rule of the project's own for *.sql wins.
-      rules: { "*.sql": { condition: { not: "browser" }, loaders: ["@totto2727/reylo/turbopack"], as: "*.js" }, ...turbopack?.rules },
-    },
-    webpack(webpackConfig: any, context: any) {
-      const out = webpack ? webpack(webpackConfig, context) : webpackConfig;
-      if (context.isServer) {out.module.rules.push({ test: /\.sql$/u, use: "@totto2727/reylo/webpack" });}
-      return out;
-    },
-    ...(check && {
-      typescript: { ...typescript, ignoreBuildErrors: true },
-      compiler: {
-        ...compiler,
-        async runAfterProductionCompile(metadata: { projectDir: string; distDir: string }) {
-          await compiler?.runAfterProductionCompile?.(metadata);
-          await typeCheck(metadata.projectDir, resolve(metadata.projectDir, typescript?.tsconfigPath ?? "tsconfig.json"));
-        },
-      },
-    }),
-  };
+// A child Node process's exit code and its output, stdout and stderr in the order they came. A
+// Piped tsc prints no colors unless FORCE_COLOR asks, which Next sets for its own check too.
+function run(args: string[], cwd: string): Promise<{ code: number; output: string }> {
+  return new Promise((done, fail) => {
+    const child = spawn(process.execPath, args, {
+      cwd,
+      stdio: ["ignore", "pipe", "pipe"],
+      env: { ...process.env, ...(process.stdout.isTTY && { FORCE_COLOR: "1" }) },
+    });
+    let output = "";
+    child.stdout.setEncoding("utf8").on("data", (chunk: string) => (output += chunk));
+    child.stderr.setEncoding("utf8").on("data", (chunk: string) => (output += chunk));
+    child.on("error", fail);
+    child.on("close", (code) => done({ code: code ?? 1, output }));
+  });
+}
+
+// `next build` prints a failed hook's error whole: a stack would point into Reylo, not at the
+// Errors, which tsc has printed above it.
+function stackless(message: string): Error {
+  const error = new Error(message);
+  error.stack = message;
+  return error;
 }
 
 // Next's own check (`next/dist/lib/typescript/runTypeCheckCli`), with `--runExternalCode`: the
@@ -91,27 +86,32 @@ async function typeCheck(dir: string, tsconfig: string): Promise<void> {
   if (code !== 0) {throw stackless("Failed to type check (tsc --runExternalCode).");}
 }
 
-// A child Node process's exit code and its output, stdout and stderr in the order they came. A
-// Piped tsc prints no colors unless FORCE_COLOR asks, which Next sets for its own check too.
-function run(args: string[], cwd: string): Promise<{ code: number; output: string }> {
-  return new Promise((done, fail) => {
-    const child = spawn(process.execPath, args, {
-      cwd,
-      stdio: ["ignore", "pipe", "pipe"],
-      env: { ...process.env, ...(process.stdout.isTTY && { FORCE_COLOR: "1" }) },
-    });
-    let output = "";
-    child.stdout.setEncoding("utf8").on("data", (chunk: string) => (output += chunk));
-    child.stderr.setEncoding("utf8").on("data", (chunk: string) => (output += chunk));
-    child.on("error", fail);
-    child.on("close", (code) => done({ code: code ?? 1, output }));
-  });
-}
-
-// `next build` prints a failed hook's error whole: a stack would point into Reylo, not at the
-// Errors, which tsc has printed above it.
-function stackless(message: string): Error {
-  const error = new Error(message);
-  error.stack = message;
-  return error;
+export function withReylo<Config extends NextConfig>(config: Config = {} as Config): Config {
+  const { typescript, turbopack, webpack, compiler } = config;
+  // A project that turned Next's type check off has turned Reylo's off with it.
+  const check = !typescript?.ignoreBuildErrors;
+  return {
+    ...config,
+    turbopack: {
+      ...turbopack,
+      // Each .sql file becomes a module that runs its statement, on the server only: a client
+      // Component that imports one fails the build. A rule of the project's own for *.sql wins.
+      rules: { "*.sql": { condition: { not: "browser" }, loaders: ["@totto2727/reylo/turbopack"], as: "*.js" }, ...turbopack?.rules },
+    },
+    webpack(webpackConfig: any, context: any) {
+      const out = webpack ? webpack(webpackConfig, context) : webpackConfig;
+      if (context.isServer) {out.module.rules.push({ test: /\.sql$/u, use: "@totto2727/reylo/webpack" });}
+      return out;
+    },
+    ...(check && {
+      typescript: { ...typescript, ignoreBuildErrors: true },
+      compiler: {
+        ...compiler,
+        async runAfterProductionCompile(metadata: { projectDir: string; distDir: string }) {
+          await compiler?.runAfterProductionCompile?.(metadata);
+          await typeCheck(metadata.projectDir, resolve(metadata.projectDir, typescript?.tsconfigPath ?? "tsconfig.json"));
+        },
+      },
+    }),
+  };
 }

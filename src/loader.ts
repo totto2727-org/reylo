@@ -25,6 +25,12 @@ const utf16 = function utf16(text: string, bytes: number): number {
   return Buffer.from(text, "utf8").subarray(0, bytes).toString("utf8").length;
 };
 
+/** The line and column, from 1, of a UTF-8 byte offset into `text`. */
+function place(text: string, bytes: number): string {
+  const before = text.slice(0, utf16(text, bytes));
+  return `${before.split("\n").length}:${before.length - before.lastIndexOf("\n")}`;
+}
+
 export async function sqlModule(path: string, sql: string): Promise<SqlModule> {
   const session = await Session.for(dirname(path));
   let outcome = await session.analyze(sql);
@@ -94,10 +100,4 @@ export async function sqlModule(path: string, sql: string): Promise<SqlModule> {
     ``,
   ].join("\n");
   return { code, entry: outcome.entry, watched: session.project.watched.filter((f) => existsSync(f)) };
-}
-
-/** The line and column, from 1, of a UTF-8 byte offset into `text`. */
-function place(text: string, bytes: number): string {
-  const before = text.slice(0, utf16(text, bytes));
-  return `${before.split("\n").length}:${before.length - before.lastIndexOf("\n")}`;
 }

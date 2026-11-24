@@ -99,127 +99,60 @@ interface ColumnCheck {
   where: string;
 }
 
-const checkColumnValue = (field: RowField, value: unknown, context: ColumnCheck): void => {
-  const { dialect, fail, row, where } = context;
-  const subject = `${where}"${field.name}"`;
-  if (matchesUndefined(value)) {
-    if (!field.optional) {fail(`${subject} is ${field.written} not null, and the row leaves it out.`);}
-    return;
-  }
-  row.keys.add(field.name);
-  if (matchesNull(value)) {
-    if (!field.nullable) {fail(`${subject} is ${field.written} not null, and the row gives null${field.optional ? "; leave the key out for the column's default" : ""}.`);}
-    row.values[field.name] = null;
-    return;
-  }
-  const checked = check(field.type, field.written, value, dialect, (message) => fail(`${subject} ${message}`));
-  if (matchesUndefined(field.schema)) {
-    row.values[field.name] = checked;
-    return;
-  }
-  // A JSON member's schema fills its defaults and checks the value (wiki/typed-json-params.md).
-  const filled = withDefaults(field.schema, checked);
-  const failure = validate(field.schema, filled);
-  if (failure) {fail(`${subject}${failure.path ? ` at ${failure.path}` : ""} ${failure.message}.`);}
-  row.values[field.name] = filled;
-};
-
-const checkRow = (value: unknown, where: string, schema: RowSchema): CheckedRow => {
-  const { dialect, fail, fields, known } = schema;
-  if (!isRecord(value) || value instanceof Date) {
-    return fail(`${where}each row is an object whose keys the column list names; got ${describe(value)}.`);
-  }
-  Object.keys(value).forEach((key) => {
-    if (!known.has(key) && !matchesUndefined(value[key])) {
-      fail(`${where}the column list names no key "${key}" (it names ${fields.map((field) => `"${field.name}"`).join(", ")}).`);
-    }
-  });
-  const row: CheckedRow = { keys: new Set(), values: {} };
-  const context: ColumnCheck = { dialect, fail, row, where };
-  Iterator.from(fields).forEach((field) => {
-    checkColumnValue(field, value[field.name], context);
-  });
-  return row;
-};
-
-interface InsertColumns {
-  keys: Set<string>;
-  rowNumber: number;
+/** An integer in `range`, as a number, a BigInt or, where `digits`, a string of its digits. */
+/**
+ * `truth`: MySQL and SQLite, where a truth value is an integer, and a TINYINT(1), BIT(1) or BOOLEAN
+ * column returns a boolean, which goes back in as 1 or 0 (the round-trip rule, src/render.ts).
+ */
+function integer(range: Readonly<[bigint, bigint]>, digits: boolean, written: string, v: unknown, fail: (message: string) => never, truth = false): bigint {
+  let n: bigint;
+  if (matchesBigInt(v)) {n = v;}
+  else if (matchesBoolean(v) && truth) {n = BigInt(v ? 1 : 0);}
+  else if (matchesNumber(v) && Number.isInteger(v)) {
+    if (!Number.isSafeInteger(v)) {fail(`is ${written}; ${v} is past 2^53 - 1, where a number stops being exact, so pass it as a BigInt${digits ? " or a string of digits" : ""}.`);}
+    n = BigInt(v);
+  } else if (matchesString(v) && /^[+-]?\d+$/u.test(v.trim()) && digits) {n = BigInt(v.trim());}
+  else {return fail(`is ${written}, an integer; got ${describe(v)}.`);}
+  if (n < range[0] || n > range[1]) {fail(`is ${written}, from ${range[0]} to ${range[1]}; got ${n}.`);}
+  return n;
 }
 
-const verifyInsertColumns = (expected: InsertColumns, actual: InsertColumns, schema: RowSchema): void => {
-  const differ = schema.fields.find((field) => expected.keys.has(field.name) !== actual.keys.has(field.name));
-  if (matchesUndefined(differ)) {return;}
-  const givesKey = actual.keys.has(differ.name);
-  schema.fail(`row ${actual.rowNumber} ${givesKey ? "gives" : "leaves out"} "${differ.name}", which row ${expected.rowNumber} ${givesKey ? "leaves out" : "gives"}. Every row of one call gives the same keys, since one insert writes them all and a key left out takes its column's default: give "${differ.name}" in every row, or in none.`);
-};
-
 /**
- * Checks a structured parameter and produces the JSON value or text to bind.
- * @param {string} name - The structured parameter's name.
- * @param {RowsType} type - Its declared column list.
- * @param {unknown} value - The supplied row or rows.
- * @param {Dialect} dialect - The database that consumes the rows.
- * @param {boolean} inserted - Whether every row must supply the same insert columns.
- * @returns {{ value: unknown; present: ReadonlySet<string> }} The bound value and supplied column names.
+ * A decimal, as a number or as its digits. `numeric(p,s)` keeps `s` digits after the point and
+ * `p` in all: a value with more decimals would be rounded, so it is refused, and so is one with
+ * more digits before the point than the column holds.
  */
-export const prepareRows = function prepareRows(name: string, type: RowsType, value: unknown, dialect: Dialect, inserted: boolean): { value: unknown; present: ReadonlySet<string> } {
-  const fail = (message: string): never => {
-    throw new ParameterError(`Parameter "${name}": ${message}`);
-  };
-  if (matchesUndefined(value) || matchesNull(value)) {fail(type.one ? "pass one object, whose keys the column list names." : "pass an array of objects, whose keys the column list names; an empty array inserts nothing.");}
-  const rows = type.one ? [value] : (Array.isArray(value) ? value : fail(`pass an array of objects, one per row; got ${describe(value)}.`));
-  const schema: RowSchema = {
-    dialect, fail, fields: type.fields, known: new Map(type.fields.map((field) => [field.name, field])),
-  };
-  // oxlint-disable-next-line rules/no-let -- An insert compares later rows with the first row it received.
-  let first: InsertColumns | undefined;
-  const out: Record<string, unknown>[] = [];
-  rows.forEach((row: unknown, index: number) => {
-    const rowNumber = index + firstRowNumber;
-    const checked = checkRow(row, type.one ? "" : `row ${rowNumber}: `, schema);
-    if (inserted) {
-      const columns = { keys: checked.keys, rowNumber };
-      if (matchesUndefined(first)) {first = columns;}
-      else {verifyInsertColumns(first, columns, schema);}
+function decimal(written: string, v: unknown, fail: (message: string) => never): unknown {
+  let text: string;
+  if (matchesNumber(v)) {
+    if (!Number.isFinite(v)) {return fail(`is ${written}, a finite decimal; got ${v}.`);}
+    text = String(v);
+  } else if (matchesString(v)) {text = v.trim();}
+  else if (matchesBigInt(v)) {text = v.toString();}
+  else {return fail(`is ${written}, a decimal: a number or a string of its digits; got ${describe(v)}.`);}
+  const regexMatch = /^([+-]?)(\d*)(?:\.(\d*))?(?:e([+-]?\d+))?$/i.exec(text);
+  if (!regexMatch || (regexMatch[2] === "" && (regexMatch[3] ?? "") === "")) {return fail(`is ${written}, a decimal: a number or a string of its digits; got ${describe(v)}.`);}
+  const mod = /\(\s*(\d+)\s*(?:,\s*(-?\d+)\s*)?\)/u.exec(written);
+  if (mod) {
+    const precision = Number(mod[1]);
+    const scale = Number(mod[2] ?? 0);
+    const exponent = Number(regexMatch[4] ?? 0);
+    let whole = (regexMatch[2] ?? "").replace(/^0+/u, "");
+    let fraction = (regexMatch[3] ?? "").replace(/0+$/u, "");
+    // Shift the point by the exponent.
+    if (exponent > 0) {
+      const moved = fraction.slice(0, exponent).padEnd(exponent, "0");
+      whole = (whole + moved).replace(/^0+/u, "");
+      fraction = fraction.slice(exponent);
+    } else if (exponent < 0) {
+      const digits = whole.padStart(-exponent, "0");
+      fraction = (digits.slice(digits.length + exponent) + fraction).replace(/0+$/u, "");
+      whole = digits.slice(0, digits.length + exponent).replace(/^0+/u, "");
     }
-    out.push(checked.values);
-  });
-  const keys = first?.keys ?? new Set(type.fields.map((field) => field.name));
-  if (inserted && !type.fields.some((field) => keys.has(field.name))) {fail("every key is left out, so the insert would name no column; give one at least.");}
-  const shaped = type.one ? out[0] : out;
-  // oxlint-disable-next-line eslint/sort-keys -- Preserve the existing field order for serialized preparation results.
-  return { value: dialect === "postgres" ? shaped : write(shaped), present: keys };
-};
-
-/** One value checked against its type, as the JSON the database reads; `fail` says why not. */
-function check(type: EngineType, written: string, v: unknown, dialect: Dialect, fail: (message: string) => never): unknown {
-  switch (type.kind) {
-    case "json": {
-      // JSON.stringify throws on a BigInt and skips a function; a JSON member holds JSON.
-      try {
-        if (matchesUndefined(JSON.stringify(v))) {fail(`is ${written}, which holds a JSON value; got ${describe(v)}.`);}
-      } catch (error) {
-        fail(`is ${written}, which holds a JSON value: ${(error as Error).message}.`);
-      }
-      return v;
-    }
-    case "enum": {
-      if (matchesString(v) && (type.labels.length === 0 || type.labels.includes(v))) {return v;}
-      return fail(`is the enum ${type.name}, one of ${type.labels.map((label) => JSON.stringify(label)).join(", ")}; got ${describe(v)}.`);
-    }
-    case "array": {
-      if (!Array.isArray(v)) {return fail(`is ${written}, an array; got ${describe(v)}.`);}
-      const element = written.replace(/\s*\[\s*\]\s*$/u, "");
-      return v.map((e, index) => (matchesNull(e) ? null : check(type.of, element, e, dialect, (message) => fail(`element ${index + 1} ${message}`))));
-    }
-    case "scalar": {
-      return scalar(type.name, written, v, dialect, fail);
-    }
-    default: {
-      return v;
-    }
+    if (fraction.length > scale) {fail(`is ${written}, which keeps ${scale} digit${scale === 1 ? "" : "s"} after the point, so ${text} would be rounded.`);}
+    if (whole.length > precision - scale) {fail(`is ${written}, which holds at most ${precision - scale} digit${precision - scale === 1 ? "" : "s"} before the point; got ${text}.`);}
   }
+  return matchesBigInt(v) ? v.toString() : v;
 }
 
 function scalar(name: string, written: string, v: unknown, dialect: Dialect, fail: (message: string) => never): unknown {
@@ -320,23 +253,128 @@ function scalar(name: string, written: string, v: unknown, dialect: Dialect, fai
   }
 }
 
-/** An integer in `range`, as a number, a BigInt or, where `digits`, a string of its digits. */
-/**
- * `truth`: MySQL and SQLite, where a truth value is an integer, and a TINYINT(1), BIT(1) or BOOLEAN
- * column returns a boolean, which goes back in as 1 or 0 (the round-trip rule, src/render.ts).
- */
-function integer(range: Readonly<[bigint, bigint]>, digits: boolean, written: string, v: unknown, fail: (message: string) => never, truth = false): bigint {
-  let n: bigint;
-  if (matchesBigInt(v)) {n = v;}
-  else if (matchesBoolean(v) && truth) {n = BigInt(v ? 1 : 0);}
-  else if (matchesNumber(v) && Number.isInteger(v)) {
-    if (!Number.isSafeInteger(v)) {fail(`is ${written}; ${v} is past 2^53 - 1, where a number stops being exact, so pass it as a BigInt${digits ? " or a string of digits" : ""}.`);}
-    n = BigInt(v);
-  } else if (matchesString(v) && /^[+-]?\d+$/u.test(v.trim()) && digits) {n = BigInt(v.trim());}
-  else {return fail(`is ${written}, an integer; got ${describe(v)}.`);}
-  if (n < range[0] || n > range[1]) {fail(`is ${written}, from ${range[0]} to ${range[1]}; got ${n}.`);}
-  return n;
+/** One value checked against its type, as the JSON the database reads; `fail` says why not. */
+function check(type: EngineType, written: string, v: unknown, dialect: Dialect, fail: (message: string) => never): unknown {
+  switch (type.kind) {
+    case "json": {
+      // JSON.stringify throws on a BigInt and skips a function; a JSON member holds JSON.
+      try {
+        if (matchesUndefined(JSON.stringify(v))) {fail(`is ${written}, which holds a JSON value; got ${describe(v)}.`);}
+      } catch (error) {
+        fail(`is ${written}, which holds a JSON value: ${(error as Error).message}.`);
+      }
+      return v;
+    }
+    case "enum": {
+      if (matchesString(v) && (type.labels.length === 0 || type.labels.includes(v))) {return v;}
+      return fail(`is the enum ${type.name}, one of ${type.labels.map((label) => JSON.stringify(label)).join(", ")}; got ${describe(v)}.`);
+    }
+    case "array": {
+      if (!Array.isArray(v)) {return fail(`is ${written}, an array; got ${describe(v)}.`);}
+      const element = written.replace(/\s*\[\s*\]\s*$/u, "");
+      return v.map((e, index) => (matchesNull(e) ? null : check(type.of, element, e, dialect, (message) => fail(`element ${index + 1} ${message}`))));
+    }
+    case "scalar": {
+      return scalar(type.name, written, v, dialect, fail);
+    }
+    default: {
+      return v;
+    }
+  }
 }
+
+const checkColumnValue = (field: RowField, value: unknown, context: ColumnCheck): void => {
+  const { dialect, fail, row, where } = context;
+  const subject = `${where}"${field.name}"`;
+  if (matchesUndefined(value)) {
+    if (!field.optional) {fail(`${subject} is ${field.written} not null, and the row leaves it out.`);}
+    return;
+  }
+  row.keys.add(field.name);
+  if (matchesNull(value)) {
+    if (!field.nullable) {fail(`${subject} is ${field.written} not null, and the row gives null${field.optional ? "; leave the key out for the column's default" : ""}.`);}
+    row.values[field.name] = null;
+    return;
+  }
+  const checked = check(field.type, field.written, value, dialect, (message) => fail(`${subject} ${message}`));
+  if (matchesUndefined(field.schema)) {
+    row.values[field.name] = checked;
+    return;
+  }
+  // A JSON member's schema fills its defaults and checks the value (wiki/typed-json-params.md).
+  const filled = withDefaults(field.schema, checked);
+  const failure = validate(field.schema, filled);
+  if (failure) {fail(`${subject}${failure.path ? ` at ${failure.path}` : ""} ${failure.message}.`);}
+  row.values[field.name] = filled;
+};
+
+const checkRow = (value: unknown, where: string, schema: RowSchema): CheckedRow => {
+  const { dialect, fail, fields, known } = schema;
+  if (!isRecord(value) || value instanceof Date) {
+    return fail(`${where}each row is an object whose keys the column list names; got ${describe(value)}.`);
+  }
+  Object.keys(value).forEach((key) => {
+    if (!known.has(key) && !matchesUndefined(value[key])) {
+      fail(`${where}the column list names no key "${key}" (it names ${fields.map((field) => `"${field.name}"`).join(", ")}).`);
+    }
+  });
+  const row: CheckedRow = { keys: new Set(), values: {} };
+  const context: ColumnCheck = { dialect, fail, row, where };
+  Iterator.from(fields).forEach((field) => {
+    checkColumnValue(field, value[field.name], context);
+  });
+  return row;
+};
+
+interface InsertColumns {
+  keys: Set<string>;
+  rowNumber: number;
+}
+
+const verifyInsertColumns = (expected: InsertColumns, actual: InsertColumns, schema: RowSchema): void => {
+  const differ = schema.fields.find((field) => expected.keys.has(field.name) !== actual.keys.has(field.name));
+  if (matchesUndefined(differ)) {return;}
+  const givesKey = actual.keys.has(differ.name);
+  schema.fail(`row ${actual.rowNumber} ${givesKey ? "gives" : "leaves out"} "${differ.name}", which row ${expected.rowNumber} ${givesKey ? "leaves out" : "gives"}. Every row of one call gives the same keys, since one insert writes them all and a key left out takes its column's default: give "${differ.name}" in every row, or in none.`);
+};
+
+/**
+ * Checks a structured parameter and produces the JSON value or text to bind.
+ * @param {string} name - The structured parameter's name.
+ * @param {RowsType} type - Its declared column list.
+ * @param {unknown} value - The supplied row or rows.
+ * @param {Dialect} dialect - The database that consumes the rows.
+ * @param {boolean} inserted - Whether every row must supply the same insert columns.
+ * @returns {{ value: unknown; present: ReadonlySet<string> }} The bound value and supplied column names.
+ */
+export const prepareRows = function prepareRows(name: string, type: RowsType, value: unknown, dialect: Dialect, inserted: boolean): { value: unknown; present: ReadonlySet<string> } {
+  const fail = (message: string): never => {
+    throw new ParameterError(`Parameter "${name}": ${message}`);
+  };
+  if (matchesUndefined(value) || matchesNull(value)) {fail(type.one ? "pass one object, whose keys the column list names." : "pass an array of objects, whose keys the column list names; an empty array inserts nothing.");}
+  const rows = type.one ? [value] : (Array.isArray(value) ? value : fail(`pass an array of objects, one per row; got ${describe(value)}.`));
+  const schema: RowSchema = {
+    dialect, fail, fields: type.fields, known: new Map(type.fields.map((field) => [field.name, field])),
+  };
+  // oxlint-disable-next-line rules/no-let -- An insert compares later rows with the first row it received.
+  let first: InsertColumns | undefined;
+  const out: Record<string, unknown>[] = [];
+  rows.forEach((row: unknown, index: number) => {
+    const rowNumber = index + firstRowNumber;
+    const checked = checkRow(row, type.one ? "" : `row ${rowNumber}: `, schema);
+    if (inserted) {
+      const columns = { keys: checked.keys, rowNumber };
+      if (matchesUndefined(first)) {first = columns;}
+      else {verifyInsertColumns(first, columns, schema);}
+    }
+    out.push(checked.values);
+  });
+  const keys = first?.keys ?? new Set(type.fields.map((field) => field.name));
+  if (inserted && !type.fields.some((field) => keys.has(field.name))) {fail("every key is left out, so the insert would name no column; give one at least.");}
+  const shaped = type.one ? out[0] : out;
+  // oxlint-disable-next-line eslint/sort-keys -- Preserve the existing field order for serialized preparation results.
+  return { value: dialect === "postgres" ? shaped : write(shaped), present: keys };
+};
 
 /** MySQL's integer types as a `::` cast names them, each with its range; `unsigned` doubles it from 0. */
 const MYSQL_INTEGERS: Record<string, IntegerRange> = {
@@ -431,44 +469,6 @@ export const checkCast = function checkCast(name: string, written: string, type:
   }
   check(type, written, v, dialect, fail);
 };
-
-/**
- * A decimal, as a number or as its digits. `numeric(p,s)` keeps `s` digits after the point and
- * `p` in all: a value with more decimals would be rounded, so it is refused, and so is one with
- * more digits before the point than the column holds.
- */
-function decimal(written: string, v: unknown, fail: (message: string) => never): unknown {
-  let text: string;
-  if (matchesNumber(v)) {
-    if (!Number.isFinite(v)) {return fail(`is ${written}, a finite decimal; got ${v}.`);}
-    text = String(v);
-  } else if (matchesString(v)) {text = v.trim();}
-  else if (matchesBigInt(v)) {text = v.toString();}
-  else {return fail(`is ${written}, a decimal: a number or a string of its digits; got ${describe(v)}.`);}
-  const regexMatch = /^([+-]?)(\d*)(?:\.(\d*))?(?:e([+-]?\d+))?$/i.exec(text);
-  if (!regexMatch || (regexMatch[2] === "" && (regexMatch[3] ?? "") === "")) {return fail(`is ${written}, a decimal: a number or a string of its digits; got ${describe(v)}.`);}
-  const mod = /\(\s*(\d+)\s*(?:,\s*(-?\d+)\s*)?\)/u.exec(written);
-  if (mod) {
-    const precision = Number(mod[1]);
-    const scale = Number(mod[2] ?? 0);
-    const exponent = Number(regexMatch[4] ?? 0);
-    let whole = (regexMatch[2] ?? "").replace(/^0+/u, "");
-    let fraction = (regexMatch[3] ?? "").replace(/0+$/u, "");
-    // Shift the point by the exponent.
-    if (exponent > 0) {
-      const moved = fraction.slice(0, exponent).padEnd(exponent, "0");
-      whole = (whole + moved).replace(/^0+/u, "");
-      fraction = fraction.slice(exponent);
-    } else if (exponent < 0) {
-      const digits = whole.padStart(-exponent, "0");
-      fraction = (digits.slice(digits.length + exponent) + fraction).replace(/0+$/u, "");
-      whole = digits.slice(0, digits.length + exponent).replace(/^0+/u, "");
-    }
-    if (fraction.length > scale) {fail(`is ${written}, which keeps ${scale} digit${scale === 1 ? "" : "s"} after the point, so ${text} would be rounded.`);}
-    if (whole.length > precision - scale) {fail(`is ${written}, which holds at most ${precision - scale} digit${precision - scale === 1 ? "" : "s"} before the point; got ${text}.`);}
-  }
-  return matchesBigInt(v) ? v.toString() : v;
-}
 
 /** The statement with each list of a structured parameter written again for the keys present (MySQL): an entry stays when its key is required or present. */
 export const variant = function variant(text: string, structured: Structured, fields: Readonly<RowField[]>, present: ReadonlySet<string>): string {
