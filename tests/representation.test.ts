@@ -13,12 +13,49 @@ import { DatabaseSync } from "node:sqlite";
 import { Session } from "#reylo-source/analyze.ts";
 import { sqlModule } from "#reylo-source/loader.ts";
 import { renderType } from "#reylo-source/render.ts";
-import { defineQuery } from "#reylo-source/index.ts";
+import { hasFunctionType, isRecord } from "#reylo-source/native-predicates.ts";
+import type { LibsqlClient, Sqlite3Client, SqlitePromiseClient, SyncSqliteClient, TursoClient } from "#reylo-source/execute.ts";
+import type { Cardinality, Query } from "#reylo-source/index.ts";
 import { DRIVERS, INDEX } from "./helpers.ts";
 
 // Real SQLite drivers must return the same public value representation.
 const drivers = existsSync(join(DRIVERS, "better-sqlite3")) || "lab/drivers is not installed";
 const require = createRequire(join(DRIVERS, "package.json"));
+
+type QueryParams = Record<string, unknown>;
+type SqliteQuery = Pick<Query<QueryParams, unknown, Cardinality, "sqlite">, "run" | "runSync">;
+type TestStatement = ReturnType<SyncSqliteClient["prepare"]> & {
+  get: () => Record<string, unknown>;
+};
+type TestSyncClient = {
+  close: () => void;
+  defaultSafeIntegers: (enabled: boolean) => unknown;
+  prepare: (sql: string) => TestStatement;
+  transaction: <Result>(callback: () => Result) => () => Result;
+};
+type TestLibsqlClient = LibsqlClient & { close: () => void };
+type TestSqlite3 = Sqlite3Client & { close: (callback: (error?: Error | null) => void) => void };
+type TestSqlite = SqlitePromiseClient & { close: () => Promise<void> };
+type TestTurso = Omit<TursoClient, "prepare"> & {
+  close: () => Promise<void>;
+  defaultSafeIntegers: (enabled: boolean) => unknown;
+  prepare: (sql: string) => { all: (...params: unknown[]) => Promise<unknown[]>; get: () => Promise<Record<string, unknown>> };
+  transactionAsync: <Result>(callback: (transaction: TursoClient) => Promise<Result>) => () => Promise<Result>;
+};
+type LibsqlAdapter = { createClient: (options: { intMode: string; url: string }) => TestLibsqlClient };
+type Sqlite3Adapter = { Database: new (file: string) => TestSqlite3 };
+type SqliteAdapter = { open: (options: { driver: Sqlite3Adapter["Database"]; filename: string }) => Promise<TestSqlite> };
+type SyncAdapter = new (file: string) => TestSyncClient;
+type TursoAdapter = { connect: (file: string) => Promise<TestTurso> };
+
+const driverAdapter = <Module>(value: unknown): Module =>
+  // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- The optional driver lab installs the real packages whose tested interfaces are declared here.
+  value as Module;
+
+const loadDriver = <Module>(name: string): Module => driverAdapter<Module>(require(name));
+
+const importDriver = async <Module>(name: string): Promise<Module> =>
+  driverAdapter<Module>(await import(pathToFileURL(require.resolve(name)).href));
 
 const project = function (...linked: string[]): string {
   const root = mkdtempSync(join(tmpdir(), "reylo-representation-"));
@@ -29,7 +66,7 @@ const project = function (...linked: string[]): string {
 };
 
 /** The module a build step writes for `sql`, imported. */
-const built = async function (root: string, url: string, name: string, sql: string) {
+const built = async function (root: string, url: string, name: string, sql: string): Promise<SqliteQuery> {
   const file = join(root, `${name}.sql`);
   await writeFile(file, sql);
   await writeFile(join(root, ".env"), `DATABASE_URL=${url}\n`);
@@ -37,7 +74,12 @@ const built = async function (root: string, url: string, name: string, sql: stri
     const { code } = await sqlModule(file, sql);
     const out = join(root, `${name}.mjs`);
     await writeFile(out, code.replace(`from "@totto2727/reylo"`, `from ${JSON.stringify(INDEX)}`));
-    return (await import(pathToFileURL(out).href)).default;
+    const imported: unknown = await import(pathToFileURL(out).href);
+    assert.ok(isRecord(imported), "generated SQLite module exports a query");
+    const { default: query } = imported;
+    assert.ok(isRecord(query) && hasFunctionType(query.run) && hasFunctionType(query.runSync), "generated query has native run and runSync");
+    // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- The generated query has both methods and this fixture only compiles SQLite statements.
+    return query as SqliteQuery;
   } finally {
     for (const session of Session.opened()) {await session.close();}
   }
@@ -51,10 +93,10 @@ const plain = (v: unknown): unknown => {
 
 // oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
 test("SQLite: one row on every driver, whatever its integer setting; an integer past 2^53, a BOOLEAN column's 2 and a value its column's type does not allow an error naming its column", { skip: drivers === true ? false : drivers, timeout: 60_000 }, async () => {
-  const Database = require("better-sqlite3");
-  const { createClient } = require("@libsql/client");
-  const sqlite3 = require("sqlite3");
-  const { open } = require("sqlite");
+  const Database = loadDriver<SyncAdapter>("better-sqlite3");
+  const { createClient } = loadDriver<LibsqlAdapter>("@libsql/client");
+  const sqlite3 = loadDriver<Sqlite3Adapter>("sqlite3");
+  const { open } = loadDriver<SqliteAdapter>("sqlite");
   const root = project();
   const file = join(root, "app.db");
   const setup = new DatabaseSync(file);
@@ -123,13 +165,13 @@ test("SQLite: one row on every driver, whatever its integer setting; an integer 
   }
   // Turso's new engine on the same file: its promise API through run, in transactionAsync too, and
   // Its compat Database through runSync. At its defaults it rounds an integer past 2^53 silently.
-  const turso = await import(pathToFileURL(require.resolve("@tursodatabase/database")).href);
-  const { Database: TursoCompat } = await import(pathToFileURL(require.resolve("@tursodatabase/database/compat")).href);
+  const turso = await importDriver<TursoAdapter>("@tursodatabase/database");
+  const { Database: TursoCompat } = await importDriver<{ Database: SyncAdapter }>("@tursodatabase/database/compat");
   for (const safe of [false, true]) {
     const tdb = await turso.connect(file);
     tdb.defaultSafeIntegers(safe);
     assert.deepEqual(plain(await q.run(tdb)), rows, `Turso's engine with defaultSafeIntegers(${safe})`);
-    assert.deepEqual(plain(await tdb.transactionAsync((tx: unknown) => q.run(tx))()), rows, "Turso's engine in transactionAsync");
+    assert.deepEqual(plain(await tdb.transactionAsync((transaction) => q.run(transaction))()), rows, "Turso's engine in transactionAsync");
     await assert.rejects(big.run(tdb), bigError);
     await assert.rejects(odd.run(tdb), refused);
     await assert.rejects(looseN.run(tdb), textInN);
@@ -167,7 +209,7 @@ test("SQLite: one row on every driver, whatever its integer setting; an integer 
 
 // oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
 test("SQLite: libSQL's intMode \"string\" changes no value Reylo types a number or a NUMERIC's: an INTEGER is its number, exact up to 2^53 - 1 and refused past it; a column with no type keeps libSQL's digits", { skip: drivers === true ? false : drivers, timeout: 60_000 }, async () => {
-  const { createClient } = require("@libsql/client");
+  const { createClient } = loadDriver<LibsqlAdapter>("@libsql/client");
   const root = project();
   const file = join(root, "app.db");
   const setup = new DatabaseSync(file);
@@ -205,10 +247,10 @@ test("SQLite: libSQL's intMode \"string\" changes no value Reylo types a number 
 
 // oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
 test("SQLite: a column declared BIGINT or INT8 is a BigInt on every driver, exact past 2^53 or refused where the driver rounded it, an INTEGER a number; its value goes back in as a parameter", { skip: drivers === true ? false : drivers, timeout: 60_000 }, async () => {
-  const Database = require("better-sqlite3");
-  const { createClient } = require("@libsql/client");
-  const sqlite3 = require("sqlite3");
-  const { open } = require("sqlite");
+  const Database = loadDriver<SyncAdapter>("better-sqlite3");
+  const { createClient } = loadDriver<LibsqlAdapter>("@libsql/client");
+  const sqlite3 = loadDriver<Sqlite3Adapter>("sqlite3");
+  const { open } = loadDriver<SqliteAdapter>("sqlite");
   const root = project();
   const file = join(root, "app.db");
   const setup = new DatabaseSync(file);
@@ -258,8 +300,8 @@ test("SQLite: a column declared BIGINT or INT8 is a BigInt on every driver, exac
     if (intMode !== "number") {assert.deepEqual(plain(await byV.run(client, { v: BigInt("9007199254740993") })), [{ id: 1, v: BigInt("9007199254740993") }], `libSQL with intMode ${intMode}: the BIGINT's value as a parameter`);}
     client.close();
   }
-  const turso = await import(pathToFileURL(require.resolve("@tursodatabase/database")).href);
-  const { Database: TursoCompat } = await import(pathToFileURL(require.resolve("@tursodatabase/database/compat")).href);
+  const turso = await importDriver<TursoAdapter>("@tursodatabase/database");
+  const { Database: TursoCompat } = await importDriver<{ Database: SyncAdapter }>("@tursodatabase/database/compat");
   for (const safe of [false, true]) {
     const tdb = await turso.connect(file);
     tdb.defaultSafeIntegers(safe);
@@ -286,10 +328,10 @@ test("SQLite: a column declared BIGINT or INT8 is a BigInt on every driver, exac
 
 // oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
 test("SQLite: JSON a statement builds is the object its type says on every driver, and a text column that holds JSON stays a string", { skip: drivers === true ? false : drivers, timeout: 60_000 }, async () => {
-  const Database = require("better-sqlite3");
-  const { createClient } = require("@libsql/client");
-  const sqlite3 = require("sqlite3");
-  const { open } = require("sqlite");
+  const Database = loadDriver<SyncAdapter>("better-sqlite3");
+  const { createClient } = loadDriver<LibsqlAdapter>("@libsql/client");
+  const sqlite3 = loadDriver<Sqlite3Adapter>("sqlite3");
+  const { open } = loadDriver<SqliteAdapter>("sqlite");
   const root = project();
   const file = join(root, "app.db");
   const setup = new DatabaseSync(file);
@@ -334,7 +376,7 @@ from users u where u.id = :id::int`,
     { o: { big: 9_007_199_254_740_992, score: 1.5, flag: 1, more: 0, pair: ["ann", 1.5], doc: "[1]" }, doc: "[1]", glued: '{"n":"ann"}' },
     { o: { big: null, score: null, flag: 0, more: 1, pair: ["bob", null], doc: null }, doc: null, glued: '{"n":"bob"}' },
   ];
-  const check = async (label: string, run: (q: any, params?: object) => unknown): Promise<void> => {
+  const check = async (label: string, run: (query: SqliteQuery, params?: QueryParams) => unknown): Promise<void> => {
     assert.deepEqual(plain(await run(profile, { id: 1 })), ann, `${label}: the profile`);
     assert.deepEqual(plain(await run(profile, { id: 2 })), bob, `${label}: a user with no posts`);
     assert.deepEqual(plain(await run(values)), rows, `${label}: the values`);
@@ -357,8 +399,8 @@ from users u where u.id = :id::int`,
     await check(`libSQL with intMode ${intMode}`, (q, p) => q.run(client, p));
     client.close();
   }
-  const turso = await import(pathToFileURL(require.resolve("@tursodatabase/database")).href);
-  const { Database: TursoCompat } = await import(pathToFileURL(require.resolve("@tursodatabase/database/compat")).href);
+  const turso = await importDriver<TursoAdapter>("@tursodatabase/database");
+  const { Database: TursoCompat } = await importDriver<{ Database: SyncAdapter }>("@tursodatabase/database/compat");
   const tdb = await turso.connect(file);
   await check("Turso's engine", (q, p) => q.run(tdb, p));
   await tdb.close();
