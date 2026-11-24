@@ -12,6 +12,16 @@ export const DRIVERS = join(ROOT, "lab", "drivers", "node_modules");
 export const MAPPER = join(ROOT, "src", "mapper.ts");
 export const INDEX = pathToFileURL(join(ROOT, "src", "index.ts")).href;
 
+/**
+ * @param implementation - The synchronous implementation of the test double.
+ * @returns A driver method that fulfills or rejects the same way as an asynchronous database driver.
+ */
+export const promiseDriverStub = <Arguments extends unknown[], Result>(
+  implementation: (...args: Arguments) => Result,
+): ((...args: Arguments) => Promise<Result>) =>
+  // oxlint-disable-next-line typescript/require-await -- Turn synchronous fixture throws into rejected driver Promises without delaying fulfilment.
+  async (...args) => implementation(...args);
+
 interface ChildResult {
   status: number | null;
   stderr: string;

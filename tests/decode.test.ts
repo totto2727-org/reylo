@@ -6,6 +6,7 @@ import { execute } from '../src/execute.ts';
 import type { QueryModule } from '../src/execute.ts';
 import { parseArray } from "../src/decode.ts";
 import type { Columns } from "../src/values.ts";
+import { promiseDriverStub } from "./helpers.ts";
 
 // Fakes of the Postgres drivers that decode as the real ones do (checked against
 // Lab/drivers/node_modules and wiki/driver-decoding/spike/postgres.md): a result asks a types
@@ -279,7 +280,7 @@ test("pg-promise: result({ text, values, types }) on the database, a task and a 
   const conn = pgClient(db);
   const calls: unknown[] = [];
   const make = (receive?: (e: { data: Record<string, unknown>[] }) => void) => ({
-    manyOrNone: async () => [],
+    manyOrNone: promiseDriverStub(() => []),
     query: async (q: Config): Promise<any> => (calls.push(q), (await conn.query(q)).rows),
     result: async (q: Config): Promise<any> => {
       calls.push(q);
@@ -307,7 +308,7 @@ test("pg-promise: result({ text, values, types }) on the database, a task and a 
 const pglite = function (db: Db, instance: Record<number, Parser> | undefined) {
   const lite = {
     ...(instance ? { parsers: instance, refreshArrayTypes: async () => {} } : { rollback: async () => {}, closed: false }),
-    exec: async () => [],
+    exec: promiseDriverStub(() => []),
     seen: [] as Record<number, Parser>[],
     async query(text: string, _values?: unknown[], options?: { parsers?: Record<number, Parser>; rowMode?: string }) {
       if (options?.parsers) {lite.seen.push(options.parsers);}

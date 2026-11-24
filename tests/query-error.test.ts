@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { defineQuery } from '../src/index.ts';
 import type { MysqlClient, MysqlCode, MysqlQueryError, PostgresClient, PostgresCondition, PostgresQueryError, Query, SqliteCode, SqliteQueryError } from '../src/index.ts';
 import { readQueryError, readQueryErrorSync } from "../src/query-error.ts";
+import { promiseDriverStub } from "./helpers.ts";
 
 // `.try()` and the database's error it reads from each driver's own (src/query-error.ts). The
 // Drivers' errors below are the ones each throws, measured on the real package (lab/driver-matrix
@@ -191,7 +192,7 @@ test("SQLite: the error each driver throws reads as one, its most specific code 
 test("try resolves to the value or to the database's error, and rejects with every other error, as run does", async () => {
   const unique = thrown(`duplicate key value violates unique constraint "users_email_key"`, { severity: "ERROR", code: "23505", table: "users", constraint: "users_email_key" });
   const refused = thrown("connect ECONNREFUSED 127.0.0.1:1", { errno: -61, code: "ECONNREFUSED" });
-  const answering = (rows: unknown[]) => ({ query: async () => ({ rows }) });
+  const answering = (rows: unknown[]) => ({ query: promiseDriverStub(() => ({ rows })) });
   const failing = (error: Error) => ({ query: async () => Promise.reject(error) });
   const many = defineQuery<{ id: number }, { id: number }, "many", "postgres">({ dialect: "postgres", sql: "select id from users where id = :id", params: ["id"], cardinality: "many" });
   const one = defineQuery<{ id: number }, { id: number }, "one", "postgres">({ dialect: "postgres", sql: "select id from users where id = :id", params: ["id"], cardinality: "one", source: "get_user.sql" });
