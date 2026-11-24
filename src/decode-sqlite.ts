@@ -189,7 +189,7 @@ export const runDurableObject = function runDurableObject(sql: SqliteClient, tex
   return normalize(cursor.toArray(), columns);
 };
 
-type Plan = {
+interface Plan {
   name: string;
   /** An INTEGER the driver read as a BigInt. */
   big: (value: bigint) => unknown;
@@ -199,7 +199,7 @@ type Plan = {
   str: ((value: string) => unknown) | undefined;
   /** A BLOB in a column whose type holds none. */
   blob?: ((value: object) => never) | undefined;
-};
+}
 
 /** An integer's digits, as libSQL under intMode "string" hands one over. */
 const DIGITS = /^[+-]?\d+$/u;

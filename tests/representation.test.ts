@@ -33,12 +33,12 @@ type SqliteQuery = Pick<Query<QueryParams, unknown, Cardinality, "sqlite">, "run
 type TestStatement = ReturnType<SyncSqliteClient["prepare"]> & {
   get: () => Record<string, unknown>;
 };
-type TestSyncClient = {
+interface TestSyncClient {
   close: () => void;
   defaultSafeIntegers: (enabled: boolean) => unknown;
   prepare: (sql: string) => TestStatement;
   transaction: <Result>(callback: () => Result) => () => Result;
-};
+}
 type TestLibsqlClient = LibsqlClient & { close: () => void };
 type TestSqlite3 = Sqlite3Client & { close: (callback: (error?: Error | null) => void) => void };
 type TestSqlite = SqlitePromiseClient & { close: () => Promise<void> };
@@ -48,11 +48,11 @@ type TestTurso = Omit<TursoClient, "prepare"> & {
   prepare: (sql: string) => { all: (...params: unknown[]) => Promise<unknown[]>; get: () => Promise<Record<string, unknown>> };
   transactionAsync: <Result>(callback: (transaction: TursoClient) => Promise<Result>) => () => Promise<Result>;
 };
-type LibsqlAdapter = { createClient: (options: { intMode: string; url: string }) => TestLibsqlClient };
-type Sqlite3Adapter = { Database: new (file: string) => TestSqlite3 };
-type SqliteAdapter = { open: (options: { driver: Sqlite3Adapter["Database"]; filename: string }) => Promise<TestSqlite> };
+interface LibsqlAdapter { createClient: (options: { intMode: string; url: string }) => TestLibsqlClient }
+interface Sqlite3Adapter { Database: new (file: string) => TestSqlite3 }
+interface SqliteAdapter { open: (options: { driver: Sqlite3Adapter["Database"]; filename: string }) => Promise<TestSqlite> }
 type SyncAdapter = new (file: string) => TestSyncClient;
-type TursoAdapter = { connect: (file: string) => Promise<TestTurso> };
+interface TursoAdapter { connect: (file: string) => Promise<TestTurso> }
 
 const driverAdapter = <Module>(value: unknown): Module =>
   // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- The optional driver lab installs the real packages whose tested interfaces are declared here.

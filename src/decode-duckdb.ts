@@ -27,8 +27,8 @@ export type DuckdbClient = {
   prepare(sql: string): Promise<unknown>;
 };
 
-type Reader = { columnNames(): string[]; columnTypes(): DuckType[]; getRows(): unknown[][] };
-type DuckType = {
+interface Reader { columnNames: () => string[]; columnTypes: () => DuckType[]; getRows: () => unknown[][] }
+interface DuckType {
   typeId: number;
   alias?: string;
   valueType?: DuckType;
@@ -37,10 +37,10 @@ type DuckType = {
   entryTypes?: DuckType[];
   memberTags?: string[];
   memberTypes?: DuckType[];
-};
+}
 
 /** The slice of @duckdb/node-api that builds a nested or binary value with its type. */
-type Api = {
+interface Api {
   DuckDBConnection: unknown;
   listValue(items: unknown[]): unknown;
   structValue(entries: Record<string, unknown>): unknown;
@@ -58,7 +58,7 @@ type Api = {
   DOUBLE: unknown;
   VARCHAR: unknown;
   BLOB: unknown;
-};
+}
 
 // Named in a variable and loaded with a `require`, so that a bundler leaves it to the run time: only
 // A DuckDB app has the package, and it loads it itself. An `import()` of it is wrapped by tsc in a
@@ -69,8 +69,8 @@ const NODE_API_ENTRY = /[\\/]@duckdb[\\/]node-api[\\/]lib[\\/]index\.js$/u;
 const apis = new WeakMap<object, Promise<Api>>();
 
 type ModuleCache = Record<string, { exports?: unknown } | undefined>;
-type NodeRequire = { (id: string): unknown; cache?: ModuleCache };
-type NodeProcess = { argv?: string[]; cwd(): string; getBuiltinModule?(id: string): { createRequire(from: string): NodeRequire } | undefined };
+interface NodeRequire { (id: string): unknown; cache?: ModuleCache }
+interface NodeProcess { argv?: string[]; cwd: () => string; getBuiltinModule?(id: string): { createRequire(from: string): NodeRequire } | undefined }
 
 /**
  * The @duckdb/node-api the connection `c` came from. node-api takes a nested or binary value only
@@ -445,7 +445,7 @@ const decimal = function (value: bigint, scale: number): string {
   return `${negative ? "-" : ""}${digits.slice(NO_DECIMAL_PLACES, -scale)}.${digits.slice(-scale)}`;
 };
 
-type NativeDuckValue = {
+interface NativeDuckValue {
   bytes: unknown;
   days: number;
   entries: Record<string, unknown> | { key: unknown; value: unknown }[];
@@ -459,7 +459,7 @@ type NativeDuckValue = {
   tag: string;
   type?: DuckType;
   value: unknown;
-};
+}
 
 /** A value of DuckDB's type `t`, as node-api reads it, in its kind's form; `column` names it in an error. */
 function decode(v: unknown, t: DuckType, column: string): unknown {

@@ -24,7 +24,7 @@ import { matchesUndefined } from "./native-predicates.ts";
  * the connection, and why the bridge could not open its socket, which the engine sees only as a
  * connection closed.
  */
-export type HostUrl = { url: string; bridge?: string; close(): void; failure?(): Error | undefined };
+export type HostUrl = { url: string; bridge?: string; close: () => void; failure?: () => Error | undefined };
 
 /** The Postgres URL parameters that name a file. */
 const FILES = ["sslrootcert", "sslcert", "sslkey"];
@@ -164,7 +164,7 @@ function mysqlSocket(pairs: string[]): { path: string; params: string[] } | unde
  * server's greeting so that the handshake is in plain text. None of its sockets keeps the process
  * alive.
  */
-async function openBridge(path: string, dialect: "postgres" | "mysql", token: string): Promise<{ port: number; close(): void; failure(): Error | undefined }> {
+async function openBridge(path: string, dialect: "postgres" | "mysql", token: string): Promise<{ port: number; close: () => void; failure: () => Error | undefined }> {
   const open = new Set<Socket>();
   let failure: Error | undefined;
   const failed = (error: Error): undefined => void (failure = new Error(`cannot open the socket ${path}: ${error.message}`));

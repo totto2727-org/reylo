@@ -38,7 +38,7 @@ It opens the page in the browser; --no-open leaves it closed, for a script or an
   GET  /api/schema                                the tables, their columns, functions and types`;
 
 /** What answers the page: the dialect, a line saying which database, the schema it shows, and each statement's analysis. */
-type Backend = {
+interface Backend {
   dialect: Dialect;
   label: string;
   /** What the project file sets that Reylo does not read (`url` alone), said once, as `reylo generate` says it. */
@@ -46,8 +46,8 @@ type Backend = {
   schema: string;
   catalog: Catalog;
   analyze(sql: string, width: number): Promise<PlayResult>;
-  close(): Promise<void>;
-};
+  close: () => Promise<void>;
+}
 
 const DEFAULT_PORT = 4983;
 
@@ -102,7 +102,7 @@ export async function play(args: string[]): Promise<number> {
   return 0;
 }
 
-export type Playground = { url: string; label: string; notice?: string; close(): Promise<void> };
+export type Playground = { url: string; label: string; notice?: string; close: () => Promise<void> };
 
 /** The built page: in an installed reylo, `play/` beside its package.json; in this repository, dist/reylo/play/. */
 const pageDir = function pageDir(cwd: string): string | undefined {

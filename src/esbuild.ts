@@ -8,11 +8,11 @@ import { readFile } from "node:fs/promises";
 import { dirname } from "node:path";
 import { releaseConnections, tooling } from "./engine-package.ts";
 
-type Build = {
+interface Build {
   onLoad(options: { filter: RegExp }, callback: (args: { path: string }) => Promise<{ contents: string; loader: "js"; watchFiles?: string[] }>): void;
   /** Esbuild's and Bun.build's; Bun's runtime plugin has none. */
   onEnd?(callback: () => Promise<void>): void;
-};
+}
 
 export default function reylo() {
   return {

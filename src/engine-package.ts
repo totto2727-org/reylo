@@ -26,9 +26,9 @@ export type Tooling = {
   /** The module a build step writes for a `.sql` file, and what the build watches: the `.reylo/` entry it was built from, and the project's files its text reads. */
   sqlModule(path: string, source: string): Promise<{ code: string; entry: string; watched: string[] }>;
   /** Closes every build step's connection, for a build that has ended. */
-  releaseConnections(): Promise<void>;
+  releaseConnections: () => Promise<void>;
   /** The methods of TypeScript's content mapper protocol, which src/mapper.ts serves over this process's stdin and stdout. */
-  mapperHandlers(): Record<string, (params: unknown) => unknown | Promise<unknown>>;
+  mapperHandlers: () => Record<string, (params: unknown) => unknown | Promise<unknown>>;
   /** Runs the CLI's command, and answers with its exit code. */
   runCli(args: string[]): Promise<number>;
 };

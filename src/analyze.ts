@@ -39,7 +39,7 @@ export type Outcome =
  * the schema changes. On SQLite, `drivers` are the app's own, which each statement is prepared on
  * too (src/sqlite-drivers.ts).
  */
-type Io = { analyze(sql: string): Promise<Analysis>; query(sql: string, params: unknown[]): Promise<unknown[][]>; forget(): Promise<void>; close(): Promise<void>; drivers?: SqliteDriver[] };
+interface Io { analyze(sql: string): Promise<Analysis>; query(sql: string, params: unknown[]): Promise<unknown[][]>; forget: () => Promise<void>; close: () => Promise<void>; drivers?: SqliteDriver[] }
 
 const ENTRY_VERSION = 1;
 // How long a schema fingerprint is trusted, as long as a statement answer: a migration shows up

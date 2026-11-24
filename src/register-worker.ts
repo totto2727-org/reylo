@@ -10,7 +10,7 @@ import type { MessagePort } from "node:worker_threads";
 import { dirname } from "node:path";
 import { tooling } from "./engine-package.ts";
 
-type Request = { path: string; source: string; port: MessagePort; done: Int32Array };
+interface Request { path: string; source: string; port: MessagePort; done: Int32Array }
 
 parentPort!.on("message", async ({ path, source, port, done }: Request) => {
   let reply: { code: string } | { error: string };

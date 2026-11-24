@@ -305,7 +305,7 @@ class Channel {
     });
     // Neither the child nor its pipes keep this process alive, from the start (`#hold`).
     child.unref();
-    Iterator.from([child.stdin, child.stdout, child.stderr]).forEach((stream) => {(stream as unknown as { unref?(): void }).unref?.();});
+    Iterator.from([child.stdin, child.stdout, child.stderr]).forEach((stream) => {(stream as unknown as { unref?: () => void }).unref?.();});
   }
 
   public get ended(): boolean {

@@ -7,11 +7,11 @@
 import { dirname } from "node:path";
 import { tooling } from "./engine-package.ts";
 
-type LoaderContext = {
+interface LoaderContext {
   resourcePath: string;
   addDependency(file: string): void;
-  async(): (error: Error | null, code?: string) => void;
-};
+  async: () => (error: Error | null, code?: string) => void;
+}
 
 export default function reyloSqlLoader(this: LoaderContext, source: string): void {
   const done = this.async();

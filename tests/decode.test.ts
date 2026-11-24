@@ -132,7 +132,7 @@ type Db = ReturnType<typeof database>;
 const bytes = (v: unknown): unknown => (v instanceof Uint8Array ? { bytes: [...v] } : Array.isArray(v) ? v.map(bytes) : v !== null && typeof v === "object" && !(v instanceof Date) ? Object.fromEntries(Object.entries(v).map(([k, x]) => [k, bytes(x)])) : v);
 const same = (actual: unknown, expected: unknown): void => assert.deepEqual(bytes(actual), bytes(expected));
 
-type Config = { text: string; values?: unknown[]; types?: { getTypeParser(oid: number, format?: string): Parser }; rowMode?: string };
+interface Config { text: string; values?: unknown[]; types?: { getTypeParser(oid: number, format?: string): Parser }; rowMode?: string }
 
 /** Pg's Client: a query's own table, else the client's setTypeParser over the app's global table. */
 const pgClient = function (db: Db, options: { binary?: boolean } = {}) {

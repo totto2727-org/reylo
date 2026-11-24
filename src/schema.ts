@@ -14,11 +14,11 @@ import { hasObjectType, matchesNull, matchesString, matchesUndefined } from "./n
 
 type Dialect = "postgres" | "mysql" | "sqlite" | "duckdb";
 type Schema = Record<string, unknown>;
-type Analysis = {
+interface Analysis {
   params: Readonly<{ name: string; type: EngineType; nullable: boolean; schema?: JsonSchema }[]>;
   columns: Readonly<{ name: string; type: EngineType; nullable: boolean }[]>;
   cardinality: "one" | "maybeOne" | "many" | "none";
-};
+}
 
 /** The schema admitting null as well: a bare `type` gets `"null"` beside it, anything else an `anyOf` with null. */
 const nullable = function (schema: Schema | JsonSchema): Schema | JsonSchema {

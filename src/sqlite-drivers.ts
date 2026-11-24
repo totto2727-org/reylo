@@ -43,7 +43,7 @@ type Open = (require: Require, path: string) => Promise<SqliteDriver>;
 
 /** Better-sqlite3's API, which the `libsql` package and Turso's compat module copy. */
 interface SyncDatabase {
-  prepare(sql: string): { get(): unknown };
+  prepare(sql: string): { get: () => unknown };
   close(): void;
 }
 
@@ -95,7 +95,7 @@ const DRIVERS: [string, Open][] = [
     async (require, path) => {
       type Db = {
         get(sql: string, cb: (error: Error | null, row: { v: string }) => void): void;
-        prepare(sql: string, cb: (error: Error | null) => void): { finalize(): void };
+        prepare(sql: string, cb: (error: Error | null) => void): { finalize: () => void };
         close(cb: () => void): void;
       };
       const sqlite3 = require("sqlite3") as { Database: new (path: string, mode: number, cb: (error: Error | null) => void) => Db; OPEN_READONLY: number };

@@ -17,12 +17,12 @@ import { Session } from "./analyze.ts";
 import { docComment, leadingComment, statementAfter } from "./doc-comment.ts";
 import { matchesUndefined } from "./native-predicates.ts";
 
-type Project = {
+interface Project {
   strictParams: boolean;
   /** The project file as its messages name it: relative to the project, or `.reylo.yaml` where there is none. */
   projectFile: string;
   session: Promise<Session>;
-};
+}
 const projects = new Map<string, Project>();
 
 /** A diagnostic of the file, its range kept inside the file's `size` bytes (`withinFile`). */

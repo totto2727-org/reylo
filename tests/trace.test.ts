@@ -27,7 +27,7 @@ const database = function () {
   return db;
 };
 
-type Event = { name: string; ctx: QueryTrace; result?: unknown; error?: unknown };
+interface Event { name: string; ctx: QueryTrace; result?: unknown; error?: unknown }
 
 /** Runs `fn` with a subscriber to every event, and returns the events with the result and error each saw. */
 const traced = async function (fn: () => unknown): Promise<Event[]> {

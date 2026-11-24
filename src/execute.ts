@@ -60,7 +60,7 @@ export type MysqlExecuteClient = {
   execute(text: string, values?: DriverValue[]): PromiseLike<[unknown, unknown] | { rows: unknown[]; statement: string }>;
 };
 /** Mysql2's callback Pool, Connection and PoolConnection, run through their promise() wrapper. */
-export type Mysql2CallbackClient = { promise(): MysqlExecuteClient };
+export type Mysql2CallbackClient = { promise: () => MysqlExecuteClient };
 /** Mariadb's Pool, Connection and PoolConnection: query(text, values) → rows, or an OK packet for a write. */
 export type MariadbClient = {
   query(text: string, values?: DriverValue): Promise<unknown>;
@@ -84,14 +84,14 @@ export type SyncSqliteClient = {
  * once with a cursor, so `runSync` takes it, inside `ctx.storage.transactionSync(fn)` too.
  */
 export type DurableObjectSql = {
-  exec(query: string, ...bindings: DriverValue[]): { toArray(): unknown[] };
+  exec(query: string, ...bindings: DriverValue[]): { toArray: () => unknown[] };
   readonly databaseSize: number;
 };
 /** A Durable Object's storage, `ctx.storage`, which `drizzle-orm/durable-sqlite` keeps: `run` takes its `sql`. */
 export type DurableObjectStorage = Readonly<{ sql: DurableObjectSql }>;
 /** Cloudflare D1's database and sessions: prepare(sql).bind(...values).all() → { results }. */
 export type D1Client = {
-  prepare(sql: string): { bind(...values: DriverValue[]): { all(): Promise<{ results: unknown[] }> } };
+  prepare(sql: string): { bind(...values: DriverValue[]): { all: () => Promise<{ results: unknown[] }> } };
 };
 /** @libsql/client's Client and Transaction: execute({ sql, args }) → { rows }. */
 export type LibsqlClient = {
@@ -110,7 +110,7 @@ export type TursoClient = {
   /** Postgres.js's transaction has a prepare(name) of any type too; exec() tells Turso's apart. */
   exec(sql: string): Promise<unknown>;
 };
-type TursoStatement = { all(...params: DriverValue[]): Promise<unknown[]> };
+interface TursoStatement { all(...params: DriverValue[]): Promise<unknown[]> }
 /** The sqlite3 package's callback Database: all(sql, params, callback). */
 export type Sqlite3Client = {
   all(sql: string, params: DriverValue[], callback: (error: Error | null, rows: DriverValue[]) => void): unknown;
@@ -118,7 +118,7 @@ export type Sqlite3Client = {
 /** The sqlite package's promise Database: all(sql, params) → rows. */
 export type SqlitePromiseClient = {
   all(sql: string, params?: DriverValue): Promise<unknown[]>;
-  getDatabaseInstance(): unknown;
+  getDatabaseInstance: () => unknown;
 };
 
 /**
@@ -131,11 +131,11 @@ export type DrizzleDatabase<C> = Readonly<{ $client: C }>;
  * which `run` runs on through the transaction's own connection. Each dialect's is known by what
  * only it has: `setTransaction()` on Postgres, `get()` and `all()` on SQLite, neither on MySQL.
  */
-export type DrizzlePgTransaction = { rollback(): never; setTransaction(config: DriverValue): Promise<void> };
-export type DrizzleMysqlTransaction = { rollback(): never; execute(query: DriverValue): unknown; setTransaction?: never; get?: never };
-export type DrizzleSqliteTransaction = { rollback(): never; get(query: DriverValue): unknown; all(query: DriverValue): unknown };
+export type DrizzlePgTransaction = { rollback: () => never; setTransaction(config: DriverValue): Promise<void> };
+export type DrizzleMysqlTransaction = { rollback: () => never; execute(query: DriverValue): unknown; setTransaction?: never; get?: never };
+export type DrizzleSqliteTransaction = { rollback: () => never; get(query: DriverValue): unknown; all(query: DriverValue): unknown };
 /** A transaction of a synchronous SQLite driver's Drizzle database, whose `all()` returns the rows themselves. */
-export type DrizzleSyncSqliteTransaction = { rollback(): never; get(query: DriverValue): unknown; all(query: DriverValue): unknown[] };
+export type DrizzleSyncSqliteTransaction = { rollback: () => never; get(query: DriverValue): unknown; all(query: DriverValue): unknown[] };
 /** Every Postgres client `run` takes, or a transaction, savepoint or connection taken from one. */
 export type PostgresClient = PgQueryClient | NeonHttpClient | UnsafeClient | CallableClient | SlonikClient | DrizzleDatabase<PgQueryClient | NeonHttpClient | UnsafeClient | CallableClient> | DrizzlePgTransaction;
 /** Every MySQL client `run` takes, or a transaction or connection taken from one. */
@@ -192,7 +192,7 @@ export type Inputs = Readonly<Record<string, Readonly<{ type: EngineType; schema
 
 type ClientMembers = Record<string, unknown>;
 type DriverRows = PromiseLike<unknown[]>;
-type BunProtocol = { unsafe: (text: string, params: unknown[]) => DriverRows };
+interface BunProtocol { unsafe: (text: string, params: unknown[]) => DriverRows }
 
 const inspectClient = <Protocol = object>(client: unknown): ClientMembers & Protocol =>
   // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- Inspect native members and describe the calling protocol selected for their receiver.

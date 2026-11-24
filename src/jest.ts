@@ -10,7 +10,7 @@
 import { createHash } from "node:crypto";
 import { sqlModuleSync } from "./bridge.ts";
 
-type Options = { supportsStaticESM: boolean; configString: string };
+interface Options { supportsStaticESM: boolean; configString: string }
 
 // The module the cache key was computed from, for the `process` call that follows it.
 const built = new Map<string, string>();

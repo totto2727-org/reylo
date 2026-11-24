@@ -20,8 +20,8 @@ import { ROOT, languageServer } from "./helpers.ts";
 // Runs as an editor runs it, `tsc --lsp --stdio` with runExternalCode on, over a SQLite project, so
 // No server is needed.
 
-type Position = { line: number; character: number };
-type Range = { start: Position; end: Position };
+interface Position { line: number; character: number }
+interface Range { start: Position; end: Position }
 
 const project = async function (): Promise<string> {
   const temporary = await mkdtemp(join(tmpdir(), "reylo-definition-"));

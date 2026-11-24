@@ -28,7 +28,7 @@ export type QueryTrace = {
 };
 
 type Channel = Readonly<{ hasSubscribers: boolean }>;
-type Tracing = {
+interface Tracing {
   readonly start: Channel;
   readonly end: Channel;
   readonly asyncStart: Channel;
@@ -36,7 +36,7 @@ type Tracing = {
   readonly error: Channel;
   traceSync<T>(fn: () => T, context: QueryTrace): T;
   tracePromise<T>(fn: () => Promise<T>, context: QueryTrace): Promise<T>;
-};
+}
 
 const tracing = ((): Tracing | undefined => {
   try {

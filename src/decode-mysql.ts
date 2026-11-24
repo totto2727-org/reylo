@@ -38,7 +38,7 @@ const driverProtocol = <Protocol>(client: DriverRow): Protocol =>
 /** Options mysql2 ORs with the app's (a BIGINT and a date as text) and the row's shape, which the query's own replace. */
 const MYSQL2_OPTIONS = { supportBigNumbers: true, bigNumberStrings: true, dateStrings: true, rowsAsArray: false, nestTables: false };
 
-type Mysql2Field = { type: string; string(encoding?: string): string | null; buffer(): Uint8Array | null };
+interface Mysql2Field { type: string; string(encoding?: string): string | null; buffer: () => Uint8Array | null }
 
 /**
  * Reylo's typeCast: a DECIMAL as its text and a JSON value parsed from its bytes (both are
@@ -66,7 +66,7 @@ const mysql2Cast = function (f: Mysql2Field, next: () => unknown): unknown {
 };
 
 /** A column's protocol type and fraction digits, as mysql2's fields give them. */
-type Mysql2Column = { name: string; columnType: number; decimals: number };
+interface Mysql2Column { name: string; columnType: number; decimals: number }
 const DATETIME = 12; const TIMESTAMP = 7; const TIME = 11;
 
 /**
@@ -84,15 +84,15 @@ const wallClock = function (s: string, decimals: number, type: number): string {
 };
 
 /** The app's settings, where mysql2 shows them: a promise Pool's, Connection's or PoolConnection's. */
-type Mysql2Config = { typeCast?: unknown; decimalNumbers?: boolean; jsonStrings?: boolean };
-type Mysql2Protocol = {
+interface Mysql2Config { typeCast?: unknown; decimalNumbers?: boolean; jsonStrings?: boolean }
+interface Mysql2Protocol {
   connection?: { config?: Mysql2Config };
   execute: (
     options: typeof MYSQL2_OPTIONS & { sql: string; typeCast: true | typeof mysql2Cast },
     values: unknown[],
   ) => PromiseLike<[DriverRow[] | object, Mysql2Column[] | null | undefined]>;
   pool?: { config?: { connectionConfig?: Mysql2Config } };
-};
+}
 const configOf = (client: Mysql2Protocol): Mysql2Config | undefined => client.pool?.config?.connectionConfig ?? client.connection?.config;
 
 /**
@@ -196,17 +196,17 @@ const MARIADB_OPTIONS = {
 };
 
 /** A GEOMETRY's bytes, where mariadb would give GeoJSON; only for a statement whose columns hold one, since a typeCast sends every value through mariadb's slower path. */
-const mariadbGeometry = (column: { type: string; buffer(): unknown }, next: () => unknown) => (column.type === "GEOMETRY" ? column.buffer() : next());
+const mariadbGeometry = (column: { type: string; buffer: () => unknown }, next: () => unknown) => (column.type === "GEOMETRY" ? column.buffer() : next());
 
-type MariadbColumn = { type?: string; columnType?: number; name?: string | (() => string); isSet?: () => boolean };
+interface MariadbColumn { type?: string; columnType?: number; name?: string | (() => string); isSet?: () => boolean }
 type MariadbResult = (DriverRow[] | object) & { meta?: MariadbColumn[] };
-type MariadbProtocol = {
+interface MariadbProtocol {
   query: (
     options: Omit<typeof MARIADB_OPTIONS, "typeCast"> & { sql: string; typeCast: typeof mariadbGeometry | undefined },
     values: unknown[],
     callback: (error: Error | null, rows: MariadbResult, meta?: MariadbColumn[]) => void,
   ) => { then?: (resolve: (rows: MariadbResult) => void, reject: (error: unknown) => void) => unknown } | null | undefined;
-};
+}
 
 /** The fixes the module's kinds call for, for a driver that tells each type by its value. */
 const columnFixes = function columnFixes(columns: Columns | undefined): (Readonly<[string, Fix]>)[] {
@@ -261,7 +261,7 @@ export const mariadb = async function mariadb(client: DriverRow, text: string, v
 // ---------------------------------------------------------------------------------------------
 // PlanetScale 1.x
 
-type PlanetscaleField = { type: string; charset?: number };
+interface PlanetscaleField { type: string; charset?: number }
 /** PlanetScale hands each value over as a string of bytes, one character each. */
 const bytesOf = (s: string) => {
   const out = new Uint8Array(s.length);

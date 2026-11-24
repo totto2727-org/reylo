@@ -37,7 +37,7 @@ const checked = new WeakMap<object, number>();
 // On every page that ran a query (examples/nextjs, Next.js 16.4). It is reached through
 // `globalThis`, typed here, since a project that type-checks Reylo's sources need not have the
 // DOM's types or Node's, which declare it (the labs' type checks failed with "Cannot find name").
-const clock = (globalThis as unknown as { performance: { now(): number } }).performance;
+const clock = (globalThis as unknown as { performance: { now: () => number } }).performance;
 
 /** Whether `query` is due for a check now. */
 export const due = function due(query: object, now = clock.now()): boolean {

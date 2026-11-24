@@ -14,10 +14,10 @@ import { releaseConnections, tooling } from "./engine-package.ts";
 import { matchesUndefined } from "./native-predicates.ts";
 
 /** What Vitest hands a plugin's `configureVitest`, as far as it is used here. */
-type VitestContext = {
+interface VitestContext {
   defineCacheKeyGenerator?(generate: (module: { id: string }) => false | undefined): void;
   experimental_defineCacheKeyGenerator?(generate: (module: { id: string }) => false | undefined): void;
-};
+}
 
 export default function reylo() {
   return {

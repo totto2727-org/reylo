@@ -16,7 +16,7 @@ export type CatalogFunction = {
 };
 export type Catalog = { tables: Table[]; functions: CatalogFunction[]; types: string[] };
 
-type Queries = { tables: string; functions?: string; types?: string };
+interface Queries { tables: string; functions?: string; types?: string }
 
 /** Each database's catalog queries: rows of `[table, column, type, nullable]`, `[name, aggregate, returns[], rows]` and `[type]`. */
 export const CATALOG_QUERIES: Record<Dialect, Queries> = {

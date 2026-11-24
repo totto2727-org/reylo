@@ -395,7 +395,7 @@ export const postgresInterval = (text: string): string => {
     : durationText.replaceAll(/(?<magnitude>\d+(?:[.,]\d+)?)(?<unit>[YMWDHSymwdhs])/gu, "-$<magnitude>$<unit>");
 };
 
-type BufferClass = { from(data: string, encoding: string): Uint8Array; isBuffer(v: unknown): boolean };
+interface BufferClass { from(data: string, encoding: string): Uint8Array; isBuffer(v: unknown): boolean }
 const NodeBuffer = (globalThis as { Buffer?: BufferClass }).Buffer;
 // TextDecoder is a global in every runtime Reylo supports; it is typed here rather than through
 // The DOM lib or Node's, which a project that type-checks Reylo's sources need not have.

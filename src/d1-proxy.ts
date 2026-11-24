@@ -14,15 +14,15 @@
 import { pathToFileURL } from "node:url";
 import { hasFunctionType, matchesUndefined } from "./native-predicates.ts";
 
-type D1Statement = { bind(...values: unknown[]): D1Statement; all(): Promise<{ results: unknown[] }>; run(): Promise<unknown> };
-type D1 = { prepare(sql: string): D1Statement; batch(statements: D1Statement[]): Promise<unknown> };
+interface D1Statement { bind(...values: unknown[]): D1Statement; all: () => Promise<{ results: unknown[] }>; run: () => Promise<unknown> }
+interface D1 { prepare(sql: string): D1Statement; batch(statements: D1Statement[]): Promise<unknown> }
 type Message = { kind: "schema"; ddl: string[] } | { kind: "explain"; id: number; sql: string; params: number } | { kind: "close" };
 
 const send = (message: object): boolean | undefined => process.send?.(message);
 const [wrangler, dir] = process.argv.slice(2);
 process.chdir(dir!);
 const { getPlatformProxy } = (await import(pathToFileURL(wrangler!).href)) as {
-  getPlatformProxy(options: { persist: boolean; remoteBindings: boolean }): Promise<{ env: Record<string, unknown>; dispose(): Promise<void> }>;
+  getPlatformProxy(options: { persist: boolean; remoteBindings: boolean }): Promise<{ env: Record<string, unknown>; dispose: () => Promise<void> }>;
 };
 const proxy = await getPlatformProxy({ persist: false, remoteBindings: false });
 const isD1 = (v: unknown): v is D1 => hasFunctionType((v as D1 | undefined)?.prepare) && hasFunctionType((v as D1).batch);

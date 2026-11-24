@@ -16,10 +16,10 @@ import { withReylo } from "#reylo-source/next.ts";
 // That check off and runs it with the flag in compiler.runAfterProductionCompile (src/next.ts).
 const REPO = join(import.meta.dirname, "..");
 
-type Built = {
+interface Built {
   typescript?: { ignoreBuildErrors?: boolean; tsconfigPath?: string };
   compiler?: { runAfterProductionCompile?: (metadata: { projectDir: string; distDir: string }) => Promise<void> };
-};
+}
 /** The hook withReylo leaves in the config it returns, which next build runs after the compile. */
 const afterCompile = (config: Built) => (withReylo(config) as Built).compiler!.runAfterProductionCompile!;
 

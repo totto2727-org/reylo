@@ -86,7 +86,7 @@ test("the representation, value by value", () => {
 
 // oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
 test("interval: an ISO 8601 duration with its sign in front, which Temporal reads, and each part signed where the parts' signs differ", () => {
-  const {Temporal} = (globalThis as unknown as { Temporal: { Duration: { from(text: string): { toString(): string } } } });
+  const {Temporal} = (globalThis as unknown as { Temporal: { Duration: { from(text: string): { toString: () => string } } } });
   // Postgres's text in IntervalStyle postgres, Reylo's value, and Postgres's own in iso_8601, as Postgres 18 writes them.
   Iterator.from([
     ["1 mon", "P1M", "P1M"],
@@ -123,7 +123,7 @@ test("interval: an ISO 8601 duration with its sign in front, which Temporal read
 
 // oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
 test("date and timestamp: a year outside 0000 to 9999 in ISO 8601's extended form, as timestamptz's, which Temporal reads and a parameter takes back", () => {
-  type PlainFrom = { from(text: string): { toString(): string } };
+  type PlainFrom = { from(text: string): { toString: () => string } };
   const {Temporal} = (globalThis as unknown as { Temporal: { PlainDate: PlainFrom; PlainDateTime: PlainFrom } });
   const date = textDecoder("date");
   const timestamp = textDecoder("timestamp");
@@ -177,7 +177,7 @@ test("date and timestamp: a year outside 0000 to 9999 in ISO 8601's extended for
 
 // oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
 test("timestamptz: the instant's ISO 8601 text in UTC, the server's fraction kept, which new Date(text) gets wrong for BC, year 1 and offsets with seconds", () => {
-  const {Temporal} = (globalThis as unknown as { Temporal: { Instant: { from(text: string): { toString(): string; epochNanoseconds: bigint } } } });
+  const {Temporal} = (globalThis as unknown as { Temporal: { Instant: { from(text: string): { toString: () => string; epochNanoseconds: bigint } } } });
   Iterator.from([
     ["2026-10-20 03:03:00.123456-07", "2026-10-20T10:03:00.123456Z"],
     ["2026-10-20 10:00:00+00", "2026-10-20T10:00:00Z"],

@@ -45,7 +45,7 @@ export type Json = string | number | boolean | null | { [key: string]: Json | un
  */
 export type AsJson<T> = T extends bigint
   ? number
-  : T extends Date | Uint8Array | { toJSON(): string }
+  : T extends Date | Uint8Array | { toJSON: () => string }
   ? string
   : T extends Readonly<(infer U)[]>
     ? AsJson<U>[]

@@ -16,7 +16,7 @@ import { nativeDriverDate, promiseDriverStub } from "./helpers.ts";
 
 // Each fake client records what execute handed it and answers the way its driver does; the
 // Driver behaviour each one copies was checked against the real package (lab/driver-matrix).
-type Call = { method: string; args: unknown[] };
+interface Call { method: string; args: unknown[] }
 const pg: QueryModule<"postgres"> = { dialect: "postgres", sql: "select :id::int as id, :name as name, :id as again", params: ["id", "name"] };
 const my: QueryModule<"mysql"> = { dialect: "mysql", sql: "select :id as id, :name as name, :id as again", params: ["id", "name"] };
 const lite: QueryModule<"sqlite"> = { dialect: "sqlite", sql: "select :id as id, :name as name, :id as again", params: ["id", "name"] };

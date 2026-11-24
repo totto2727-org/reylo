@@ -20,18 +20,18 @@ import type { DuckdbDescribed, DuckdbType, EngineIo } from "./engine-core.ts";
 import { matchesUndefined } from "./native-predicates.ts";
 
 /** The slice of `@duckdb/node-api` the type check uses. */
-type NodeApi = {
+interface NodeApi {
   DuckDBInstance: { create(path?: string, options?: Record<string, string>): Promise<Instance> };
   DuckDBTypeId: Record<number, string>;
   StatementType: Record<number, string>;
-};
-type Instance = { connect(): Promise<DbConnection>; closeSync(): void };
-type DbConnection = {
+}
+interface Instance { connect: () => Promise<DbConnection>; closeSync: () => void }
+interface DbConnection {
   prepare(sql: string): Promise<Prepared>;
-  runAndReadAll(sql: string, values?: unknown[]): Promise<{ getRowsJson(): unknown[][] }>;
-  closeSync(): void;
-};
-type Prepared = {
+  runAndReadAll(sql: string, values?: unknown[]): Promise<{ getRowsJson: () => unknown[][] }>;
+  closeSync: () => void;
+}
+interface Prepared {
   statementType: number;
   parameterCount: number;
   parameterName(i: number): string;
@@ -40,12 +40,12 @@ type Prepared = {
   columnCount: number;
   columnName(i: number): string;
   columnType(i: number): NodeType;
-  destroySync?(): void;
-};
-type NodeType = {
+  destroySync?: () => void;
+}
+interface NodeType {
   typeId: number;
   alias?: string;
-  toString(): string;
+  toString: () => string;
   width?: number;
   scale?: number;
   valueType?: NodeType;
@@ -56,7 +56,7 @@ type NodeType = {
   memberTags?: string[];
   memberTypes?: NodeType[];
   values?: string[];
-};
+}
 
 /** Why the type check cannot read a DuckDB database: no `@duckdb/node-api` in the project. */
 export class NoDuckdbDriver extends Error {

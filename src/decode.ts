@@ -535,14 +535,14 @@ export function bunRows(rows: unknown[], columns: Columns | undefined): unknown[
 // Each parameter appears once in a statement (upstream engine/core/src/lex.rs), so the statement is the
 // Tag's template as it stands: its text between the placeholders, and the values in their order.
 
-type SlonikTypeParser = { name: string; parse(value: string): unknown };
-type SlonikQuery = { typeParsers?: unknown };
-type SlonikTag = { unsafe(strings: TemplateStringsArray, ...values: unknown[]): SlonikQuery };
-type SlonikModule = { createSqlTag(configuration: { typeParsers: SlonikTypeParser[] }): SlonikTag };
-type SlonikConfiguration = {
+interface SlonikTypeParser { name: string; parse(value: string): unknown }
+interface SlonikQuery { typeParsers?: unknown }
+interface SlonikTag { unsafe(strings: TemplateStringsArray, ...values: unknown[]): SlonikQuery }
+interface SlonikModule { createSqlTag(configuration: { typeParsers: SlonikTypeParser[] }): SlonikTag }
+interface SlonikConfiguration {
   interceptors?: { transformRow?: unknown; transformRowAsync?: unknown }[];
   typeParsers?: SlonikTypeParser[];
-};
+}
 type SlonikProtocol = {
   clientConfiguration?: SlonikConfiguration;
   configuration?: SlonikConfiguration;
@@ -571,7 +571,7 @@ const ARRAY_KIND_SUFFIX = "[]";
 let slonikModule: SlonikModule | undefined;
 const slonikTags = new Map<string, SlonikTag>();
 
-type NodeProcess = { argv?: string[]; cwd(): string; getBuiltinModule?(id: string): { createRequire(from: string): (id: string) => unknown } | undefined };
+interface NodeProcess { argv?: string[]; cwd: () => string; getBuiltinModule?(id: string): { createRequire(from: string): (id: string) => unknown } | undefined }
 
 /**
  * The app's own `slonik`, the package its pool came from, loaded the first time a Slonik client is
