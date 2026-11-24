@@ -1,10 +1,12 @@
 // oxlint-disable-next-line rules/no-node-imports, vitest/no-import-node-test -- Nub runs this suite with Node's test runner and provides the runtime used by the SQLite integration tests.
 import { test } from "node:test";
+// oxlint-disable-next-line rules/no-node-imports -- Nub's Node suite uses native assertions for driver, CLI, and protocol results.
 import assert from "node:assert/strict";
 // oxlint-disable-next-line rules/no-node-imports -- Run Vitest watch as a real subprocess and stop it at teardown.
 import { spawn } from "node:child_process";
 // oxlint-disable-next-line rules/no-node-imports -- Build and read the fixture projects used by the test runners.
 import { access, mkdir, mkdtemp, readFile, symlink, writeFile } from "node:fs/promises";
+// oxlint-disable-next-line rules/no-node-imports -- Exercise the native SQLite driver used by Reylo's Node runtime.
 import { DatabaseSync } from "node:sqlite";
 import { tmpdir } from "node:os";
 import { join } from "node:path";

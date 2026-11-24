@@ -1,6 +1,7 @@
 // Copyright IBM Corp. 2014, 2025
 // SPDX-License-Identifier: MPL-2.0
 // Shape adapter only. Every expected value comes from the pinned Go oracle.
+// oxlint-disable-next-line rules/no-node-imports -- Nub's Node suite uses native assertions for driver, CLI, and protocol results.
 import assert from 'node:assert/strict';
 import type { Diagnostic, Pos, Range } from '../../src/hclsyntax/types.ts';
 

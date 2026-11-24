@@ -1,5 +1,6 @@
 // oxlint-disable-next-line rules/no-node-imports, vitest/no-import-node-test -- Nub runs this suite with Node's test runner and provides the runtime used by the SQLite integration tests.
 import { test } from "node:test";
+// oxlint-disable-next-line rules/no-node-imports -- Nub's Node suite uses native assertions for driver, CLI, and protocol results.
 import assert from "node:assert/strict";
 import { docComment, leadingComment, statementAfter } from "../src/doc-comment.ts";
 import type { Dialect } from "../src/engine.ts";
