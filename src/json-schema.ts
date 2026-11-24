@@ -8,8 +8,8 @@ import { hasObjectType, matchesBoolean, matchesNull, matchesNumber, matchesStrin
 // `unevaluatedProperties`, the dynamic keywords), so none of those reach this file. A format is
 // Asserted, as the decision of 2026-10-19 says; a format this file has no rule for checks nothing.
 
-type Schema = boolean | { readonly [key: string]: unknown };
-type Object_ = { readonly [key: string]: unknown };
+type Schema = boolean | Readonly<{ [key: string]: unknown }>;
+type Object_ = Readonly<{ [key: string]: unknown }>;
 
 /** Why a value fails a schema: the place in the value, as a JSON Pointer, and what it breaks. */
 export type Failure = { path: string; message: string };
