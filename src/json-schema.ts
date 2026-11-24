@@ -43,7 +43,7 @@ export const withDefaults = function withDefaults(schema: Schema, value: unknown
     Object.entries(properties).forEach(([key, sub]) => {
       if (! Object.hasOwn(o, key) && !matchesNull(sub) && hasObjectType(sub) && "default" in sub) {o[key] = cloneJson((sub).default);}
     });
-    const patterns = Object.entries((s.patternProperties ?? {}) as Record<string, Schema>).map(([p, sub]) => [regex(p), sub] as const);
+    const patterns = Object.entries((s.patternProperties ?? {}) as Record<string, Schema>).map(([key, sub]) => [regex(key), sub] as const);
     Iterator.from(Object.keys(o)).forEach((key) => {
       let named = false;
       if (Object.hasOwn(properties, key)) {
@@ -151,7 +151,7 @@ function check(schema: Schema, value: unknown, path: string, out: Failure[]): Ev
       }
     }
     const properties = (s.properties ?? {}) as Record<string, Schema>;
-    const patterns = Object.entries((s.patternProperties ?? {}) as Record<string, Schema>).map(([p, sub]) => [regex(p), sub] as const);
+    const patterns = Object.entries((s.patternProperties ?? {}) as Record<string, Schema>).map(([key, sub]) => [regex(key), sub] as const);
     for (const key of keys) {
       const at = `${path}/${pointer(key)}`;
       let named = false;

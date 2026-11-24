@@ -94,7 +94,7 @@ const built = async function (root: string, url: string, name: string, sql: stri
 /** Rows compared by value: a driver's own row prototype and a Buffer's are not Reylo's to set. No value Reylo returns is a Date. */
 const plain = (v: unknown): unknown => {
   if (v instanceof Date) {throw new assert.AssertionError({ message: `a Date in Reylo's rows: ${v.toISOString()}` });}
-  return v instanceof Uint8Array ? { bytes: [...v] } : Array.isArray(v) ? v.map(plain) : v !== null && typeof v === "object" ? Object.fromEntries(Object.entries(v).map(([k, x]) => [k, plain(x)])) : v;
+  return v instanceof Uint8Array ? { bytes: [...v] } : Array.isArray(v) ? v.map(plain) : v !== null && typeof v === "object" ? Object.fromEntries(Object.entries(v).map(([key, value]) => [key, plain(value)])) : v;
 };
 
 // oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.

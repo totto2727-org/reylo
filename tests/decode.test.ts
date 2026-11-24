@@ -129,7 +129,7 @@ const database = function () {
 type Db = ReturnType<typeof database>;
 
 /** Rows compared by value, binary data by its bytes (a Buffer is a Uint8Array, with its own prototype). */
-const bytes = (v: unknown): unknown => (v instanceof Uint8Array ? { bytes: [...v] } : Array.isArray(v) ? v.map(bytes) : v !== null && typeof v === "object" && !(v instanceof Date) ? Object.fromEntries(Object.entries(v).map(([k, x]) => [k, bytes(x)])) : v);
+const bytes = (v: unknown): unknown => (v instanceof Uint8Array ? { bytes: [...v] } : Array.isArray(v) ? v.map(bytes) : v !== null && typeof v === "object" && !(v instanceof Date) ? Object.fromEntries(Object.entries(v).map(([key, value]) => [key, bytes(value)])) : v);
 const same = (actual: unknown, expected: unknown): void => assert.deepEqual(bytes(actual), bytes(expected));
 
 interface Config { text: string; values?: unknown[]; types?: { getTypeParser(oid: number, format?: string): Parser }; rowMode?: string }

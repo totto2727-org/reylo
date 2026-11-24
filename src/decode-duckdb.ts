@@ -110,8 +110,8 @@ async function loadNodeApi(c: DuckdbClient): Promise<Api> {
     cache = proc?.getBuiltinModule?.("node:module")?.createRequire(`${proc.cwd()}/`).cache;
   } catch {}
   const loaded: Api[] = [];
-  for (const [path, m] of Object.entries(cache ?? {})) {
-    const exports = NODE_API_ENTRY.test(path) ? (m?.exports as Api | undefined) : undefined;
+  for (const [path, value] of Object.entries(cache ?? {})) {
+    const exports = NODE_API_ENTRY.test(path) ? (value?.exports as Api | undefined) : undefined;
     if (matchesUndefined(exports?.DuckDBConnection)) {continue;}
     if (classes.includes(exports.DuckDBConnection)) {return exports;}
     loaded.push(exports);

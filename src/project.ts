@@ -328,9 +328,9 @@ export const resolveProject = function resolveProject(engine: Engine | MissingEn
         const encoded = inUserinfo(parts);
         const build = (fresh: boolean): { url: string } | { error: string } => {
           let built = "";
-          for (const [i, part] of parts.entries()) {
+          for (const [index, part] of parts.entries()) {
             if ("text" in part) {
-              built += texts[i];
+              built += texts[index];
               continue;
             }
             const out = commandOutput(part.command, root, shellEnv, fresh);

@@ -70,7 +70,7 @@ const write = function write(v: unknown): string {
   if (Array.isArray(v)) {return `[${v.map(write).join(",")}]`;}
   if (isRecord(v)) {
     return `{${Object.entries(v)
-      .map(([k, x]) => `${JSON.stringify(k)}:${write(x)}`)
+      .map(([key, value]) => `${JSON.stringify(key)}:${write(value)}`)
       .join(",")}}`;
   }
   return JSON.stringify(v);

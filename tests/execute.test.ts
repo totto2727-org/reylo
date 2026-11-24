@@ -922,7 +922,7 @@ const durableObjectSql = function durableObjectSql(db: DatabaseSync) {
       const st = db.prepare(sql);
       st.setReadBigInts(true);
       const rows = st.all(...(bindings as never[])).map((row) =>
-        Object.fromEntries(Object.entries(row).map(([k, v]) => [k, typeof v === "bigint" ? Number(v) : (v instanceof Uint8Array ? v.slice().buffer : v)])),
+        Object.fromEntries(Object.entries(row).map(([key, value]) => [key, typeof value === "bigint" ? Number(value) : (value instanceof Uint8Array ? value.slice().buffer : value)])),
       );
       return { toArray: () => rows, columnNames: rows.length ? Object.keys(rows[0]!) : [] };
     },
