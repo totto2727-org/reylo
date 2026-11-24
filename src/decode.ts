@@ -217,8 +217,18 @@ class Pending {
 /** A value pg read in the binary format, which pg 8.23 cannot read (it corrupts an int8). */
 const BINARY = Symbol("binary");
 
+interface PgTypeTable {
+  getTypeParser: (oid: number, format?: string) => Decoder;
+}
+
+interface PgTypeObservation {
+  sawBinary: () => boolean;
+  sawPending: () => boolean;
+  table: PgTypeTable;
+}
+
 /** The decoder table for one query on a pg-family client, which never falls back to the client's own parsers. */
-const pgTypes = function (key: object) {
+const pgTypes = function (key: object): PgTypeObservation {
   const known = learnedOf(key);
   const observed = { binary: false, pending: false };
   const table = {
@@ -241,16 +251,42 @@ const pgTypes = function (key: object) {
 const refuseBinary = () =>
   new TypeError(`Reylo cannot read this pg client's results: it was set up with binary: true (or pg.defaults.binary), which pg 8 reads wrong (an int8 comes back as another number). Reylo decodes every value from the server's text; leave binary off.`);
 
-type PgResult = { rows: Record<string, unknown>[]; fields?: { name: string; dataTypeID: number }[] };
+interface PgField {
+  dataTypeID: number;
+  name: string;
+}
+
+interface PgRows<Row> {
+  fields?: PgField[] | null;
+  rows: Row[];
+}
+
+type PgRow = Record<string, unknown>;
+type CatalogRow = (string | null)[];
+type PgResult<Row> = PgRows<Row> | (Row[] & { fields?: PgField[] | null });
+type PgArguments = [request: object] | [text: string, values: unknown[], options?: object];
+type PgClient = Record<string, unknown> & {
+  $config?: { options?: { receive?: unknown } };
+  options?: { binary?: unknown };
+};
+
+const callPg = <Result>(client: PgClient, method: "query" | "result", args: PgArguments): PromiseLike<Result> =>
+  // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- Existing driver detection selects the pg protocol; each call describes the rows selected by its options.
+  (client[method] as (...values: PgArguments) => PromiseLike<Result>)(...args);
+
+const queryPg = <Result>(client: PgClient, ...args: PgArguments): PromiseLike<Result> =>
+  callPg<Result>(client, "query", args);
+
+const rowsOf = <Row>(result: PgResult<Row>): Row[] => Array.isArray(result) ? result : result.rows;
 
 /**
  * Runs the query with Reylo's table through `run`, then decodes the values of the types the
  * database created that Reylo met for the first time, by the module's columns or the catalog.
  */
-const pgFamily = async function (key: object, run: (types: object) => Promise<PgResult>, columns: Columns | undefined, load: Load): Promise<unknown[]> {
+const pgFamily = async function (key: object, run: (types: PgTypeTable) => PromiseLike<PgResult<PgRow>>, columns: Columns | undefined, load: Load): Promise<PgRow[]> {
   const types = pgTypes(key);
   const result = await run(types.table);
-  const rows = Array.isArray(result) ? (result as Record<string, unknown>[]) : result.rows;
+  const rows = rowsOf(result);
   if (types.sawBinary()) {throw refuseBinary();}
   if (!types.sawPending()) {return rows;}
   // Learned from the module's columns where the result has their fields, else from the catalog.
@@ -274,54 +310,60 @@ const pgFamily = async function (key: object, run: (types: object) => Promise<Pg
 /** A decoder table that keeps every value its text: the catalog's rows, whatever the app registered. */
 const asText = { getTypeParser: () => (x: string) => x };
 
+const objectQueryCatalog = (client: PgClient): Load => async (sql) => {
+  const result = await queryPg<PgRows<CatalogRow>>(client, { text: sql, rowMode: "array", types: asText });
+  return result.rows;
+};
+
 /**
  * Runs a Postgres statement on a client whose query() Reylo calls: pg's Client, PoolClient and
  * Pool, Neon's, @vercel/postgres's, pg-promise's database, tasks and transactions, PGlite and its
  * transactions, and Neon's neon(). Each is told apart by what it has.
  */
-export const queryPostgres = async function queryPostgres(c: AnyClient, text: string, values: unknown[], columns: Columns | undefined): Promise<unknown[]> {
+export const queryPostgres = async function queryPostgres(client: PgClient, text: string, values: unknown[], columns: Columns | undefined): Promise<unknown[]> {
   // Pg-promise formats the values into the text itself (reading $1 inside a string literal
   // Too) unless it is handed a { text, values } object, which it binds.
-  if (hasFunctionType(c.manyOrNone)) {return pgPromise(c, text, values, columns);}
+  if (hasFunctionType(client.manyOrNone)) {return pgPromise(client, text, values, columns);}
   // Pg's Client and PoolClient, Neon's, and @vercel/postgres's VercelClient.
-  if (hasFunctionType(c.getTypeParser)) {
-    if (c.binary === true) {throw refuseBinary();}
-    const load: Load = async (sql) => (await c.query({ text: sql, rowMode: "array", types: asText })).rows;
-    return pgFamily(c, (types) => c.query({ text, values, types }), columns, load);
+  if (hasFunctionType(client.getTypeParser)) {
+    if (client.binary === true) {throw refuseBinary();}
+    return pgFamily(client, (types) => queryPg<PgResult<PgRow>>(client, { text, values, types }), columns, objectQueryCatalog(client));
   }
   // PGlite and its transactions.
-  if (isPglite(c)) {return pglite(c, text, values, columns);}
+  if (isPglite(client)) {return pglite(client, text, values, columns);}
   // Pg's Pool, Neon's and @vercel/postgres's: query() checks a client out of the pool, and the
   // Table goes with the query, so a `connect` listener's parsers do not apply either.
-  if (hasFunctionType(c.connect) && hasFunctionType(c.Client)) {
-    if (c.options?.binary === true) {throw refuseBinary();}
-    const load: Load = async (sql) => (await c.query({ text: sql, rowMode: "array", types: asText })).rows;
-    return pgFamily(c, (types) => c.query({ text, values, types }), columns, load);
+  if (hasFunctionType(client.connect) && hasFunctionType(client.Client)) {
+    if (client.options?.binary === true) {throw refuseBinary();}
+    return pgFamily(client, (types) => queryPg<PgResult<PgRow>>(client, { text, values, types }), columns, objectQueryCatalog(client));
   }
   // Neon's neon() from 1.0: query(text, params, options) replaces Neon's whole table with the
   // Query's, and returns the fields with `fullResults`.
-  if (hasFunctionType(c.transaction)) {
-    const load: Load = async (sql) => (await c.query(sql, [], { arrayMode: true, fullResults: true, types: asText })).rows;
-    return pgFamily(c, (types) => c.query(text, values, { fullResults: true, arrayMode: false, types }), columns, load);
+  if (hasFunctionType(client.transaction)) {
+    const load: Load = async (sql) => {
+      const result = await queryPg<PgRows<CatalogRow>>(client, sql, [], { arrayMode: true, fullResults: true, types: asText });
+      return result.rows;
+    };
+    return pgFamily(client, (types) => queryPg<PgResult<PgRow>>(client, text, values, { fullResults: true, arrayMode: false, types }), columns, load);
   }
-  const result = await c.query(text, values);
-  return Array.isArray(result) ? result : result.rows;
+  const result = await queryPg<PgResult<PgRow>>(client, text, values);
+  return rowsOf(result);
 };
 
 // Pg-promise sends a { text, values, types } object to pg as it is, on the database, a task or a
 // Transaction. Its `receive` event runs on every result, Reylo's too, and may rewrite the rows: on
 // The database Reylo reads it from the options and refuses; a task exposes no options, so a
 // Receive that renamed the columns is caught by the rows' keys.
-async function pgPromise(db: AnyClient, text: string, values: unknown[], columns: Columns | undefined): Promise<unknown[]> {
+async function pgPromise(db: PgClient, text: string, values: unknown[], columns: Columns | undefined): Promise<unknown[]> {
   if (hasFunctionType(db.$config?.options?.receive)) {throw refuseReceive();}
-  const run = (query: object) => (hasFunctionType(db.result) ? db.result(query) : db.query(query));
+  const method = (): "query" | "result" => hasFunctionType(db.result) ? "result" : "query";
   const load: Load = async (sql) => {
-    const r = await run({ text: sql, rowMode: "array", types: asText });
-    return Array.isArray(r) ? r : r.rows;
+    const result = await callPg<PgResult<CatalogRow>>(db, method(), [{ text: sql, rowMode: "array", types: asText }]);
+    return rowsOf(result);
   };
   // A task's or transaction's connection is not reachable, so what Reylo learns is kept per object.
-  const rows = await pgFamily(db, (types) => run({ text, values, types }), columns, load);
-  const first = rows[0] as Record<string, unknown> | undefined;
+  const rows = await pgFamily(db, (types) => callPg<PgResult<PgRow>>(db, method(), [{ text, values, types }]), columns, load);
+  const first = rows[0];
   if (first && columns?.length && !columns.every(([name]) => Object.hasOwn(first, name))) {throw refuseReceive();}
   return rows;
 }
@@ -338,7 +380,7 @@ export const neonCallable = function neonCallable(c: AnyClient & ((...args: unkn
 // ---------------------------------------------------------------------------------------------
 // PGlite
 
-const isPglite = (client: AnyClient): boolean => hasFunctionType(client.query) && hasFunctionType(client.exec) && (hasFunctionType(client.refreshArrayTypes) || (hasFunctionType(client.rollback) && "closed" in client));
+const isPglite = (client: PgClient): boolean => hasFunctionType(client.query) && hasFunctionType(client.exec) && (hasFunctionType(client.refreshArrayTypes) || (hasFunctionType(client.rollback) && "closed" in client));
 
 /** The oids each statement's result had on its earlier runs, by the statement's text: PGlite's per-query table names only those. */
 const pgliteOids = new Map<string, Set<number>>();
@@ -346,21 +388,23 @@ const PGLITE_STATEMENTS = 2000;
 const builtinOids = [...Object.keys(SCALAR_OIDS).map(Number), ...ARRAY_OIDS.keys()];
 const keepText = (x: string): string => x;
 
-async function pglite(db: AnyClient, text: string, values: unknown[], columns: Columns | undefined): Promise<unknown[]> {
+async function pglite(db: PgClient, text: string, values: unknown[], columns: Columns | undefined): Promise<unknown[]> {
   // A statement met for the first time names every built-in type Reylo decodes, and every oid the
   // Instance has a parser for (its arrays, and the app's); a transaction has no table to read.
   let named = pgliteOids.get(text);
   const oids = named ?? new Set([...builtinOids, ...Object.keys(db.parsers ?? {}).map(Number)]);
   const parsers: Record<number, Decoder> = {};
   Iterator.from(oids).forEach((oid) => {parsers[oid] = builtinDecoder(oid) ?? keepText;});
-  const result = await db.query(text, values, { rowMode: "object", parsers });
-  const rows: Record<string, unknown>[] = result.rows;
-  const fields: Field[] = (result.fields ?? []).map((f: { name: string; dataTypeID: number }) => ({ name: f.name, oid: f.dataTypeID }));
+  const { rows, fields: columnMetadata } = await queryPg<PgRows<PgRow>>(db, text, values, { rowMode: "object", parsers });
+  const fields: Field[] = (columnMetadata ?? []).map(({ name, dataTypeID }) => ({ name, oid: dataTypeID }));
   // Created types, which the table kept as text, and an oid the table did not name, which went
   // Through the instance's parser.
   const after = fields.map((field, index) => [field, index] as const).filter(([f]) => f.oid >= FIRST_USER_OID || !oids.has(f.oid));
   if (after.length) {
-    const load: Load = async (sql) => (await db.query(sql, [], { rowMode: "array", parsers: { 25: keepText } })).rows;
+    const load: Load = async (sql) => {
+      const result = await queryPg<PgRows<CatalogRow>>(db, sql, [], { rowMode: "array", parsers: { 25: keepText } });
+      return result.rows;
+    };
     const decoders = await fieldDecoders(fields, columns, { key: db, load });
     const kinds = fields.map((field, index) => (columns && columns.length === fields.length ? columns[index]![1] : (builtin(field.oid)?.kind ?? learnedOf(db).get(field.oid)?.kind ?? "text")));
     Iterator.from(after).forEach(([f, i]) => {
