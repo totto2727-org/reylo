@@ -65,9 +65,9 @@ test("SQLite: untyped JSON values use Json through the content mapper, and JSON 
     `export const key: number = plain.Json.Json;`,
     "",
   ].join("\n"));
-  const r = spawnSync(process.execPath, [TSC, "-p", "tsconfig.json", "--runExternalCode", "--pretty", "false"], { cwd: root, encoding: "utf8" });
-  assert.equal(r.stdout + r.stderr, "");
-  assert.equal(r.status, 0);
+  const commandResult = spawnSync(process.execPath, [TSC, "-p", "tsconfig.json", "--runExternalCode", "--pretty", "false"], { cwd: root, encoding: "utf8" });
+  assert.equal(commandResult.stdout + commandResult.stderr, "");
+  assert.equal(commandResult.status, 0);
   const keep = `select coalesce(:doc::json, json('"kept"')) as doc, coalesce(:keep::nullable(json), json('"kept"')) as keep\n`;
   const declaration = (await declarations(root, { "keep.sql": keep }))["keep.sql"]!;
   assert.deepEqual(declaration.split("\n").filter((line) => /^export type (?:Params|Row) = /u.test(line) || line.startsWith("import type")), [WITH_JSON, "export type Params = { doc: Json; keep?: Json };", "export type Row = { doc: string; keep: string };"]);

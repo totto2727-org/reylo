@@ -175,9 +175,9 @@ function check(schema: Schema, value: unknown, path: string, out: Failure[]): Ev
     if (s.dependentSchemas && hasObjectType(s.dependentSchemas)) {
       for (const [key, sub] of Object.entries(s.dependentSchemas as Record<string, Schema>)) {
         if (!has(key)) {continue;}
-        const e = check(sub, value, path, out);
-        if (!e) {return undefined;}
-        e.forEach((k) => evaluated.add(k));
+        const result = check(sub, value, path, out);
+        if (!result) {return undefined;}
+        result.forEach((k) => evaluated.add(k));
       }
     }
   }
@@ -185,18 +185,18 @@ function check(schema: Schema, value: unknown, path: string, out: Failure[]): Ev
   // The applicators: a subschema's evaluated keys count only where it passed.
   if (Array.isArray(s.allOf)) {
     for (const sub of s.allOf as Schema[]) {
-      const e = check(sub, value, path, out);
-      if (!e) {return undefined;}
-      e.forEach((k) => evaluated.add(k));
+      const result = check(sub, value, path, out);
+      if (!result) {return undefined;}
+      result.forEach((k) => evaluated.add(k));
     }
   }
   if (Array.isArray(s.anyOf)) {
     let any = false;
     Iterator.from(s.anyOf as Schema[]).forEach((sub) => {
-      const e = check(sub, value, path, []);
-      if (e) {
+      const result = check(sub, value, path, []);
+      if (result) {
         any = true;
-        e.forEach((k) => evaluated.add(k));
+        result.forEach((k) => evaluated.add(k));
       }
     });
     if (!any) {return fail(out, path, "must match one of its `anyOf` schemas");}
@@ -204,23 +204,23 @@ function check(schema: Schema, value: unknown, path: string, out: Failure[]): Ev
   if (Array.isArray(s.oneOf)) {
     let matched = 0;
     Iterator.from(s.oneOf as Schema[]).forEach((sub) => {
-      const e = check(sub, value, path, []);
-      if (e) {
+      const result = check(sub, value, path, []);
+      if (result) {
         matched++;
-        e.forEach((k) => evaluated.add(k));
+        result.forEach((k) => evaluated.add(k));
       }
     });
     if (matched !== 1) {return fail(out, path, matched === 0 ? "must match one of its `oneOf` schemas" : "must match only one of its `oneOf` schemas, and matches more");}
   }
   if (!matchesUndefined(s.not) && check(s.not as Schema, value, path, [])) {return fail(out, path, "must not match its `not` schema");}
   if (!matchesUndefined(s.if)) {
-    const e = check(s.if as Schema, value, path, []);
-    const branch = e ? s.then : s.else;
-    if (e) {e.forEach((k) => evaluated.add(k));}
+    const result = check(s.if as Schema, value, path, []);
+    const branch = result ? s.then : s.else;
+    if (result) {result.forEach((k) => evaluated.add(k));}
     if (!matchesUndefined(branch)) {
-      const b = check(branch as Schema, value, path, out);
-      if (!b) {return undefined;}
-      b.forEach((k) => evaluated.add(k));
+      const currentResult = check(branch as Schema, value, path, out);
+      if (!currentResult) {return undefined;}
+      currentResult.forEach((k) => evaluated.add(k));
     }
   }
   if (isRecord(value)) {

@@ -54,9 +54,9 @@ const sqlFiles = async function (dir: string, include = INCLUDE, exclude: string
 /** The files among `files` that git ignores; none where git is missing or `dir` is not in a repository. */
 const gitIgnored = function (dir: string, files: string[]): Set<string> {
   if (!files.length) {return new Set();}
-  const r = spawnSync("git", ["check-ignore", "-z", "--stdin"], { cwd: dir, input: files.join("\0"), encoding: "utf8" });
+  const commandResult = spawnSync("git", ["check-ignore", "-z", "--stdin"], { cwd: dir, input: files.join("\0"), encoding: "utf8" });
   // 0: some are ignored; 1: none is; 128 or no status: not a repository, or no git.
-  return r.status === 0 ? new Set(r.stdout.split("\0").filter(Boolean).map((part) => resolve(dir, part))) : new Set();
+  return commandResult.status === 0 ? new Set(commandResult.stdout.split("\0").filter(Boolean).map((part) => resolve(dir, part))) : new Set();
 };
 
 /** The place of a byte offset and the line that holds it, with a caret under the span, as an editor underlines it. */

@@ -38,8 +38,8 @@ const check = function (url: string, engine: "sqlite" | "postgres", setup: (root
   Object.entries(FILES).forEach(([name, text]) => {writeFileSync(join(root, name), text);});
   // Each module is typed: an import that became `any` would leave its expected error unused.
   writeFileSync(join(root, "main.ts"), Object.keys(FILES).map((name, index) => `import q${index} from "./${name}";\n// @ts-expect-error a typed query has no such property\nq${index}.nope;\n`).join(""));
-  const r = spawnSync(process.execPath, [TSC, "-p", "tsconfig.json", "--runExternalCode", "--pretty", "false"], { cwd: root, encoding: "utf8", env: { ...process.env, DATABASE_URL: url } });
-  return (r.stdout + r.stderr).trim();
+  const commandResult = spawnSync(process.execPath, [TSC, "-p", "tsconfig.json", "--runExternalCode", "--pretty", "false"], { cwd: root, encoding: "utf8", env: { ...process.env, DATABASE_URL: url } });
+  return (commandResult.stdout + commandResult.stderr).trim();
 };
 
 const EXPECTED = [

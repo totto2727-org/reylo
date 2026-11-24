@@ -87,9 +87,9 @@ export const shortType = function shortType(type: string): string {
 export const catalog = function catalog(dialect: Dialect, tables: unknown[][], functions: unknown[][] = [], types: unknown[][] = []): Catalog {
   const byName = new Map<string, Table>();
   Iterator.from(tables as [string, string, string, unknown][]).forEach(([table, name, type, nullable]) => {
-    let t = byName.get(table);
-    if (!t) {byName.set(table, (t = { name: table, columns: [] }));}
-    t.columns.push({ name, type: shortType(String(type ?? "")), nullable: Boolean(Number(nullable) || nullable === true) });
+    let entry = byName.get(table);
+    if (!entry) {byName.set(table, (entry = { name: table, columns: [] }));}
+    entry.columns.push({ name, type: shortType(String(type ?? "")), nullable: Boolean(Number(nullable) || nullable === true) });
   });
   return {
     tables: [...byName.values()],
