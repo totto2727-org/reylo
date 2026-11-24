@@ -35,6 +35,11 @@ const equalBytes = function equalBytes(leftBytes: Uint8Array, rightBytes: Uint8A
   return leftBytes.length === rightBytes.length && leftBytes.every((v, index) => v === rightBytes[index]);
 };
 const sourceStart = 0;
+const firstLine = 1;
+const firstColumn = 1;
+const positionStep = 1;
+const braceStep = 1;
+const identifierTokenCount = 2;
 const maxAscii = 0x7F;
 const maxTwoByte = 0x7_FF;
 const maxThreeByte = 0xFF_FF;
@@ -82,9 +87,9 @@ const scanTokens = function (input: Uint8Array, filename: string, start: Pos, mo
     const bytes = data.subarray(from, to);
     Iterator.from(graphemeClusters(bytes)).forEach((cluster) => {
       if ((cluster.length === lfLength && cluster[0] === lineFeed) || (cluster.length === crlfLength && cluster[0] === carriageReturn && cluster[1] === lineFeed)) {
-        end.line++;
-        end.column = 1;
-      } else {end.column++;}
+        end.line += positionStep;
+        end.column = firstColumn;
+      } else {end.column += positionStep;}
     });
     pos = end;
     tokens.push({ type, bytes, range: { filename, start: begin, end } });
@@ -96,7 +101,7 @@ const scanTokens = function (input: Uint8Array, filename: string, start: Pos, mo
   let braces = 0;
   const token = (type: string): void => emit(type, s.ts, s.te);
   const selfToken = (): void => {
-    if (s.te - s.ts !== 1) {throw new Error('selfToken only works for single-character tokens');}
+    if (s.te - s.ts !== oneByte) {throw new Error('selfToken only works for single-character tokens');}
     const type = selfTokens[data[s.ts]!];
     if (!type) {throw new Error('Unrecognized scanner self token');}
     token(type);
@@ -109,14 +114,14 @@ const scanTokens = function (input: Uint8Array, filename: string, start: Pos, mo
     return true;
   };
   const end = (kind: 'next' | 'hold' | 'rewind'): void => {
-    if (kind === 'next') {s.te = s.p + 1;}
-    else if (kind === 'hold') { s.te = s.p; s.p--; }
-    else {s.p = s.te - 1;}
+    if (kind === 'next') {s.te = s.p + oneByte;}
+    else if (kind === 'hold') { s.te = s.p; s.p -= oneByte; }
+    else {s.p = s.te - oneByte;}
   };
   const lit = (type: string, kind: 'next' | 'hold' | 'rewind'): void => { end(kind); token(type); };
   const interp = (type: string, kind: 'next' | 'hold'): boolean => {
     lit(type, kind);
-    braces++;
+    braces += braceStep;
     retBraces.push(braces);
     if (heredocs.length) {heredocs.at(-1)!.startOfLine = false;}
     return call(tables.en_main);
@@ -129,7 +134,7 @@ const scanTokens = function (input: Uint8Array, filename: string, start: Pos, mo
   runRagel(data, tables, s, id => {
     /* oxlint-disable eslint/no-magic-numbers -- These numeric actions and cursor offsets mirror the upstream Ragel tables. */
     switch (id) {
-      case 0: { s.p--; break; }
+      case 0: { s.p -= oneByte; break; }
       case 1: { s.ts = 0; break; }
       case 2: { s.act = 0; break; }
       case 3: { s.ts = s.p; break; }
@@ -162,8 +167,8 @@ const scanTokens = function (input: Uint8Array, filename: string, start: Pos, mo
         if (doc.startOfLine && equalBytes(trimSpace(data.subarray(s.ts, s.te)), doc.marker)) {
           let nls = s.te - 1;
           const nle = s.te;
-          s.te--;
-          if (data[s.te - 1] === 13) { nls--; s.te--; }
+          s.te -= oneByte;
+          if (data[s.te - oneByte] === carriageReturn) { nls -= oneByte; s.te -= oneByte; }
           token('TokenCHeredoc');
           s.ts = nls;
           s.te = nle;
@@ -218,17 +223,17 @@ const scanTokens = function (input: Uint8Array, filename: string, start: Pos, mo
       case 65: { lit('TokenEllipsis', 'next'); break; }
       case 66: { lit('TokenFatArrow', 'next'); break; }
       case 67: { end('next'); selfToken(); break; }
-      case 68: { lit('TokenOBrace', 'next'); braces++; break; }
+      case 68: { lit('TokenOBrace', 'next'); braces += braceStep; break; }
       case 69: case 70: {
         s.te = s.p + 1;
         if (retBraces.length && retBraces.at(-1) === braces) {
           token('TokenTemplateSeqEnd');
-          braces--;
+          braces -= braceStep;
           retBraces.pop();
           return ret();
         }
         token(id === 69 ? 'TokenCBrace' : 'TokenTemplateSeqEnd');
-        braces--;
+        braces -= braceStep;
         break;
       }
       case 71: {
@@ -263,18 +268,20 @@ const scanTokens = function (input: Uint8Array, filename: string, start: Pos, mo
   return tokens;
 };
 
-export const lexConfig = function lexConfig(input: Uint8Array, filename: string, start: Pos = { line: 1, column: 1, byte: 0 }): { tokens: Token[]; diagnostics: Diagnostic[] } {
+const beginningOfFile = { line: firstLine, column: firstColumn, byte: sourceStart };
+
+export const lexConfig = function lexConfig(input: Uint8Array, filename: string, start: Pos = beginningOfFile): { tokens: Token[]; diagnostics: Diagnostic[] } {
   const tokens = scanTokens(input, filename, start, 'normal');
   return { tokens, diagnostics: checkInvalidTokens(tokens) };
 };
 export const lexExpression = lexConfig;
-export const lexTemplate = function lexTemplate(input: Uint8Array, filename: string, start: Pos = { line: 1, column: 1, byte: 0 }): { tokens: Token[]; diagnostics: Diagnostic[] } {
+export const lexTemplate = function lexTemplate(input: Uint8Array, filename: string, start: Pos = beginningOfFile): { tokens: Token[]; diagnostics: Diagnostic[] } {
   const tokens = scanTokens(input, filename, start, 'template');
   return { tokens, diagnostics: checkInvalidTokens(tokens) };
 };
 export const validIdentifier = function validIdentifier(value: string | Uint8Array): boolean {
   const tokens = scanTokens(typeof value === 'string' ? new TextEncoder().encode(value) : value, '', { line: 0, column: 0, byte: 0 }, 'ident');
-  return tokens.length === 2 && tokens[0]!.type === 'TokenIdent' && tokens[1]!.type === 'TokenEOF';
+  return tokens.length === identifierTokenCount && tokens[0]?.type === 'TokenIdent' && tokens[1]?.type === 'TokenEOF';
 };
 
 // Exact escape/literal segmentation from scan_string_lit.go, not string decoding.
@@ -306,6 +313,7 @@ export const scanStringLit = function scanStringLit(data: Uint8Array, quoted: bo
 export function checkInvalidTokens(tokens: Token[]): Diagnostic[] {
   const diagnostics: Diagnostic[] = [];
   const bitwiseReportLimit = 4;
+  const reportStep = 1;
   const pairedQuotePeriod = 2;
   const firstQuoteInPair = 0;
   const lastTrackedQuote = 2;
@@ -325,7 +333,7 @@ export function checkInvalidTokens(tokens: Token[]): Diagnostic[] {
         if (reported.bitwise < bitwiseReportLimit) {
           const suggestion = tok.type === 'TokenBitwiseAnd' ? ' Did you mean boolean AND ("&&")?' : tok.type === 'TokenBitwiseOr' ? ' Did you mean boolean OR ("||")?' : tok.type === 'TokenBitwiseNot' ? ' Did you mean boolean NOT ("!")?' : '';
           add('Unsupported operator', `Bitwise operators are not supported.${suggestion}`);
-          reported.bitwise++;
+          reported.bitwise += reportStep;
         }
         break;
       }
@@ -338,12 +346,12 @@ export function checkInvalidTokens(tokens: Token[]): Diagnostic[] {
       }
       case 'TokenBacktick': {
         if (reported.backtick % pairedQuotePeriod === firstQuoteInPair) {add('Invalid character', 'The "`" character is not valid. To create a multi-line string, use the "heredoc" syntax, like "<<EOT".');}
-        if (reported.backtick <= lastTrackedQuote) {reported.backtick++;}
+        if (reported.backtick <= lastTrackedQuote) {reported.backtick += reportStep;}
         break;
       }
       case 'TokenApostrophe': {
         if (reported.apostrophe % pairedQuotePeriod === firstQuoteInPair) {add('Invalid character', 'Single quotes are not valid. Use double quotes (") to enclose strings.');}
-        if (reported.apostrophe <= lastTrackedQuote) {reported.apostrophe++;}
+        if (reported.apostrophe <= lastTrackedQuote) {reported.apostrophe += reportStep;}
         break;
       }
       case 'TokenSemicolon': {
