@@ -91,7 +91,7 @@ const configOf = (m: AnyClient): Mysql2Config | undefined => m.pool?.config?.con
  * or replace mysql2's own reading (or cannot be read).
  */
 const needsCast = function (m: AnyClient, columns: Columns | undefined): boolean {
-  if (!columns || columns.some(([, kind]) => kind === "unknown" || kind.split("|").some((k) => k === "json" || k.startsWith("json")))) {return true;}
+  if (!columns || columns.some(([, kind]) => kind === "unknown" || kind.split("|").some((part) => part === "json" || part.startsWith("json")))) {return true;}
   const config = configOf(m);
   return matchesUndefined(config) || hasFunctionType(config.typeCast) || config.decimalNumbers === true || config.jsonStrings === true;
 };

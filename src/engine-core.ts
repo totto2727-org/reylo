@@ -89,7 +89,7 @@ async function fulfil(need: Need, io: EngineIo): Promise<Answer> {
       const d = await io.describe(need.sql);
       if ("kind" in d && d.kind === "duckdb") {return { describe: { statement: d.statement, params: d.params, columns: d.columns } };}
       if ("kind" in d) {return { mysql: { columns: d.columns, params: d.params } };}
-      return { describe: { params: d.params.map((p) => p.oid), columns: d.columns } };
+      return { describe: { params: d.params.map((parameter) => parameter.oid), columns: d.columns } };
     }
     return { rows: await io.query(need.sql, need.params) };
   } catch (e) {

@@ -134,14 +134,14 @@ const learn = async function (key: object, oids: Iterable<number>, load: Load): 
  */
 const fieldDecoders = async function (fields: Field[], columns: Columns | undefined, key: object, load: Load): Promise<Decoder[]> {
   const byColumn = columns && columns.length === fields.length ? columns : undefined;
-  const created = fields.filter((f) => f.oid >= FIRST_USER_OID);
+  const created = fields.filter((field) => field.oid >= FIRST_USER_OID);
   const known = learnedOf(key);
   if (byColumn) {created.forEach((f) => known.has(f.oid) || known.set(f.oid, { kind: byColumn[fields.indexOf(f)]![1], delim: byColumn[fields.indexOf(f)]![2] ?? "," }));}
   else if (created.length) {await learn(key, created.map((f) => f.oid), load);}
-  return fields.map((f) => {
-    const b = builtinDecoder(f.oid);
+  return fields.map((field) => {
+    const b = builtinDecoder(field.oid);
     if (b) {return b;}
-    const k = known.get(f.oid) ?? { kind: "text", delim: "," };
+    const k = known.get(field.oid) ?? { kind: "text", delim: "," };
     return textDecoder(k.kind, k.delim);
   });
 };
@@ -199,7 +199,7 @@ const pgFamily = async function (key: object, run: (types: object) => Promise<Pg
   if (types.sawBinary()) {throw refuseBinary();}
   if (!types.sawPending()) {return rows;}
   // Learned from the module's columns where the result has their fields, else from the catalog.
-  if (result.fields && !Array.isArray(result)) {await fieldDecoders(result.fields.map((f) => ({ name: f.name, oid: f.dataTypeID })), columns, key, load);}
+  if (result.fields && !Array.isArray(result)) {await fieldDecoders(result.fields.map((field) => ({ name: field.name, oid: field.dataTypeID })), columns, key, load);}
   const oids = new Set<number>();
   Iterator.from(rows).forEach((row) => {Object.values(row).forEach((v) => {if (v instanceof Pending) {oids.add(v.oid);}});});
   await learn(key, oids, load);
@@ -301,11 +301,11 @@ async function pglite(db: AnyClient, text: string, values: unknown[], columns: C
   const fields: Field[] = (result.fields ?? []).map((f: { name: string; dataTypeID: number }) => ({ name: f.name, oid: f.dataTypeID }));
   // Created types, which the table kept as text, and an oid the table did not name, which went
   // Through the instance's parser.
-  const after = fields.map((f, i) => [f, i] as const).filter(([f]) => f.oid >= FIRST_USER_OID || !oids.has(f.oid));
+  const after = fields.map((field, i) => [field, i] as const).filter(([f]) => f.oid >= FIRST_USER_OID || !oids.has(f.oid));
   if (after.length) {
     const load: Load = async (sql) => (await db.query(sql, [], { rowMode: "array", parsers: { 25: keepText } })).rows;
     const decoders = await fieldDecoders(fields, columns, db, load);
-    const kinds = fields.map((f, i) => (columns && columns.length === fields.length ? columns[i]![1] : (builtin(f.oid)?.kind ?? learnedOf(db).get(f.oid)?.kind ?? "text")));
+    const kinds = fields.map((field, i) => (columns && columns.length === fields.length ? columns[i]![1] : (builtin(field.oid)?.kind ?? learnedOf(db).get(field.oid)?.kind ?? "text")));
     Iterator.from(after).forEach(([f, i]) => {
       const decode = decoders[i]!;
       for (const row of rows) {
@@ -314,9 +314,9 @@ async function pglite(db: AnyClient, text: string, values: unknown[], columns: C
       }
     });
   }
-  if (!named || fields.some((f) => !named!.has(f.oid))) {
+  if (!named || fields.some((field) => !named!.has(field.oid))) {
     if (pgliteOids.size >= PGLITE_STATEMENTS) {pgliteOids.clear();}
-    pgliteOids.set(text, (named = new Set([...(named ?? []), ...fields.map((f) => f.oid)])));
+    pgliteOids.set(text, (named = new Set([...(named ?? []), ...fields.map((field) => field.oid)])));
   }
   return rows;
 }
@@ -348,7 +348,7 @@ export async function postgresJs(c: AnyClient, text: string, params: unknown[], 
   const decoders = await fieldDecoders(fields, columns, c, load);
   // The module's names, which a `transform.column` of the app's does not rename; a query defined by
   // Hand has the server's.
-  const names = columns && columns.length === fields.length ? columns.map(([name]) => name) : fields.map((f) => f.name);
+  const names = columns && columns.length === fields.length ? columns.map(([name]) => name) : fields.map((field) => field.name);
   const n = names.length;
   const out = new Array(raw.length);
   for (let r = 0; r < raw.length; r++) {
@@ -513,9 +513,9 @@ function slonikRows(rows: Record<string, unknown>[], fields: { name: string; dat
   if (!rows.length) {return rows;}
   const work: Readonly<(Readonly<[string, Kind, string?]>)[]> =
     columns ??
-    fields.map((f) => {
-      const b = builtin(f.dataTypeId);
-      return b ? ([f.name, b.kind, b.delim] as const) : ([f.name, "text"] as const);
+    fields.map((field) => {
+      const b = builtin(field.dataTypeId);
+      return b ? ([field.name, b.kind, b.delim] as const) : ([field.name, "text"] as const);
     });
   Iterator.from(rows).forEach((row) => {
     for (const [name, kind, delim] of work) {row[name] = slonikValue(kind, row[name], name, delim);}

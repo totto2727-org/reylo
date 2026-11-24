@@ -200,7 +200,7 @@ export class Session {
     // Newest by the time the entry records, since a copy (`cp -r`, `fs.cpSync`, a CI artifact) may
     // Reset the file's.
     let newest: { file: string; entry: Entry } | undefined;
-    Iterator.from(names.map((n) => join(dir, n))).forEach((file) => {
+    Iterator.from(names.map((name) => join(dir, name))).forEach((file) => {
       const other = readEntry(file);
       if (other && (!newest || (other.at ?? -Infinity) > (newest.entry.at ?? -Infinity))) {newest = { file, entry: other };}
     });
@@ -564,7 +564,7 @@ const sha256 = (text: string) => createHash("sha256").update(text).digest("hex")
 const NS = `not (n.nspname operator(pg_catalog.=) any ('{pg_catalog,information_schema}'::pg_catalog.name[])) and n.nspname operator(pg_catalog.!~) '^pg_(toast|temp)'::pg_catalog.text`;
 const cat = (...parts: string[]) => parts.join(" operator(pg_catalog.||) ");
 const lit = (s: string) => `'${s}'::pg_catalog.text`;
-const line = (tag: string, ...fields: string[]) => cat(lit(`${tag} `), ...fields.flatMap((f, i) => (i ? [lit(" "), f] : [f])));
+const line = (tag: string, ...fields: string[]) => cat(lit(`${tag} `), ...fields.flatMap((field, i) => (i ? [lit(" "), field] : [field])));
 const out = (type: string, value: string) => `pg_catalog.textin(pg_catalog.${type}out(${value}))`;
 const txt = (value: string) => `${value}::pg_catalog.text`;
 const md5 = (value: string) => `pg_catalog.md5(${value})`;

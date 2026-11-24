@@ -272,8 +272,8 @@ function schemaText(dialect: Dialect, cat: Catalog): string {
   const q = (name: string) => (/^[a-z_][a-z0-9_]*$/u.test(name) ? name : dialect === "mysql" ? `\`${name}\`` : `"${name.replace(/"/gu, '""')}"`);
   return cat.tables
     .map((t) => {
-      const width = Math.max(...t.columns.map((c) => q(c.name).length));
-      return `create table ${q(t.name)} (\n${t.columns.map((c) => `  ${q(c.name).padEnd(width)} ${c.type}${c.nullable ? "" : " not null"}`).join(",\n")}\n);`;
+      const width = Math.max(...t.columns.map((column) => q(column.name).length));
+      return `create table ${q(t.name)} (\n${t.columns.map((column) => `  ${q(column.name).padEnd(width)} ${column.type}${column.nullable ? "" : " not null"}`).join(",\n")}\n);`;
     })
     .join("\n\n");
 }

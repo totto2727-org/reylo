@@ -39,7 +39,7 @@ const traced = async function (fn: () => unknown): Promise<Event[]> {
   return events;
 };
 
-const names = (events: Event[]) => events.map((e) => e.name);
+const names = (events: Event[]) => events.map((currentEvent) => currentEvent.name);
 
 // oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
 test(".run() publishes one call, which ends when its promise settles", async () => {
@@ -47,7 +47,7 @@ test(".run() publishes one call, which ends when its promise settles", async () 
   const events = await traced(async () => assert.deepEqual(await getUser.run(db, { id: 1 }), { email: "ada@example.com", id: 1 }));
   assert.deepEqual(names(events), ["start", "end", "asyncStart", "asyncEnd"]);
   const { ctx } = events[0]!;
-  assert.ok(events.every((e) => e.ctx === ctx), "one context from start to asyncEnd");
+  assert.ok(events.every((currentEvent) => currentEvent.ctx === ctx), "one context from start to asyncEnd");
   assert.equal(ctx.query, getUser);
   assert.equal(ctx.query.source, "queries/get_user.sql");
   assert.equal(ctx.client, db);

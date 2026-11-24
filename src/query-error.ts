@@ -326,11 +326,11 @@ function sqliteNames(errcode: number | undefined, message: string) {
   if (!matchesUndefined(errcode) && (errcode & 0xFF) === SQLITE_CODES.SQLITE_CONSTRAINT) {
     if ((m = /^UNIQUE constraint failed: index '([\s\S]*)'$/.exec(message))) {names.constraint = m[1];}
     else if ((m = /^(?:UNIQUE|NOT NULL) constraint failed: ([\s\S]+)$/.exec(message))) {
-      const columns = m[1]!.split(", ").map((c) => /^([^.]+)\.([\s\S]+)$/.exec(c));
+      const columns = m[1]!.split(", ").map((part) => /^([^.]+)\.([\s\S]+)$/.exec(part));
       const table = columns[0]?.[1];
-      if (columns.every((c) => c && c[1] === table)) {
+      if (columns.every((currentColumn) => currentColumn && currentColumn[1] === table)) {
         names.table = table;
-        names.columns = columns.map((c) => c![2]!);
+        names.columns = columns.map((currentColumn) => currentColumn![2]!);
       }
     } else if ((m = /^CHECK constraint failed: ([\s\S]*)$/.exec(message))) {names.constraint = m[1];}
     else if ((m = /^cannot store \S+ value in \S+ column ([^.]+)\.([\s\S]+)$/.exec(message))) {

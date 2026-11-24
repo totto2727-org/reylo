@@ -186,7 +186,7 @@ export function columnKind(t: EngineType, dialect: Dialect): Kind {
 
 /** The TypeScript type of a scalar kind, `a|b` as the union of both; `unknown` where any part is. */
 export function kindType(kind: Kind): string {
-  const parts = kind.split("|").map((k) => TS_TYPE[k as ScalarKind] ?? "unknown");
+  const parts = kind.split("|").map((currentPart) => TS_TYPE[currentPart as ScalarKind] ?? "unknown");
   return parts.includes("unknown") ? "unknown" : [...new Set(parts)].join(" | ");
 }
 

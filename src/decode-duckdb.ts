@@ -159,7 +159,7 @@ function bindValue(a: Api, t: EngineType | undefined, v: unknown): unknown {
     return a.listValue(v.map((e) => bindValue(a, t?.kind === "array" ? t.of : undefined, e)));
   }
   if (hasObjectType(v)) {
-    if (t?.kind === "struct") {return a.structValue(Object.fromEntries(t.fields.map((f) => [f.name, bindValue(a, f.type, (v as Record<string, unknown>)[f.name])])));}
+    if (t?.kind === "struct") {return a.structValue(Object.fromEntries(t.fields.map((field) => [field.name, bindValue(a, field.type, (v as Record<string, unknown>)[field.name])])));}
     if (t?.kind === "union") {
       const { tag, value } = v as { tag?: unknown; value?: unknown };
       return a.unionValue(String(tag), bindValue(a, t.members.find((m) => m.name === tag)?.type, value));
@@ -177,10 +177,10 @@ function bindValue(a: Api, t: EngineType | undefined, v: unknown): unknown {
 export async function runDuckdb(c: DuckdbClient, text: string, values: unknown[], types: (EngineType | undefined)[], columns: Columns | undefined): Promise<unknown[]> {
   let bound = values;
   let bindTypes: unknown[] | undefined;
-  if (values.some((v) => !matchesNull(v) && hasObjectType(v))) {
+  if (values.some((currentValue) => !matchesNull(currentValue) && hasObjectType(currentValue))) {
     const a = await nodeApiOf(c);
-    bindTypes = values.map((v, i) => (!matchesNull(v) && hasObjectType(v) ? bindType(a, types[i], v) : undefined));
-    bound = values.map((v, i) => (!matchesNull(v) && hasObjectType(v) ? bindValue(a, types[i], v) : v));
+    bindTypes = values.map((currentValue, i) => (!matchesNull(currentValue) && hasObjectType(currentValue) ? bindType(a, types[i], currentValue) : undefined));
+    bound = values.map((currentValue, i) => (!matchesNull(currentValue) && hasObjectType(currentValue) ? bindValue(a, types[i], currentValue) : currentValue));
   }
   const reader = (await c.runAndReadAll(text, bound, bindTypes)) as Reader;
   if (!matchesUndefined(columns) && columns.length === 0) {return [];}
@@ -209,7 +209,7 @@ function bindType(a: Api, t: EngineType | undefined, v: unknown): unknown {
     return a.LIST(bindType(a, t?.kind === "array" ? t.of : undefined, v.find((e) => !matchesNullish(e))));
   }
   if (t?.kind === "struct" && !matchesNull(v) && hasObjectType(v)) {
-    return a.STRUCT(Object.fromEntries(t.fields.map((f) => [f.name, bindType(a, f.type, (v as Record<string, unknown>)[f.name])])));
+    return a.STRUCT(Object.fromEntries(t.fields.map((field) => [field.name, bindType(a, field.type, (v as Record<string, unknown>)[field.name])])));
   }
   if (t?.kind === "union" && !matchesNull(v) && hasObjectType(v)) {
     return a.UNION(Object.fromEntries(t.members.map((m) => [m.name, bindType(a, m.type, (v as { tag?: unknown; value?: unknown }).tag === m.name ? (v as { value?: unknown }).value : undefined)])));
@@ -218,7 +218,7 @@ function bindType(a: Api, t: EngineType | undefined, v: unknown): unknown {
 }
 
 function firstOf(entries: unknown[], key: "key" | "value"): unknown {
-  for (const e of entries) {if (!matchesNull(e) && hasObjectType(e) && !matchesNullish((e as Record<string, unknown>)[key])) {return (e as Record<string, unknown>)[key];}}
+  for (const entry of entries) {if (!matchesNull(entry) && hasObjectType(entry) && !matchesNullish((entry as Record<string, unknown>)[key])) {return (entry as Record<string, unknown>)[key];}}
   return undefined;
 }
 
@@ -237,7 +237,7 @@ export function encodeDuckdb(type: EngineType | undefined, v: unknown, name: str
   if (type.kind === "map" && Array.isArray(v)) {return v.map((e) => (!matchesNull(e) && hasObjectType(e) ? { ...e, key: encodeDuckdb(type.key, (e as { key?: unknown }).key, name), value: encodeDuckdb(type.value, (e as { value?: unknown }).value, name) } : e));}
   if (type.kind === "struct" && hasObjectType(v) && !Array.isArray(v)) {
     const out: Record<string, unknown> = { ...(v as Record<string, unknown>) };
-    Iterator.from(type.fields).forEach((f) => {out[f.name] = encodeDuckdb(f.type, out[f.name], name);});
+    Iterator.from(type.fields).forEach((field) => {out[field.name] = encodeDuckdb(field.type, out[field.name], name);});
     return out;
   }
   // A UNION takes `{ tag, value }`, its tag one of its members and its value that member's.
@@ -393,17 +393,17 @@ function decode(v: unknown, t: DuckType, column: string): unknown {
     case T.TIMESTAMP_TZ_NS: { return timestamp(o.nanos, BigInt("1000000000"), 9, "Z"); }
     case T.INTERVAL: { return interval(o.months, o.days, o.micros); }
     case T.LIST: case T.ARRAY: {
-      return (o.items as unknown[]).map((e) => decode(e, t.valueType!, column));
+      return (o.items as unknown[]).map((currentItem) => decode(currentItem, t.valueType!, column));
     }
     case T.STRUCT: {
       // A tuple, a struct whose fields have no names, is its values in order.
-      if (Array.isArray(o.items)) {return (o.items as unknown[]).map((e, i) => decode(e, t.entryTypes![i]!, column));}
+      if (Array.isArray(o.items)) {return (o.items as unknown[]).map((currentItem, i) => decode(currentItem, t.entryTypes![i]!, column));}
       const out: Record<string, unknown> = {};
       t.entryNames!.forEach((name, i) => (out[name] = decode(o.entries[name], t.entryTypes![i]!, column)));
       return out;
     }
     case T.MAP: {
-      return (o.entries as { key: unknown; value: unknown }[]).map((e) => ({ key: decode(e.key, t.keyType!, column), value: decode(e.value, t.valueType!, column) }));
+      return (o.entries as { key: unknown; value: unknown }[]).map((entry) => ({ key: decode(entry.key, t.keyType!, column), value: decode(entry.value, t.valueType!, column) }));
     }
     case T.UNION: {
       const at = t.memberTags!.indexOf(o.tag);

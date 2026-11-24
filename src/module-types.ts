@@ -32,7 +32,7 @@ export type ModuleTypes = {
 export function queryErrorType(dialect: Dialect, errors: Analysis["errors"]): string {
   if (!errors) {return `import("@totto2727/reylo").QueryError<${JSON.stringify(dialect)}>`;}
   const name = { postgres: "PostgresQueryError", mysql: "MysqlQueryError", sqlite: "SqliteQueryError", duckdb: "DuckdbQueryError" }[dialect];
-  const names = (field: string, list: string[]) => list.map((n) => (field === "columns" ? `readonly [${n.split(", ").map((c) => JSON.stringify(c)).join(", ")}]` : JSON.stringify(n))).join(" | ");
+  const names = (field: string, list: string[]) => list.map((n) => (field === "columns" ? `readonly [${n.split(", ").map((part) => JSON.stringify(part)).join(", ")}]` : JSON.stringify(n))).join(" | ");
   const codes = Object.entries(errors).map(([code, fields]) => `  ${JSON.stringify(code)}: { ${Object.entries(fields).map(([field, list]) => `${field}: ${names(field, list)}`).join("; ")} };`);
   return codes.length ? `import("@totto2727/reylo").${name}<{\n${codes.join("\n")}\n}>` : `import("@totto2727/reylo").${name}<{}>`;
 }
@@ -103,7 +103,7 @@ export function moduleTypes(sql: string, analysis: Analysis, dialect: Dialect, l
   // A MySQL session reads its strings by its sql_mode, which the analysis asked for and the
   // Lexer alone does not know: the placeholders are the ones the analysis read.
   if (dialect === "mysql") {
-    names = analysis.params.map((q) => q.name);
+    names = analysis.params.map((parameter) => parameter.name);
     placeholders = analysis.rewritten.spans.map(([start, end], k) => ({ name: analysis.rewritten.order[k]!, start, end }));
   }
   const diagnostics: FileDiagnostic[] = analysis.diagnostics.map((d) => ({ message: d.message, start: d.start, length: d.length, code: d.code }));
@@ -113,12 +113,12 @@ export function moduleTypes(sql: string, analysis: Analysis, dialect: Dialect, l
   // End, so its parameters are untyped for that reason: its own error is the one to fix first.
   if (strictParams && !analysis.diagnostics.length) {
     const bytes = utf8.encode(sql);
-    Iterator.from(analysis.params).forEach((q) => {
-      if (q.type.kind !== "unknown") {return;}
-      const at = placeholders.find((h) => h.name === q.name);
+    Iterator.from(analysis.params).forEach((parameter) => {
+      if (parameter.type.kind !== "unknown") {return;}
+      const at = placeholders.find((h) => h.name === parameter.name);
       // The engine's offsets are UTF-8 bytes, as the diagnostics' are. A MySQL placeholder's span
       // Takes in the `::type` the engine rewrote, which is no part of its name.
-      const span = at ? fromUtf8.decode(bytes.subarray(at.start, at.end)) : `:${q.name}`;
+      const span = at ? fromUtf8.decode(bytes.subarray(at.start, at.end)) : `:${parameter.name}`;
       const written = span.replace(/\s*::[\s\S]*$/, "");
       const length = at ? utf8.encode(written).length : 1;
       const message = `Nothing in the statement gives the parameter ${written} a type; cast it, as in ${written}::text, or set strict_params: false in ${projectFile}.`;
@@ -130,10 +130,10 @@ export function moduleTypes(sql: string, analysis: Analysis, dialect: Dialect, l
   const columns = lastOfEachName(analysis.columns).map((c) => [`${ident(c.name)}: ${c.nullable ? orNull(renderType(c.type, false, dialect)) : renderType(c.type, false, dialect)}`, c.comment] as const);
   // A parameter is typed from its context (a column it is compared with or written to, a CAST);
   // One no context types is `unknown`.
-  const typed = analysis.params.map((q) => [q.name, paramType(q, declaredType(q.type, q.schema) ?? renderParamType(q.type, dialect)), q.comment] as const);
+  const typed = analysis.params.map((parameter) => [parameter.name, paramType(parameter, declaredType(parameter.type, parameter.schema) ?? renderParamType(parameter.type, dialect)), parameter.comment] as const);
   // A parameter that takes null may be left out, which binds NULL; so may a typed JSON parameter
   // Whose schema has a `default` (wiki/typed-json-params.md).
-  const optional = new Set(analysis.params.filter((q) => q.nullable || (!matchesNull(q.schema) && hasObjectType(q.schema) && "default" in q.schema)).map((q) => q.name));
+  const optional = new Set(analysis.params.filter((parameter) => parameter.nullable || (!matchesNull(parameter.schema) && hasObjectType(parameter.schema) && "default" in parameter.schema)).map((parameter) => parameter.name));
   const paramTypes = typed.map(([name, type, comment]) => [`${ident(name)}${optional.has(name) ? "?" : ""}: ${type}`, comment] as const);
   return {
     diagnostics,

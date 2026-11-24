@@ -126,7 +126,7 @@ export function mapperHandlers(): MapperHandlers {
           `export type QueryError = ${queryError};`,
           `export declare const sql: ${matchesUndefined(compiled) ? "string" : JSON.stringify(compiled)};`,
           `export declare const raw: ${JSON.stringify(sql)};`,
-          `export declare const params: readonly [${names.map((n) => JSON.stringify(n)).join(", ")}];`,
+          `export declare const params: readonly [${names.map((currentName) => JSON.stringify(currentName)).join(", ")}];`,
           // The literal types go in the Query type directly rather than through the aliases, so a
           // Hover shows the row's shape (`{ id: number; ... } | null`) and not `Row | null`. The two
           // Texts go in by `typeof`, so a hover over the query names them and one over its `sql`

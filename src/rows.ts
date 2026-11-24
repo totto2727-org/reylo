@@ -74,7 +74,7 @@ export function prepareRows(name: string, type: RowsType, value: unknown, dialec
   };
   if (matchesUndefined(value) || matchesNull(value)) {fail(type.one ? "pass one object, whose keys the column list names." : "pass an array of objects, whose keys the column list names; an empty array inserts nothing.");}
   const rows = type.one ? [value] : Array.isArray(value) ? value : fail(`pass an array of objects, one per row; got ${describe(value)}.`);
-  const known = new Map(type.fields.map((f) => [f.name, f]));
+  const known = new Map(type.fields.map((field) => [field.name, field]));
   let present: Set<string> | undefined;
   let first = -1;
   const out: Record<string, unknown>[] = [];
@@ -83,30 +83,30 @@ export function prepareRows(name: string, type: RowsType, value: unknown, dialec
     if (matchesNull(row) || !hasObjectType(row) || Array.isArray(row) || row instanceof Date) {fail(`${where}each row is an object whose keys the column list names; got ${describe(row)}.`);}
     const r = row as Record<string, unknown>;
     Object.keys(r).forEach((key) => {
-      if (!known.has(key) && !matchesUndefined(r[key])) {fail(`${where}the column list names no key "${key}" (it names ${type.fields.map((f) => `"${f.name}"`).join(", ")}).`);}
+      if (!known.has(key) && !matchesUndefined(r[key])) {fail(`${where}the column list names no key "${key}" (it names ${type.fields.map((field) => `"${field.name}"`).join(", ")}).`);}
     });
     const keys = new Set<string>();
     const written: Record<string, unknown> = {};
-    Iterator.from(type.fields).forEach((f) => {
-      const v = r[f.name];
+    Iterator.from(type.fields).forEach((field) => {
+      const v = r[field.name];
       if (matchesUndefined(v)) {
-        if (!f.optional) {fail(`${where}"${f.name}" is ${f.written} not null, and the row leaves it out.`);}
+        if (!field.optional) {fail(`${where}"${field.name}" is ${field.written} not null, and the row leaves it out.`);}
         return;
       }
-      keys.add(f.name);
+      keys.add(field.name);
       if (matchesNull(v)) {
-        if (!f.nullable) {fail(`${where}"${f.name}" is ${f.written} not null, and the row gives null${f.optional ? `; leave the key out for the column's default` : ""}.`);}
-        written[f.name] = null;
+        if (!field.nullable) {fail(`${where}"${field.name}" is ${field.written} not null, and the row gives null${field.optional ? `; leave the key out for the column's default` : ""}.`);}
+        written[field.name] = null;
         return;
       }
-      const checked = check(f.type, f.written, v, dialect, (message) => fail(`${where}"${f.name}" ${message}`));
+      const checked = check(field.type, field.written, v, dialect, (message) => fail(`${where}"${field.name}" ${message}`));
       // A JSON member's schema fills its defaults and checks the value (wiki/typed-json-params.md).
-      if (!matchesUndefined(f.schema)) {
-        const filled = withDefaults(f.schema, checked);
-        const failure = validate(f.schema, filled);
-        if (failure) {fail(`${where}"${f.name}"${failure.path ? ` at ${failure.path}` : ""} ${failure.message}.`);}
-        written[f.name] = filled;
-      } else {written[f.name] = checked;}
+      if (!matchesUndefined(field.schema)) {
+        const filled = withDefaults(field.schema, checked);
+        const failure = validate(field.schema, filled);
+        if (failure) {fail(`${where}"${field.name}"${failure.path ? ` at ${failure.path}` : ""} ${failure.message}.`);}
+        written[field.name] = filled;
+      } else {written[field.name] = checked;}
     });
     // One statement inserts every row of a call, so on MySQL, which copies no default, its column
     // List is the same for each: a key one row leaves out and another gives cannot have its
@@ -116,14 +116,14 @@ export function prepareRows(name: string, type: RowsType, value: unknown, dialec
         present = keys;
         first = i;
       } else {
-        const differ = type.fields.find((f) => present!.has(f.name) !== keys.has(f.name));
+        const differ = type.fields.find((field) => present!.has(field.name) !== keys.has(field.name));
         if (differ) {fail(`row ${i + 1} ${keys.has(differ.name) ? "gives" : "leaves out"} "${differ.name}", which row ${first + 1} ${keys.has(differ.name) ? "leaves out" : "gives"}. Every row of one call gives the same keys, since one insert writes them all and a key left out takes its column's default: give "${differ.name}" in every row, or in none.`);}
       }
     }
     out.push(written);
   });
-  const keys = present ?? new Set(type.fields.map((f) => f.name));
-  if (inserted && !type.fields.some((f) => keys.has(f.name))) {fail("every key is left out, so the insert would name no column; give one at least.");}
+  const keys = present ?? new Set(type.fields.map((field) => field.name));
+  if (inserted && !type.fields.some((field) => keys.has(field.name))) {fail("every key is left out, so the insert would name no column; give one at least.");}
   const shaped = type.one ? out[0] : out;
   return { value: dialect === "postgres" ? shaped : write(shaped), present: keys };
 }
@@ -142,7 +142,7 @@ function check(type: EngineType, written: string, v: unknown, dialect: Dialect, 
     }
     case "enum": {
       if (matchesString(v) && (type.labels.length === 0 || type.labels.includes(v))) {return v;}
-      return fail(`is the enum ${type.name}, one of ${type.labels.map((l) => JSON.stringify(l)).join(", ")}; got ${describe(v)}.`);
+      return fail(`is the enum ${type.name}, one of ${type.labels.map((label) => JSON.stringify(label)).join(", ")}; got ${describe(v)}.`);
     }
     case "array": {
       if (!Array.isArray(v)) {return fail(`is ${written}, an array; got ${describe(v)}.`);}
@@ -387,7 +387,7 @@ export function variant(text: string, structured: Structured, fields: Readonly<R
   const lists = [...structured.lists].sort((a, b) => b.start - a.start);
   let out = text;
   Iterator.from(lists).forEach((list) => {
-    const kept = list.entries.filter((_, k) => {
+    const kept = list.entries.filter((entry, k) => {
       const f = fields[k];
       return matchesUndefined(f) || !f.optional || present.has(f.name);
     });

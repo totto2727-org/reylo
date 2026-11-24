@@ -68,7 +68,7 @@ export function renderType(t: EngineType, inJson = false, dialect: Dialect = "po
       const parts = t.name.split("|").map((name) => (dialect === "sqlite" ? sqliteJson : dialect === "mysql" ? mysqlJson : json)[name] ?? JSON_TYPE);
       return parts.includes(JSON_TYPE) ? JSON_TYPE : [...new Set(parts.flatMap((part) => part.split(" | ")))].join(" | ");
     }
-    case "enum": { return t.labels.length ? t.labels.map((l) => JSON.stringify(l)).join(" | ") : "string"; }
+    case "enum": { return t.labels.length ? t.labels.map((label) => JSON.stringify(label)).join(" | ") : "string"; }
     case "array": {
       if (((t.of.kind === "scalar" && t.of.name === "record") || t.of.kind === "composite") && !inJson) {return "string";}
       // Postgres lets any array hold NULL elements, whatever a column's NOT NULL says, so a result's
@@ -206,7 +206,7 @@ export function lastOfEachName<T extends { name: string }>(items: Readonly<T[]>)
 /** An object type of JSON-encoded fields, each nullable as the engine says. */
 function renderFields(fields: { name: string; type: EngineType; nullable: boolean }[], dialect: Dialect): string {
   fields = lastOfEachName(fields);
-  return fields.length ? `{ ${fields.map((f) => `${ident(f.name)}: ${f.nullable ? orNull(renderType(f.type, true, dialect)) : renderType(f.type, true, dialect)}`).join("; ")} }` : "Record<never, never>";
+  return fields.length ? `{ ${fields.map((field) => `${ident(field.name)}: ${field.nullable ? orNull(renderType(field.type, true, dialect)) : renderType(field.type, true, dialect)}`).join("; ")} }` : "Record<never, never>";
 }
 
 /**
@@ -249,7 +249,7 @@ export function renderParamType(t: EngineType, dialect: Dialect = "postgres", in
       if (kind === "int8") {return "number | bigint | string";}
       if (kind === "decimal" || kind === "date" || kind === "timestamp" || kind === "timestamptz" || kind === "interval") {return "string";}
     }
-    if (t.kind === "struct") {return t.fields.length ? `{ ${t.fields.map((f) => `${ident(f.name)}: ${orNull(renderParamType(f.type, dialect, true))}`).join("; ")} }` : "Record<never, never>";}
+    if (t.kind === "struct") {return t.fields.length ? `{ ${t.fields.map((field) => `${ident(field.name)}: ${orNull(renderParamType(field.type, dialect, true))}`).join("; ")} }` : "Record<never, never>";}
     if (t.kind === "map") {return `readonly { key: ${renderParamType(t.key, dialect, true)}; value: ${orNull(renderParamType(t.value, dialect, true))} }[]`;}
     if (t.kind === "tuple") {return `readonly [${t.items.map((item) => orNull(renderParamType(item, dialect, true))).join(", ")}]`;}
   }
@@ -278,9 +278,9 @@ export function renderParamType(t: EngineType, dialect: Dialect = "postgres", in
   // A structured parameter: each key as a parameter of its type takes it, `?` where the caller
   // May leave it out, `| null` where it may be null.
   if (t.kind === "rows") {
-    const fields = t.fields.map((f) => {
-      const type = declaredType(f.type, f.schema) ?? renderParamType(f.type, dialect, true);
-      return `${ident(f.name)}${f.optional ? "?" : ""}: ${f.nullable ? orNull(type) : type}`;
+    const fields = t.fields.map((field) => {
+      const type = declaredType(field.type, field.schema) ?? renderParamType(field.type, dialect, true);
+      return `${ident(field.name)}${field.optional ? "?" : ""}: ${field.nullable ? orNull(type) : type}`;
     });
     const row = fields.length ? `{ ${fields.join("; ")} }` : "Record<never, never>";
     return t.one ? row : `readonly ${row}[]`;

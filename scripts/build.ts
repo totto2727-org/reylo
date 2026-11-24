@@ -66,12 +66,12 @@ await writeFile(join(reylo, "package.json"), `${JSON.stringify(built, null, 2)  
 
 // Nothing TypeScript ships but declarations, and no engine ships inside reylo.
 const files = await readdir(reylo, { encoding: "utf8", recursive: true });
-const source = files.filter((f) => /\.(?:c|m)?ts$/u.test(f) && !/\.d\.(?:c|m)?ts$/u.test(f));
+const source = files.filter((currentFile) => /\.(?:c|m)?ts$/u.test(currentFile) && !/\.d\.(?:c|m)?ts$/u.test(currentFile));
 if (source.length) {throw new Error(`dist/reylo holds TypeScript sources: ${source.join(", ")}`);}
-const wasm = files.filter((f) => f.endsWith(".wasm"));
+const wasm = files.filter((currentFile) => currentFile.endsWith(".wasm"));
 if (wasm.length) {throw new Error(`dist/reylo holds an engine: ${wasm.join(", ")}`);}
 // Nor any of the build-time half, which a run-time module would drag in by importing it.
-const tooling = files.filter((f) => /^src\/(?:tooling|analyze|engine|engine-core|engine-worker|component|loader|commands|mapper-server|play)\.js$/u.test(f));
+const tooling = files.filter((currentFile) => /^src\/(?:tooling|analyze|engine|engine-core|engine-worker|component|loader|commands|mapper-server|play)\.js$/u.test(currentFile));
 if (tooling.length) {throw new Error(`dist/reylo holds the engine packages' build steps: ${tooling.join(", ")}`);}
 console.log(`dist/reylo: ${files.length} files, package ${built.name}@${built.version}`);
 

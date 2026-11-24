@@ -48,7 +48,7 @@ const sqlFiles = async function (dir: string, include = INCLUDE, exclude: string
   });
   const excluded = [...EXCLUDE, ...exclude, ...include.filter(negated).map((p) => p.slice(1))];
   const entries = await Array.fromAsync(glob(patterns, { cwd: dir, exclude: excluded, withFileTypes: true }));
-  return entries.filter((e) => !e.isDirectory() && e.name.endsWith(".sql")).map((e) => resolve(e.parentPath, e.name));
+  return entries.filter((entry) => !entry.isDirectory() && entry.name.endsWith(".sql")).map((entry) => resolve(entry.parentPath, entry.name));
 };
 
 /** The files among `files` that git ignores; none where git is missing or `dir` is not in a repository. */
@@ -56,7 +56,7 @@ const gitIgnored = function (dir: string, files: string[]): Set<string> {
   if (!files.length) {return new Set();}
   const r = spawnSync("git", ["check-ignore", "-z", "--stdin"], { cwd: dir, input: files.join("\0"), encoding: "utf8" });
   // 0: some are ignored; 1: none is; 128 or no status: not a repository, or no git.
-  return r.status === 0 ? new Set(r.stdout.split("\0").filter(Boolean).map((f) => resolve(dir, f))) : new Set();
+  return r.status === 0 ? new Set(r.stdout.split("\0").filter(Boolean).map((part) => resolve(dir, part))) : new Set();
 };
 
 /** The place of a byte offset and the line that holds it, with a caret under the span, as an editor underlines it. */
@@ -181,7 +181,7 @@ const generate = async function (args: string[]): Promise<number> {
       }
       rows.push({ file, ok: true });
     }
-    const width = Math.max(...rows.map((r) => shown(r.file).length));
+    const width = Math.max(...rows.map((row) => shown(row.file).length));
     Iterator.from(rows).forEach(({ file, ok }) => {
       if (ok) {typed++;}
       else {failed.push(file);}

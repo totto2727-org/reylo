@@ -52,7 +52,7 @@ Iterator.from(fixtures.entries()).forEach(([index, fixture]) => {
     switch (fixture.api) {
       case 'lexConfig': case 'lexExpression': case 'lexTemplate': {
         const result = { lexConfig, lexExpression, lexTemplate }[fixture.api](source, fixture.filename, start);
-        assert.deepEqual(result.tokens.map(t => ({ ...t, bytes: Buffer.from(t.bytes) })), oracleTokens(fixture.extra));
+        assert.deepEqual(result.tokens.map(currentToken => ({ ...currentToken, bytes: Buffer.from(currentToken.bytes) })), oracleTokens(fixture.extra));
         assert.deepEqual(actualDiagnostics(result.diagnostics), diagnostics(fixture.diagnostics));
         break;
       }

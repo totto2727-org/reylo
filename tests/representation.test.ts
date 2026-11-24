@@ -315,7 +315,7 @@ from users u where u.id = :id::int`,
     for (const [name, text] of Object.entries(sql)) {
       const outcome = await session.analyze(text);
       assert.ok(outcome.ok, `${name}: ${outcome.ok ? "" : outcome.message}`);
-      types[name] = outcome.analysis.columns.map((c) => `${c.name}: ${renderType(c.type, false, "sqlite")}${c.nullable ? " | null" : ""}`).join("; ");
+      types[name] = outcome.analysis.columns.map((column) => `${column.name}: ${renderType(column.type, false, "sqlite")}${column.nullable ? " | null" : ""}`).join("; ");
     }
     assert.deepEqual(types, {
       profile: "profile: { user: { id: number; name: string }; posts: { id: number; title: string }[] }",

@@ -43,7 +43,7 @@ export async function sqlModule(path: string, sql: string): Promise<SqlModule> {
   if (session.project.dialect === "mysql") {
     // A MySQL session reads its strings by its sql_mode, which the analysis asked for: its
     // Placeholders are the ones the server finds.
-    params = analysis.params.map((p) => p.name);
+    params = analysis.params.map((parameter) => parameter.name);
   } else {
     try {
       params = (await session.lex(sql)).params;
@@ -62,13 +62,13 @@ export async function sqlModule(path: string, sql: string): Promise<SqlModule> {
   if (refused) {throw new Error(`${path}:${place(sql, refused.start)}: ${refused.message}`);}
   // Each parameter's type, for the drivers that bind an array or a JSON value wrong, and whether it
   // Takes null, which the run time refuses for one that does not (src/execute.ts).
-  const inputs = Object.fromEntries(analysis.params.map((p) => [p.name, { type: p.type, ...(matchesUndefined(p.schema) ? {} : { schema: p.schema }), ...(matchesUndefined(p.cast) ? {} : { cast: p.cast }), nullable: p.nullable }]));
+  const inputs = Object.fromEntries(analysis.params.map((parameter) => [parameter.name, { type: parameter.type, ...(matchesUndefined(parameter.schema) ? {} : { schema: parameter.schema }), ...(matchesUndefined(parameter.cast) ? {} : { cast: parameter.cast }), nullable: parameter.nullable }]));
   // Each output column's name and kind, from the table the declared types come from: what the run
   // Time gives each value (src/values.ts); and an array's delimiter where it is not a comma.
-  const columns = analysis.columns.map((c) => {
-    const kind = columnKind(c.type, session.project.dialect);
-    const delimiter = arrayDelimiter(c.type);
-    return matchesUndefined(delimiter) ? [c.name, kind] : [c.name, kind, delimiter];
+  const columns = analysis.columns.map((column) => {
+    const kind = columnKind(column.type, session.project.dialect);
+    const delimiter = arrayDelimiter(column.type);
+    return matchesUndefined(delimiter) ? [column.name, kind] : [column.name, kind, delimiter];
   });
   const source = sourceName(path);
   // The compiled statement without the file's trailing blank lines; the comment naming the file
@@ -81,7 +81,7 @@ export async function sqlModule(path: string, sql: string): Promise<SqlModule> {
   // The statement has one, so that an app none of whose statements has one bundles none of them
   // (src/checks.ts). A non-null JSON parameter whose type alone carries a schema needs them too,
   // To learn whether that schema allows null.
-  const checked = analysis.params.some((p) => !matchesUndefined(p.schema) || !matchesUndefined(p.cast) || p.type.kind === "rows" || (p.type.kind === "json" && !matchesUndefined(p.type.schema) && !p.nullable));
+  const checked = analysis.params.some((parameter) => !matchesUndefined(parameter.schema) || !matchesUndefined(parameter.cast) || parameter.type.kind === "rows" || (parameter.type.kind === "json" && !matchesUndefined(parameter.type.schema) && !parameter.nullable));
   const code = [
     `import { defineQuery${checked ? ", checks" : ""} } from "@totto2727/reylo";`,
     // `sql` is the compiled statement and `raw` the file as written; the definition's own `sql` is

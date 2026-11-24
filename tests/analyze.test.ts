@@ -55,14 +55,14 @@ test("a change to the schema makes the entry stale, and the statement is analyze
   const { root, env } = project();
   const before = await analyze(root, env, "select * from users");
   assert.ok(before.ok);
-  assert.deepEqual(before.analysis.columns.map((c) => c.name), ["id", "name"]);
+  assert.deepEqual(before.analysis.columns.map((column) => column.name), ["id", "name"]);
   const db = new DatabaseSync(join(root, "app.db"));
   db.exec("alter table users add column email text");
   db.close();
   const after = await analyze(root, env, "select * from users");
   assert.ok(after.ok);
   assert.equal(after.source, "database");
-  assert.deepEqual(after.analysis.columns.map((c) => c.name), ["id", "name", "email"]);
+  assert.deepEqual(after.analysis.columns.map((column) => column.name), ["id", "name", "email"]);
   assert.equal(after.entry, before.entry);
 });
 
@@ -192,9 +192,9 @@ test("one statement of another kind is a command: DDL resolves to nothing and ru
     const listed = await analyze(root, env, "pragma index_list(users)");
     assert.ok(listed.ok);
     assert.equal(listed.analysis.cardinality, "many");
-    assert.deepEqual(listed.analysis.columns.map((c) => [c.name, c.type.kind, c.nullable]), ["seq", "name", "unique", "origin", "partial"].map((name) => [name, "unknown", true]));
+    assert.deepEqual(listed.analysis.columns.map((column) => [column.name, column.type.kind, column.nullable]), ["seq", "name", "unique", "origin", "partial"].map((name) => [name, "unknown", true]));
     const rows = await defineQuery({ dialect: "sqlite", sql: "pragma index_list(users)", params: [], cardinality: "many" }).run(db);
-    assert.deepEqual(rows.map((r) => (r as { name: string }).name), ["users_name"]);
+    assert.deepEqual(rows.map((row) => (row as { name: string }).name), ["users_name"]);
   } finally {
     db.close();
   }
@@ -250,7 +250,7 @@ test("a parameter written twice is an error at each later use, which the type ch
     const read = await session.analyze(once);
     assert.ok(read.ok);
     assert.deepEqual(read.analysis.diagnostics, []);
-    assert.deepEqual(read.analysis.params.map((p) => [p.name, p.nullable]), [["q", true]]);
+    assert.deepEqual(read.analysis.params.map((parameter) => [parameter.name, parameter.nullable]), [["q", true]]);
     await writeFile(file, once);
     const { code } = await sqlModule(file, once);
     assert.match(code, /export const params = \["q"\];/u);
@@ -269,7 +269,7 @@ test("a parameter as a whole sort key is an error the type check places, and a b
     const outcome = await session.analyze(sql);
     assert.ok(outcome.ok);
     assert.deepEqual(outcome.analysis.diagnostics.map((d) => [d.code, d.start, d.length]), [[17, sql.indexOf(":sort"), 5]]);
-    assert.deepEqual(outcome.analysis.columns.map((c) => c.name), ["id", "name"]);
+    assert.deepEqual(outcome.analysis.columns.map((column) => column.name), ["id", "name"]);
     // As an ON CONFLICT target no key matches, the error is the type check's: the module is built.
     const file = join(root, "sorted.sql");
     await writeFile(file, sql);

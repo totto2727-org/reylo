@@ -112,7 +112,7 @@ test("postgres: a JSON parameter's value is a JavaScript value, which every driv
   const pgp = { manyOrNone: promiseDriverStub(() => []), query: async (q: any): Promise<any> => (seen.push(q.values), []) };
   await execute(pgp, jsonQuery, jsonValues);
   await execute((_: string, values?: unknown[]) => (seen.push(values!), Promise.resolve([])), jsonQuery, jsonValues);
-  const unsafe = async (_: string, values?: unknown[]) => (seen.push(values!.map((v) => (v !== null && typeof v === "object" ? JSON.stringify(v) : v))), []);
+  const unsafe = async (_: string, values?: unknown[]) => (seen.push(values!.map((currentValue) => (currentValue !== null && typeof currentValue === "object" ? JSON.stringify(currentValue) : currentValue))), []);
   const bun = { unsafe, commitDistributed: async () => {} };
   await execute({ unsafe }, jsonQuery, jsonValues);
   await execute(bun, jsonQuery, jsonValues);
@@ -569,7 +569,7 @@ test("sqlite: node:sqlite answers at once, with one ? per placeholder; a write g
   db.exec("create table t (a int)");
   const rows = execute(db, lite, { id: 1, name: "ada" });
   assert.ok(Array.isArray(rows), "a synchronous client's rows are not a promise");
-  assert.deepEqual(rows.map((r) => ({ ...(r as object) })), [row]);
+  assert.deepEqual(rows.map((currentRow) => ({ ...(currentRow as object) })), [row]);
   assert.deepEqual(execute(db, { dialect: "sqlite", sql: "insert into t values (:a)", params: ["a"] }, { a: 2 }), []);
   assert.deepEqual(db.prepare("select a from t").all().map((r) => ({ ...r })), [{ a: 2 }]);
 });
@@ -740,7 +740,7 @@ test("an unsupported client rejects, naming what it has and what reylo takes", a
 function durableObjectSql(db: DatabaseSync) {
   return {
     exec(sql: string, ...bindings: unknown[]) {
-      if (bindings.some((b) => typeof b === "bigint")) {throw new TypeError("Cannot convert a BigInt value to a number");}
+      if (bindings.some((binding) => typeof binding === "bigint")) {throw new TypeError("Cannot convert a BigInt value to a number");}
       const st = db.prepare(sql);
       st.setReadBigInts(true);
       const rows = st.all(...(bindings as never[])).map((row) =>

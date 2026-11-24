@@ -63,7 +63,7 @@ test("the rows an insert writes carry the same keys, and its lists name only tho
   const a = { id: 1, ts: "2026-10-20T10:00:00Z" };
   assert.throws(() => prepareRows("events", events, [a, { ...a, status: "x" }], "postgres", true), /row 2 gives "status", which row 1 leaves out/u);
   // Elsewhere a key left out reads as NULL, so the rows may differ.
-  assert.doesNotThrow(() => prepareRows("events", { ...events, fields: events.fields.filter((f) => f.name !== "status") }, [a, { ...a, amount: 1 }], "postgres", false));
+  assert.doesNotThrow(() => prepareRows("events", { ...events, fields: events.fields.filter((field) => field.name !== "status") }, [a, { ...a, amount: 1 }], "postgres", false));
   const { present } = prepareRows("events", events, [a, a], "postgres", true);
   const text = `insert into events ("id", "ts", "status", "amount", "tags", "meta") SELECT e."id", e."ts", e."status", e."amount", e."tags", e."meta" FROM x`;
   const entries = (prefix: string) => ["id", "ts", "status", "amount", "tags", "meta"].map((n) => `${prefix}"${n}"`);

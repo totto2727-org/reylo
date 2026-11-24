@@ -35,7 +35,7 @@ export function refusedLogin(e: unknown): boolean {
 /** A driver error as one line: a refused connection is an AggregateError with no message of its own. */
 export function reason(e: unknown): string {
   const err = e as { message?: string; code?: string; errors?: { message?: string }[] } | undefined;
-  return err?.message || err?.errors?.map((x) => x.message).filter(Boolean).join("; ") || err?.code || String(e);
+  return err?.message || err?.errors?.map((error) => error.message).filter(Boolean).join("; ") || err?.code || String(e);
 }
 
 /**

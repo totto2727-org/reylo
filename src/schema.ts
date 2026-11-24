@@ -76,7 +76,7 @@ const scalar = function (name: string, dialect: Dialect, inJson: boolean, input:
     if (kinds.length > 1) {
       // A NUMERIC: whichever storage class the row stored, an integer being a number too.
       const types = [...new Set(kinds.map((k) => kindSchema(k as ScalarKind, name, dialect).type as string))];
-      return { type: types.includes("number") ? types.filter((t) => t !== "integer") : types };
+      return { type: types.includes("number") ? types.filter((currentType) => currentType !== "integer") : types };
     }
     return kindSchema(kinds[0] as ScalarKind, name, dialect);
   }
@@ -119,7 +119,7 @@ const scalar = function (name: string, dialect: Dialect, inJson: boolean, input:
     }
   }
   const kind = scalarKind(name, dialect);
-  if (kind.includes("|")) {return { anyOf: kind.split("|").map((k) => kindSchema(k as ScalarKind, name, dialect)) };}
+  if (kind.includes("|")) {return { anyOf: kind.split("|").map((currentPart) => kindSchema(currentPart as ScalarKind, name, dialect)) };}
   const schema = kindSchema(kind as ScalarKind, name, dialect);
   if (kind !== "text") {return schema;}
   switch (name) {
@@ -136,11 +136,11 @@ const object = function (fields: Readonly<{ name: string }[]>, field: (f: number
   const properties: Record<string, unknown> = {};
   const required: string[] = [];
   // A later field of a name replaces an earlier one, as a row object and `JSON.parse` keep the last.
-  fields.forEach((f, i) => {
-    properties[f.name] = field(i);
-    const at = required.indexOf(f.name);
+  fields.forEach((currentField, i) => {
+    properties[currentField.name] = field(i);
+    const at = required.indexOf(currentField.name);
     if (at >= 0) {required.splice(at, 1);}
-    if (!optional(i)) {required.push(f.name);}
+    if (!optional(i)) {required.push(currentField.name);}
   });
   return { type: "object", properties, required, ...(closed ? { additionalProperties: false } : {}) };
 };

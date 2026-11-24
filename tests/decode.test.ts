@@ -145,10 +145,10 @@ const pgClient = function (db: Db, options: { binary?: boolean } = {}) {
       const c: Config = typeof config === "string" ? { text: config, ...(values ? { values } : {}) } : config;
       const types = c.types ?? client;
       const answer = db.answer(c.text);
-      const parsers = answer.fields.map((f) => types.getTypeParser(f.dataTypeID, client.binary ? "binary" : "text"));
+      const parsers = answer.fields.map((field) => types.getTypeParser(field.dataTypeID, client.binary ? "binary" : "text"));
       const rows = answer.raw.map((raw) => {
         const values = raw.map((v, i) => (v === null ? null : parsers[i]!(v)));
-        return c.rowMode === "array" ? values : Object.fromEntries(answer.fields.map((f, i) => [f.name, values[i]]));
+        return c.rowMode === "array" ? values : Object.fromEntries(answer.fields.map((field, i) => [field.name, values[i]]));
       });
       return { fields: answer.fields, rows };
     },
@@ -316,7 +316,7 @@ const pglite = function (db: Db, instance: Record<number, Parser> | undefined) {
       const parsers = { ...instance, ...options?.parsers };
       const rows = answer.raw.map((raw) => {
         const values = raw.map((v, i) => (v === null ? null : parsers[answer.fields[i]!.dataTypeID] ? parsers[answer.fields[i]!.dataTypeID]!(v) : v));
-        return options?.rowMode === "array" ? values : Object.fromEntries(answer.fields.map((f, i) => [f.name, values[i]]));
+        return options?.rowMode === "array" ? values : Object.fromEntries(answer.fields.map((field, i) => [field.name, values[i]]));
       });
       return { fields: answer.fields, rows };
     },
@@ -369,7 +369,7 @@ const postgresJs = function (db: Db, rowTransform?: (row: unknown[]) => unknown)
       raw: async () => {
         const answer = db.answer(text);
         const rows = answer.raw.map((r) => r.map((v) => (v === null ? null : Buffer.from(v))));
-        return Object.assign(rowTransform ? rows.map(rowTransform) : rows, { columns: answer.fields.map((f) => ({ name: f.name.toUpperCase(), type: f.dataTypeID })) });
+        return Object.assign(rowTransform ? rows.map(rowTransform) : rows, { columns: answer.fields.map((field) => ({ name: field.name.toUpperCase(), type: field.dataTypeID })) });
       },
     }),
   };

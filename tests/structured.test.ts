@@ -58,10 +58,10 @@ test("SQLite: an insert's rows are checked and written in their order, a key lef
   const insert = `insert into events :events::rows(id integer not null, ts text not null, status? text not null, amount real, meta json('{"type": "object", "properties": {"source": {"type": "string"}}}')) returning id, status`;
   try {
     const a = await analysis(root, url, insert);
-    assert.deepEqual(a.params.map((p) => [p.name, p.type_name]), [["events", "rows"]]);
+    assert.deepEqual(a.params.map((parameter) => [parameter.name, parameter.type_name]), [["events", "rows"]]);
     const events = a.params[0]!.type;
     assert.ok(events.kind === "rows");
-    assert.deepEqual(events.fields.map((f) => [f.name, f.type.kind === "scalar" ? f.type.name : f.type.kind, f.nullable, f.optional]), [["id", "integer", false, false], ["ts", "text", false, false], ["status", "text", false, true], ["amount", "real", true, true], ["meta", "json", true, true]]);
+    assert.deepEqual(events.fields.map((field) => [field.name, field.type.kind === "scalar" ? field.type.name : field.type.kind, field.nullable, field.optional]), [["id", "integer", false, false], ["ts", "text", false, false], ["status", "text", false, true], ["amount", "real", true, true], ["meta", "json", true, true]]);
     const q = await built(root, url, "insert_events", insert);
     assert.deepEqual(plain(await q.run(db, { events: [{ id: 2, ts: "2026-10-20", status: "done", amount: 1.5, meta: { source: "x" } }, { id: 1, ts: "2026-10-20", status: "late", amount: null, meta: null }] })), [{ id: 2, status: "done" }, { id: 1, status: "late" }]);
     assert.deepEqual(plain(await q.run(db, { events: [{ id: 3, ts: "2026-10-21" }] })), [{ id: 3, status: "new" }]);
@@ -131,7 +131,7 @@ test("SQLite: elsewhere a rows parameter is a table named by its alias or by the
   const sql = "select e.id, e.note from :events::rows(id integer not null, note text) as e order by e.id";
   try {
     const a = await analysis(root, url, sql);
-    assert.deepEqual(a.columns.map((c) => [c.name, c.nullable]), [["id", false], ["note", true]]);
+    assert.deepEqual(a.columns.map((column) => [column.name, column.nullable]), [["id", false], ["note", true]]);
     const q = await built(root, url, "select_events", sql);
     const db = new DatabaseSync(join(root, "app.db"));
     try {
@@ -140,7 +140,7 @@ test("SQLite: elsewhere a rows parameter is a table named by its alias or by the
       db.close();
     }
     const unaliased = await analysis(root, url, "select events.id from :events::rows(id integer not null)");
-    assert.deepEqual(unaliased.columns.map((c) => [c.name, c.nullable]), [["id", false]]);
+    assert.deepEqual(unaliased.columns.map((column) => [column.name, column.nullable]), [["id", false]]);
   } finally {
     await closeSessions();
   }

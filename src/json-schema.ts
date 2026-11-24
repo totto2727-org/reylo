@@ -99,7 +99,7 @@ function check(schema: Schema, value: unknown, path: string, out: Failure[]): Ev
 
   if (!matchesUndefined(s.type)) {
     const types = Array.isArray(s.type) ? (s.type as string[]) : [s.type as string];
-    if (!types.some((t) => is(t, value))) {return fail(out, path, `must be ${types.join(" or ")}, got ${kind(value)}`);}
+    if (!types.some((currentType) => is(currentType, value))) {return fail(out, path, `must be ${types.join(" or ")}, got ${kind(value)}`);}
   }
   if (Array.isArray(s.enum) && !s.enum.some((e) => equal(e, value))) {return fail(out, path, `must be one of ${s.enum.map((e) => JSON.stringify(e)).join(", ")}`);}
   if ("const" in s && !equal(s.const, value)) {return fail(out, path, `must be ${JSON.stringify(s.const)}`);}
@@ -538,6 +538,6 @@ function ipv6(v: string): boolean {
   const v4 = last.includes(".");
   if (v4 && !format("ipv4", last)) {return false;}
   const words = parts.length + (v4 ? 1 : 0);
-  if (parts.slice(0, v4 ? -1 : undefined).some((g) => !/^[0-9a-f]{1,4}$/i.test(g))) {return false;}
+  if (parts.slice(0, v4 ? -1 : undefined).some((part) => !/^[0-9a-f]{1,4}$/i.test(part))) {return false;}
   return halves.length === 2 ? words < 8 : words === 8;
 }

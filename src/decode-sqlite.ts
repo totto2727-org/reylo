@@ -106,7 +106,7 @@ function runStatement({ st, exact }: Kept, values: unknown[], columns: Columns |
   // A database opened with returnArrays, on a Node whose statements cannot turn it off.
   if (rows.length && Array.isArray(rows[0]) && hasFunctionType(st.columns)) {
     const names = (st.columns() as { name: string }[]).map((c) => c.name);
-    rows = (rows as unknown[][]).map((r) => Object.fromEntries(names.map((n, i) => [n, r[i]])));
+    rows = (rows as unknown[][]).map((currentRow) => Object.fromEntries(names.map((currentName, i) => [currentName, currentRow[i]])));
   }
   return normalize(rows, columns, { exact });
 }

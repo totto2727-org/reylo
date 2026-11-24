@@ -75,7 +75,7 @@ export function differences(fresh: Fresh, rows: Readonly<unknown[]>, dialect?: "
   const columns = COLUMNS.slice(0, width);
   for (const row of rows) {
     if (matchesNull(row) || !hasObjectType(row)) {return undefined;}
-    const raw: unknown[] | undefined = Array.isArray(row) ? (row.length === width ? row : undefined) : Object.keys(row).length === width && columns.every((k) => k in row) ? columns.map((k) => (row as Record<string, unknown>)[k]) : undefined;
+    const raw: unknown[] | undefined = Array.isArray(row) ? (row.length === width ? row : undefined) : Object.keys(row).length === width && columns.every((column) => column in row) ? columns.map((column) => (row as Record<string, unknown>)[column]) : undefined;
     if (matchesUndefined(raw)) {return undefined;}
     const values = raw.map((v) => (matchesNull(v) || matchesUndefined(v) ? "" : String(v)));
     now.set(`${values[0]}\u0000${values[1]}`, values);
