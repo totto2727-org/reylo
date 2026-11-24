@@ -58,7 +58,7 @@ export function parseTemplate(source: string | Uint8Array, filename = '', start:
   return { expression, diagnostics: [...result.diagnostics, ...parser.diagnostics] };
 }
 
-function relativeTraversal(expression: Expression, step: TraversalStep): Expression {
+const relativeTraversal = function relativeTraversal(expression: Expression, step: TraversalStep): Expression {
   if (expression.kind === 'traversal' || expression.kind === 'relativeTraversal') {
     expression.steps.push(step);
     if (expression.kind === 'traversal') {
@@ -69,8 +69,8 @@ function relativeTraversal(expression: Expression, step: TraversalStep): Express
     expression.range = between(expression.range, step.range); return expression;
   }
   return { kind: 'relativeTraversal', source: expression, steps: [step], range: between(expression.range, step.range) };
-}
-function nameSuggestion(given: string, suggestions: string[]): string {
+};
+const nameSuggestion = function nameSuggestion(given: string, suggestions: string[]): string {
   const chars = [...given];
   for (const suggestion of suggestions) {
     const candidate = [...suggestion];
@@ -83,7 +83,7 @@ function nameSuggestion(given: string, suggestions: string[]): string {
     if (row[candidate.length]! < 3) {return suggestion;}
   }
   return '';
-}
+};
 
 /** Stateful translation of the upstream recursive-descent parser. */
 export class Parser extends Peeker {

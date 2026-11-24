@@ -31,7 +31,7 @@ const nullable = function (schema: Schema | JsonSchema): Schema | JsonSchema {
 const GEOJSON: Schema = { type: "object", properties: { type: { type: "string" } }, required: ["type"], description: "a GeoJSON geometry" };
 
 /** The JSON form of a value of `kind` as `run` returns it, once JSON: each kind's one representation (src/values.ts). */
-function kindSchema(kind: ScalarKind, name: string, dialect: Dialect): Schema {
+const kindSchema = function kindSchema(kind: ScalarKind, name: string, dialect: Dialect): Schema {
   switch (kind) {
     case "bool": { return { type: "boolean" }; }
     // A SQLite INTEGER is 64 bits wide, and so is an oid's range past int4's.
@@ -53,7 +53,7 @@ function kindSchema(kind: ScalarKind, name: string, dialect: Dialect): Schema {
     case "json": { return {}; }
     case "unknown": { return {}; }
   }
-}
+};
 
 /** A base type by its catalog name, standing where `inJson` says: inside a JSON document, as a parameter the caller passes, or as `run` returns it. */
 const scalar = function (name: string, dialect: Dialect, inJson: boolean, input: boolean): Schema {

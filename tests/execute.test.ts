@@ -739,7 +739,7 @@ test("an unsupported client rejects, naming what it has and what reylo takes", a
 // A SQLite-backed Durable Object's ctx.storage.sql, as workerd's answers
 // (lab/driver-matrix/probes/durable-object.mjs): exec() runs at once and returns a cursor; a BigInt
 // Binding throws; an INTEGER comes back as a number, rounded past 2^53; a BLOB as an ArrayBuffer.
-function durableObjectSql(db: DatabaseSync) {
+const durableObjectSql = function durableObjectSql(db: DatabaseSync) {
   return {
     exec(sql: string, ...bindings: unknown[]) {
       if (bindings.some((binding) => typeof binding === "bigint")) {throw new TypeError("Cannot convert a BigInt value to a number");}
@@ -754,7 +754,7 @@ function durableObjectSql(db: DatabaseSync) {
       return 4096;
     },
   };
-}
+};
 
 // oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
 test("a Drizzle database or transaction runs on the driver client its session keeps", async () => {

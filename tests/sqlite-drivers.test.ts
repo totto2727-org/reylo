@@ -18,11 +18,11 @@ import { DRIVERS } from "./helpers.ts";
 const missing = ["better-sqlite3", "@libsql/client", "sqlite3"].find((d) => !existsSync(join(DRIVERS, d)));
 const skip = missing ? `lab/drivers is not installed (no ${missing})` : false;
 
-function link(root: string, driver: string): void {
+const link = function link(root: string, driver: string): void {
   const to = join(root, "node_modules", driver);
   mkdirSync(dirname(to), { recursive: true });
   symlinkSync(join(DRIVERS, driver), to);
-}
+};
 
 const project = function (drivers: string[]): { root: string; env: Record<string, string> } {
   const root = mkdtempSync(join(tmpdir(), "reylo-drivers-"));

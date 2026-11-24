@@ -102,7 +102,7 @@ export function differences(fresh: Fresh, rows: Readonly<unknown[]>, dialect?: "
 }
 
 /** Where the parenthesis that opens `s` closes, its strings skipped. */
-function closes(s: string): number {
+const closes = function closes(s: string): number {
   let depth = 0;
   for (let i = 0; i < s.length; i++) {
     if (s[i] === "'") {
@@ -112,7 +112,7 @@ function closes(s: string): number {
     else if (s[i] === ")" && --depth === 0) {return i;}
   }
   return -1;
-}
+};
 
 /**
  * A SQLite default's text in one spelling, since engines that read the same schema write it

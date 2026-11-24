@@ -135,7 +135,7 @@ export function statementAfter(sql: string, leading: Leading): string {
 }
 
 /** The fence a Markdown text opens and never closes, which would take in what follows it. */
-function openFence(text: string): string | undefined {
+const openFence = function openFence(text: string): string | undefined {
   let open: string | undefined;
   Iterator.from(text.split("\n")).forEach((line) => {
     const regexMatch = /^ {0,3}(`{3,}|~{3,})/u.exec(line);
@@ -144,7 +144,7 @@ function openFence(text: string): string | undefined {
     else if (regexMatch[1]![0] === open[0] && regexMatch[1]!.length >= open.length && !line.slice(regexMatch[0].length).trim()) {open = undefined;}
   });
   return open;
-}
+};
 
 /**
  * A JSDoc comment, indented by `indent`: the prose, then `sql` in a fenced `sql` block, then

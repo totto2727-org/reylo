@@ -83,7 +83,7 @@ export type Response =
 /** An engine's request function: one JSON request in, its answer out. */
 export type EngineCall = (request: string) => string;
 
-async function fulfil(need: Need, io: EngineIo): Promise<Answer> {
+const fulfil = async function fulfil(need: Need, io: EngineIo): Promise<Answer> {
   try {
     if (need.kind === "describe") {
       const d = await io.describe(need.sql);
@@ -100,7 +100,7 @@ async function fulfil(need: Need, io: EngineIo): Promise<Answer> {
     if (!matchesUndefined(err.position)) {error.position = Number(err.position);}
     return { error };
   }
-}
+};
 
 /**
  * An engine's core: its requests that need no database, and the analysis of a statement whose

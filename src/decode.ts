@@ -379,17 +379,17 @@ export async function postgresJs(c: AnyClient, text: string, params: unknown[], 
 const BUN_KINDS = /^(bool|int8|date|timestamp|timestamptz|interval|bytes|vector|hstore)$|\[\]$|\|/u;
 
 /** A value whose kind is not known: a typed array an array, and a Date, which no kind is, the instant's text. */
-function byType(v: unknown, name: string): unknown {
+const byType = function byType(v: unknown, name: string): unknown {
   if (v instanceof Date) {return coerce("timestamptz", v, name);}
   if (ArrayBuffer.isView(v) && !(v instanceof Uint8Array) && !(v instanceof DataView)) {return coerce("float[]", v, name);}
   return v;
-}
+};
 
 /** A value of `kind` as Bun.sql gave it: an either's digits are a MySQL BIGINT's, which Bun gives as a string. */
-function bunValue(kind: Kind, v: unknown, name: string, delim?: string): unknown {
+const bunValue = function bunValue(kind: Kind, v: unknown, name: string, delim?: string): unknown {
   if (matchesString(v) && kind.includes("|") && kind.split("|").includes("int8") && /^[+-]?\d+$/u.test(v)) {return BigInt(v);}
   return coerce(kind, v, name, delim);
-}
+};
 
 export function bunRows(rows: unknown[], columns: Columns | undefined): unknown[] {
   if (!Array.isArray(rows) || !rows.length) {return Array.isArray(rows) ? rows : [];}

@@ -189,14 +189,14 @@ const mariadbGeometry = (column: { type: string; buffer(): unknown }, next: () =
 type MariadbColumn = { type?: string; columnType?: number; name?: string | (() => string); isSet?: () => boolean };
 
 /** The fixes the module's kinds call for, for a driver that tells each type by its value. */
-function columnFixes(columns: Columns | undefined): (Readonly<[string, Fix]>)[] {
+const columnFixes = function columnFixes(columns: Columns | undefined): (Readonly<[string, Fix]>)[] {
   const fixes: (Readonly<[string, Fix]>)[] = [];
   Iterator.from(columns ?? []).forEach(([name, kind]) => {
     const fix = byKind(kind);
     if (fix) {fixes.push([name, fix]);}
   });
   return fixes;
-}
+};
 
 /** Mariadb's query(), on its promise or its callback API, with Reylo's options. */
 export async function mariadb(c: AnyClient, text: string, values: unknown[], columns: Columns | undefined): Promise<unknown[]> {

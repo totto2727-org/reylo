@@ -50,7 +50,7 @@ class Raw {
 }
 
 /** The checked rows as JSON text, a 64-bit integer as its digits. */
-function write(v: unknown): string {
+const write = function write(v: unknown): string {
   if (v instanceof Raw) {return v.text;}
   if (Array.isArray(v)) {return `[${v.map(write).join(",")}]`;}
   if (!matchesNull(v) && hasObjectType(v)) {
@@ -59,7 +59,7 @@ function write(v: unknown): string {
       .join(",")}}`;
   }
   return JSON.stringify(v);
-}
+};
 
 /**
  * Checks a structured parameter's value against its column list, and gives the value to bind:
@@ -293,7 +293,7 @@ const MYSQL_INTEGERS: Record<string, Readonly<[bigint, bigint]>> = {
  * text into NULL, an impossible date included, and rounds a fraction finer than the type keeps
  * (`::time` keeps none, and `::datetime` is written as DATETIME(6)).
  */
-function wallClock(base: string, written: string, v: unknown, fail: (message: string) => never): void {
+const wallClock = function wallClock(base: string, written: string, v: unknown, fail: (message: string) => never): void {
   const example = base === "date" ? `"2026-10-12"` : (base === "time" ? `"19:06:48"` : `"2026-10-12 19:06:48.282"`);
   if (!matchesString(v)) {return void fail(`is ${written}, which takes its text (${example}), not ${describe(v)}${v instanceof Date ? ": drivers write a Date's time in different zones" : ""}.`);}
   const s = v.trim();
@@ -312,7 +312,7 @@ function wallClock(base: string, written: string, v: unknown, fail: (message: st
     return Number(m[4] ?? 0) < 24 && Number(m[5] ?? 0) < 60 && Number(m[6] ?? 0) < 60 && (m[7] ?? "").length <= keeps;
   })();
   if (!ok) {fail(`is ${written}, as text like ${example}${keeps > 0 && base !== "date" ? ` with at most ${keeps} digits after the second's point` : (base === "time" ? " with no fraction of a second" : "")}; got ${describe(v)}, which MySQL's CAST would make NULL or change.`);}
-}
+};
 
 /**
  * Checks the value of a parameter written `:p::type` on MySQL or SQLite, whose cast turns a value

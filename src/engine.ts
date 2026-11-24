@@ -133,12 +133,12 @@ const KEPT_ANSWERS = 512;
  * (src/connection.ts); a MariaDB server, which the type check refuses, is a NotMysql; any other
  * failure is an Error.
  */
-function settled(answer: Answer): Answer {
+const settled = function settled(answer: Answer): Answer {
   if (answer.status === "notMysql") {throw new NotMysql(answer.server!);}
   if (answer.status === "unreachable" || answer.status === "refused") {throw new Unreachable(Object.assign(new Error(answer.message), answer.code && { code: answer.code }));}
   if (answer.status === "error") {throw Object.assign(new Error(answer.message), answer.code && { code: answer.code });}
   return answer;
-}
+};
 
 /** One database's engine, as the `reylo` executable serves it. */
 export class Engine extends EngineCore {

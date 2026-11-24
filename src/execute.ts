@@ -201,9 +201,9 @@ export type ParamsInput = Record<string, unknown>;
 
 // A SQLite-backed Durable Object's `ctx.storage.sql`: exec() and databaseSize, and no prepare().
 // Sqlite3's Database has exec() too, beside all().
-function isDurableObjectSql(client: AnyClient | null | undefined): boolean {
+const isDurableObjectSql = function isDurableObjectSql(client: AnyClient | null | undefined): boolean {
   return !matchesNullish(client) && hasFunctionType(client.exec) && !hasFunctionType(client.prepare) && !hasFunctionType(client.all) && "databaseSize" in client;
-}
+};
 
 /**
  * Runs the statement and returns its rows (an empty array for a statement that returns none).
@@ -302,12 +302,12 @@ const isSlonik = function (client: AnyClient): boolean {
   return hasFunctionType(client.maybeOneFirst) && hasFunctionType(client.anyFirst);
 };
 
-function asByteaHex(v: unknown) {
+const asByteaHex = function asByteaHex(v: unknown) {
   if (!(v instanceof Uint8Array)) {return v;}
   let hex = String.raw`\x`;
   Iterator.from(v).forEach((byte) => {hex += (byte < 16 ? "0" : "") + byte.toString(16);});
   return hex;
-}
+};
 
 // A value as Slonik's sql tag takes it, which is a string, a number, a boolean, a BigInt or null:
 // The rest as pg would write them, binary data as `\x` and its hex, an array as its literal, a
@@ -752,12 +752,12 @@ function dateText(d: Date): string {
   return `${pad(year < 1 ? 1 - year : year, 4)}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}.${pad(d.getMilliseconds(), 3)}${offset < 0 ? "-" : "+"}${pad(Math.floor(abs / 60))}:${pad(abs % 60)}${year < 1 ? " BC" : ""}`;
 }
 
-function indexOf(query: QueryModule, p: { name: string; start: number; end: number }): number {
+const indexOf = function indexOf(query: QueryModule, p: { name: string; start: number; end: number }): number {
   const index = query.params.indexOf(p.name);
   // A hand-built query whose `params` misses a placeholder would bind `$0`.
   if (index === -1) {throw new Error(`The statement's placeholder ${query.sql.slice(p.start, p.end)} is parameter "${p.name}", which the query's params (${JSON.stringify(query.params)}) do not list.`);}
   return index;
-}
+};
 
 /**
  * The statement as Reylo sends it to the database, and the parameter each placeholder binds: the

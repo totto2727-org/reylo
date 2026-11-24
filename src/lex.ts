@@ -15,7 +15,7 @@ import { matchesUndefined } from "./native-predicates.ts";
 export type Placeholder = { name: string; start: number; end: number };
 
 // A doubled quote is one character, and so, where `escapes`, is a backslash and what follows it.
-function skipQuoted(sql: string, start: number, quote: string, escapes: boolean): number {
+const skipQuoted = function skipQuoted(sql: string, start: number, quote: string, escapes: boolean): number {
   let i = start + 1;
   while (i < sql.length) {
     if (escapes && sql[i] === "\\") { i += 2; continue; }
@@ -23,7 +23,7 @@ function skipQuoted(sql: string, start: number, quote: string, escapes: boolean)
     i += 1;
   }
   return i;
-}
+};
 
 // A name drops its prefix (`:id` is `id`); a positional placeholder is named by its number
 // (`$2` and `?2` are `2`), and a bare `?` takes the number after the largest so far.

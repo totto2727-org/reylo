@@ -104,15 +104,15 @@ export function renderType(t: EngineType, inJson = false, dialect: Dialect = "po
 }
 
 /** A union of JSON types: `Json` absorbs the rest, and `never` adds nothing. */
-function union(parts: string[]): string {
+const union = function union(parts: string[]): string {
   const kept = [...new Set(parts)];
   if (kept.includes(JSON_TYPE)) {return JSON_TYPE;}
   const real = kept.filter((p) => p !== "never");
   return real.length ? real.join(" | ") : "never";
-}
+};
 
 /** The TypeScript literal type of one JSON value. */
-function literalType(v: unknown): string {
+const literalType = function literalType(v: unknown): string {
   if (matchesNull(v)) {return "null";}
   if (matchesString(v)) {return JSON.stringify(v);}
   if (matchesNumber(v) || matchesBoolean(v)) {return String(v);}
@@ -122,7 +122,7 @@ function literalType(v: unknown): string {
     return entries.length ? `{ ${entries.map(([key, x]) => `${ident(key)}: ${literalType(x)}`).join("; ")} }` : "Record<never, never>";
   }
   return "unknown";
-}
+};
 
 /**
  * The TypeScript type of a JSON value the engine's canonical JSON Schema describes: the values a

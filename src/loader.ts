@@ -21,9 +21,9 @@ export type SqlModule = {
 };
 
 /** The JavaScript offset into `text` of a UTF-8 byte offset. */
-function utf16(text: string, bytes: number): number {
+const utf16 = function utf16(text: string, bytes: number): number {
   return Buffer.from(text, "utf8").subarray(0, bytes).toString("utf8").length;
-}
+};
 
 export async function sqlModule(path: string, sql: string): Promise<SqlModule> {
   const session = await Session.for(dirname(path));

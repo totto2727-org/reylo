@@ -72,7 +72,7 @@ const exportedTooling = (module: unknown): Tooling => {
 
 let loaded: Promise<Tooling> | undefined = undefined;
 
-async function load(from: string): Promise<Tooling> {
+const load = async function load(from: string): Promise<Tooling> {
   let other: { name: string; version: string | undefined; dir: string } | undefined;
   for (const base of [path.join(from, "package.json"), import.meta.url]) {
     const require = createRequire(base);
@@ -100,7 +100,7 @@ async function load(from: string): Promise<Tooling> {
   }
   if (other) {throw new Error(`reylo ${VERSION} runs with ${other.name} ${VERSION}, and the one installed is ${other.version ?? "of no version"} (${other.dir}): npm install -D ${other.name}@${VERSION}`);}
   throw new Error(`reylo's SQLite/HCL build steps are not installed: npm install -D @totto2727/reylo-sqlite`);
-}
+};
 
 /** The build-time half, as the project of the directory `from` finds it, or reylo's own install. */
 export function tooling(from: string = process.cwd()): Promise<Tooling> {

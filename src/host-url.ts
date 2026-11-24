@@ -49,11 +49,11 @@ const MYSQL_SSL_CAPABILITY = 0x08_00;
 
 type SocketDialect = "postgres" | "mysql";
 
-function splitQuery(url: string): [string, string?] {
+const splitQuery = function splitQuery(url: string): [string, string?] {
   const separator = "?";
   const queryStart = url.indexOf(separator);
   return queryStart === -1 ? [url] : [url.slice(0, queryStart), url.slice(queryStart + separator.length)];
-}
+};
 
 const decodeQueryPart = (part: string): string => {
   try {
@@ -63,17 +63,17 @@ const decodeQueryPart = (part: string): string => {
   }
 };
 
-function splitPair(pair: string): [string, string] {
+const splitPair = function splitPair(pair: string): [string, string] {
   const separator = "=";
   const assignment = pair.indexOf(separator);
   return assignment === -1
     ? [decodeQueryPart(pair), ""]
     : [decodeQueryPart(pair.slice(0, assignment)), decodeQueryPart(pair.slice(assignment + separator.length))];
-}
+};
 
-function join(base: string, pairs: string[]): string {
+const join = function join(base: string, pairs: string[]): string {
   return pairs.length ? `${base}?${pairs.join("&")}` : base;
-}
+};
 
 const detectDialect = (url: string): SocketDialect | undefined => {
   const separator = url.indexOf(SCHEME_SEPARATOR);

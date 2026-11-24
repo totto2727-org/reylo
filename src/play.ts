@@ -44,7 +44,7 @@ type Backend = {
 
 const DEFAULT_PORT = 4983;
 
-function parseArgs(args: string[]): { port?: number; open: boolean; help: boolean } | string {
+const parseArgs = function parseArgs(args: string[]): { port?: number; open: boolean; help: boolean } | string {
   const out: { port?: number; open: boolean; help: boolean } = { open: true, help: false };
   for (let i = 0; i < args.length; i++) {
     const a = args[i]!;
@@ -59,12 +59,12 @@ function parseArgs(args: string[]): { port?: number; open: boolean; help: boolea
     } else {return `unknown argument ${a}`;}
   }
   return out;
-}
+};
 
-function openBrowser(url: string): void {
+const openBrowser = function openBrowser(url: string): void {
   const [command, args] = process.platform === "darwin" ? ["open", [url]] : (process.platform === "win32" ? ["cmd", ["/c", "start", "", url]] : ["xdg-open", [url]]);
   spawn(command, args, { detached: true, stdio: "ignore" }).on("error", () => {}).unref();
-}
+};
 
 export async function play(args: string[]): Promise<number> {
   const options = parseArgs(args);
@@ -98,7 +98,7 @@ export async function play(args: string[]): Promise<number> {
 export type Playground = { url: string; label: string; notice?: string; close(): Promise<void> };
 
 /** The built page: in an installed reylo, `play/` beside its package.json; in this repository, dist/reylo/play/. */
-function pageDir(cwd: string): string | undefined {
+const pageDir = function pageDir(cwd: string): string | undefined {
   const candidates = [process.env.REYLO_PLAY_PAGE];
   // Reylo exports no package.json: its entry is resolved, and its directory found above it.
   Iterator.from([join(cwd, "noop.js"), import.meta.filename]).forEach((from) => {
@@ -110,14 +110,14 @@ function pageDir(cwd: string): string | undefined {
   });
   candidates.push(join(import.meta.dirname, "..", "dist", "reylo", "play"));
   return candidates.find((dir): dir is string => !!dir && existsSync(join(dir, "index.html")));
-}
+};
 
-function send(res: ServerResponse, status: number, body: unknown): void {
+const send = function send(res: ServerResponse, status: number, body: unknown): void {
   res.writeHead(status, { "content-type": "application/json; charset=utf-8", "cache-control": "no-store", "x-content-type-options": "nosniff" });
   res.end(JSON.stringify(body));
-}
+};
 
-function listen(server: ReturnType<typeof createServer>, port: number | undefined): Promise<number | undefined> {
+const listen = function listen(server: ReturnType<typeof createServer>, port: number | undefined): Promise<number | undefined> {
   // A port the caller names is that port or nothing; the default moves up past ports in use.
   const tries = matchesUndefined(port) ? Array.from({ length: 20 }, (_unused, index) => DEFAULT_PORT + index) : [port];
   return new Promise((done) => {
@@ -132,7 +132,7 @@ function listen(server: ReturnType<typeof createServer>, port: number | undefine
     };
     attempt(0);
   });
-}
+};
 
 /** Starts the playground for the project of `cwd`, on `port` (by default the first free one from 4983): what `reylo play` runs, and the tests. */
 export async function startPlay(options: { port?: number | undefined; cwd?: string; env?: Record<string, string | undefined> } = {}): Promise<Playground> {

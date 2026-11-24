@@ -208,7 +208,7 @@ const SQLSTATE = /^[0-9A-Z]{5}$/u;
 const text = (v: unknown): string | undefined => (matchesString(v) && v !== "" ? v : undefined);
 const record = (e: unknown): Record<string, unknown> | undefined => (hasObjectType(e) && !matchesNull(e) ? (e as Record<string, unknown>) : undefined);
 
-function postgresError(error: unknown) {
+const postgresError = function postgresError(error: unknown) {
   const e = record(error);
   if (!e || !matchesString(e.severity) || !matchesString(e.message)) {return undefined;}
   const code = matchesString(e.code) && SQLSTATE.test(e.code) ? e.code : (matchesString(e.errno) && SQLSTATE.test(e.errno) ? e.errno : undefined);
@@ -230,9 +230,9 @@ function postgresError(error: unknown) {
       constraint: text(e.constraint ?? e.constraint_name),
     },
   };
-}
+};
 
-function mysqlError(error: unknown) {
+const mysqlError = function mysqlError(error: unknown) {
   const e = record(error);
   if (!e || !matchesString(e.message)) {return undefined;}
   let { errno, sqlState } = e;
@@ -248,10 +248,10 @@ function mysqlError(error: unknown) {
   if (!matchesNumber(errno) || !Number.isInteger(errno) || errno <= 0 || !matchesString(sqlState) || !SQLSTATE.test(sqlState)) {return undefined;}
   if (errno > 45_000 && errno < 46_000 && /^\(conn[:=]/u.test(e.message)) {return undefined;}
   return { errno, sqlState, message };
-}
+};
 
 /** What a MySQL message names, for the errors that name a key, a constraint or a column. */
-function mysqlNames(errno: number, message: string) {
+const mysqlNames = function mysqlNames(errno: number, message: string) {
   const names: { key?: string | undefined; constraint?: string | undefined; table?: string | undefined; column?: string | undefined } = {};
   let m: RegExpExecArray | null;
   switch (errno) {
@@ -290,7 +290,7 @@ function mysqlNames(errno: number, message: string) {
     }
   }
   return { key: names.key, constraint: names.constraint, table: names.table, column: names.column };
-}
+};
 
 /** The database's error `error` is, or undefined where it is another. */
 export async function readQueryError(dialect: Dialect, error: unknown): Promise<QueryError | undefined> {
@@ -320,7 +320,7 @@ export async function readQueryError(dialect: Dialect, error: unknown): Promise<
 }
 
 /** What SQLite's message names, for a constraint it failed. */
-function sqliteNames(errcode: number | undefined, message: string) {
+const sqliteNames = function sqliteNames(errcode: number | undefined, message: string) {
   const names: { table?: string | undefined; columns?: string[] | undefined; constraint?: string | undefined } = {};
   let m: RegExpExecArray | null;
   if (!matchesUndefined(errcode) && (errcode & 0xFF) === SQLITE_CODES.SQLITE_CONSTRAINT) {
@@ -339,7 +339,7 @@ function sqliteNames(errcode: number | undefined, message: string) {
     }
   }
   return { table: names.table, columns: names.columns, constraint: names.constraint };
-}
+};
 
 /** `readQueryError` for the synchronous SQLite clients, whose list is no import away. */
 export function readQueryErrorSync(dialect: Dialect, error: unknown): QueryError | undefined {

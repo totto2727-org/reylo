@@ -150,7 +150,7 @@ const T = {
 } as const;
 
 /** `v` as node-api builds it for `bindType`'s type: a scalar its text, a JSON value its JSON. */
-function bindValue(a: Api, t: EngineType | undefined, v: unknown): unknown {
+const bindValue = function bindValue(a: Api, t: EngineType | undefined, v: unknown): unknown {
   if (matchesNull(v) || matchesUndefined(v)) {return null;}
   if (v instanceof Uint8Array) {return a.blobValue(v);}
   if (t?.kind === "tuple" && Array.isArray(v)) {return a.tupleValue(t.items.map((item, index) => bindValue(a, item, v[index])));}
@@ -167,7 +167,7 @@ function bindValue(a: Api, t: EngineType | undefined, v: unknown): unknown {
     return JSON.stringify(v);
   }
   return String(v);
-}
+};
 
 /**
  * Runs `text` with `values`, each bound by `types` (the engine's type of each parameter), and

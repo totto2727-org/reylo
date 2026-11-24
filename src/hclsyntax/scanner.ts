@@ -31,9 +31,9 @@ const carriageReturn = 13;
 const lfLength = 1;
 const crlfLength = 2;
 
-function equalBytes(leftBytes: Uint8Array, rightBytes: Uint8Array): boolean {
+const equalBytes = function equalBytes(leftBytes: Uint8Array, rightBytes: Uint8Array): boolean {
   return leftBytes.length === rightBytes.length && leftBytes.every((v, index) => v === rightBytes[index]);
-}
+};
 const sourceStart = 0;
 const maxAscii = 0x7F;
 const maxTwoByte = 0x7_FF;

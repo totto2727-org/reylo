@@ -103,7 +103,7 @@ const ATOM = "[A-Za-z0-9!#$%&'*+\\-/=?^_`{|}~]+";
 const DOT_STRING = new RegExp(`^${ATOM}(?:\\.${ATOM})*$`);
 const QUOTED = /^"(?:[\u0020\u0021\u0023-\u005B\u005D-\u007E]|\\[\u0020-\u007E])*"$/u;
 const LABEL = /^[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?$/u;
-function email(value: string): boolean {
+const email = function email(value: string): boolean {
   const separator = value.lastIndexOf("@");
   if (separator < FIRST_SEPARATOR_POSITION) {return false;}
   const local = value.slice(TEXT_START, separator);
@@ -114,7 +114,7 @@ function email(value: string): boolean {
     return /^ipv6:/iu.test(literal) ? ipv6(literal.slice(IPV6_EMAIL_PREFIX.length)) : IPV4.test(literal);
   }
   return domain.length <= MAX_EMAIL_DOMAIN_LENGTH && domain.split(".").every((label) => label.length <= MAX_LABEL_LENGTH && LABEL.test(label));
-}
+};
 
 // RFC 3986's URI: a scheme, `:`, an authority after `//` or a path, a query and a fragment, each
 // Of the characters its part allows, a `%` always followed by two hexadecimal digits.
@@ -126,7 +126,7 @@ const URI = new RegExp(`^[A-Za-z][A-Za-z0-9+.-]*:(?://(?<authority>[^/?#]*))?(?<
 const USERINFO = new RegExp(`^(?:[${UNRESERVED}${SUB_DELIMS}:]|${PCT})*$`);
 const REG_NAME = new RegExp(`^(?:[${UNRESERVED}${SUB_DELIMS}]|${PCT})*$`);
 
-function uri(value: string): boolean {
+const uri = function uri(value: string): boolean {
   const parts = URI.exec(value)?.groups;
   if (matchesUndefined(parts)) {return false;}
   const { authority, path } = parts;
@@ -146,7 +146,7 @@ function uri(value: string): boolean {
   const host = colon !== INDEX_NOT_FOUND ? hostport.slice(TEXT_START, colon) : hostport;
   if (colon !== INDEX_NOT_FOUND && !/^\d*$/u.test(hostport.slice(colon + ":".length))) {return false;}
   return REG_NAME.test(host);
-}
+};
 
 // oxlint-disable-next-line eslint/no-magic-numbers -- Keep the Unicode virama table as ordered code-point data for IDNA context checks.
 const VIRAMA = new Set([0x09_4D, 0x09_CD, 0x0A_4D, 0x0A_CD, 0x0B_4D, 0x0B_CD, 0x0C_4D, 0x0C_CD, 0x0D_3B, 0x0D_3C, 0x0D_4D, 0x0D_CA, 0x0E_3A, 0x0E_BA, 0x0F_84, 0x10_39, 0x10_3A, 0x17_14, 0x17_15, 0x17_34, 0x17_D2, 0x1A_60, 0x1B_44, 0x1B_AA, 0x1B_AB, 0x1B_F2, 0x1B_F3, 0x2D_7F, 0xA8_06, 0xA8_2C, 0xA8_C4, 0xA9_53, 0xA9_C0, 0xAA_F6, 0xAB_ED, 0x1_0A_3F, 0x1_10_46, 0x1_10_70, 0x1_10_7F, 0x1_10_B9, 0x1_11_33, 0x1_11_34, 0x1_11_C0, 0x1_12_35, 0x1_12_EA, 0x1_13_4D, 0x1_14_42, 0x1_14_C2, 0x1_15_BF, 0x1_16_3F, 0x1_16_B6, 0x1_17_2B, 0x1_18_39, 0x1_19_3D, 0x1_19_3E, 0x1_19_E0, 0x1_1A_34, 0x1_1A_47, 0x1_1A_99, 0x1_1C_3F, 0x1_1D_44, 0x1_1D_45, 0x1_1D_97, 0x1_1F_41, 0x1_1F_42]);
