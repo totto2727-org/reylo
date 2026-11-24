@@ -372,9 +372,15 @@ const refuseReceive = () =>
   new TypeError(`Reylo cannot run on this pg-promise database: its receive event rewrites every result, Reylo's rows too, so they would not have the types the query declares. Run Reylo's queries on a database initialized without receive (pgp({ ... }) with no receive), or on its pool (db.$pool).`);
 
 /** Neon's neon() before 1.0, a function called with (text, params, options), whose options take `types` (0.9 too, undocumented). */
-export const neonCallable = function neonCallable(c: AnyClient & ((...args: unknown[]) => Promise<any>), text: string, values: unknown[], columns: Columns | undefined): Promise<unknown[]> {
-  const load: Load = async (sql) => (await c(sql, [], { arrayMode: true, fullResults: true, types: asText })).rows;
-  return pgFamily(c, (types) => c(text, values, { fullResults: true, arrayMode: false, types }), columns, load);
+export const neonCallable = function neonCallable(client: object, text: string, values: unknown[], columns: Columns | undefined): Promise<unknown[]> {
+  type QueryOptions<Row> = { arrayMode: Row extends CatalogRow ? true : false; fullResults: true; types: PgTypeTable };
+  // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- Dispatch has selected the callable Neon protocol; its options select the returned row format.
+  const query = client as <Row>(text: string, values: unknown[], options: QueryOptions<Row>) => PromiseLike<PgRows<Row>>;
+  const load: Load = async (sql) => {
+    const result = await query<CatalogRow>(sql, [], { arrayMode: true, fullResults: true, types: asText });
+    return result.rows;
+  };
+  return pgFamily(client, (types) => query<PgRow>(text, values, { fullResults: true, arrayMode: false, types }), columns, load);
 };
 
 // ---------------------------------------------------------------------------------------------
@@ -425,19 +431,29 @@ async function pglite(db: PgClient, text: string, values: unknown[], columns: Co
 // ---------------------------------------------------------------------------------------------
 // Postgres.js: `.raw()`, and the rows built by Reylo.
 
-type BufferLike = Uint8Array;
+type RawCell = Uint8Array | null;
+type PostgresRaw = unknown[] & { columns?: { name: string; type: number }[] };
+type PostgresPending = PromiseLike<unknown[]> & { raw?: () => PromiseLike<PostgresRaw> };
+type PostgresJsClient = {
+  unsafe: {
+    (text: string): { raw: () => PromiseLike<RawCell[][]> };
+    (text: string, params: unknown[], options: { prepare: true }): PostgresPending;
+  };
+};
 const textOf = utf8;
 
-export const postgresJs = async function postgresJs(c: AnyClient, text: string, params: unknown[], columns: Columns | undefined): Promise<unknown[]> {
+export const postgresJs = async function postgresJs(client: Record<string, unknown>, text: string, params: unknown[], columns: Columns | undefined): Promise<unknown[]> {
+  // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- Dispatch has selected the postgres.js unsafe query protocol.
+  const driver = client as PostgresJsClient;
   // Prepared, as postgres.js prepares its own queries: its unsafe() prepares nothing by default,
   // So every run with a parameter took two round trips (Parse and Describe, then Bind and Execute)
   // Where a statement prepared on the connection takes one. A client made with `prepare: false`,
   // As one behind a pooler in transaction mode is, still prepares nothing: its option wins.
-  const pending = c.unsafe(text, params, { prepare: true });
+  const pending = driver.unsafe(text, params, { prepare: true });
   // A client whose query has no raw() (a wrapper of postgres.js's shape): its values, given their kinds.
   if (!hasFunctionType(pending?.raw)) {return bunRows(await pending, columns);}
   const raw = await pending.raw();
-  const fields: Field[] = (raw.columns ?? []).map((f: { name: string; type: number }) => ({ name: f.name, oid: f.type }));
+  const fields: Field[] = (raw.columns ?? []).map((field) => ({ name: field.name, oid: field.type }));
   if (!raw.length) {return [];}
   // A row transform (`transform: { row }`) runs on `.raw()` rows too, and leaves them not an array of each value's bytes.
   Iterator.from(raw).forEach((row) => {
@@ -445,21 +461,26 @@ export const postgresJs = async function postgresJs(c: AnyClient, text: string, 
       throw new TypeError(`Reylo cannot read this postgres.js client's rows: its transform.row rewrites every row, Reylo's too, so they would not have the types the query declares. Run Reylo's queries on a postgres() instance without transform.row.`);
     }
   });
-  const load: Load = async (sql) => ((await c.unsafe(sql).raw()) as (BufferLike | null)[][]).map((r) => r.map((bytes) => (matchesNull(bytes) ? null : textOf(bytes))));
-  const decoders = await fieldDecoders(fields, columns, { key: c, load });
+  const load: Load = async (sql) => {
+    const rows = await driver.unsafe(sql).raw();
+    return rows.map((row) => row.map((bytes) => (matchesNull(bytes) ? null : textOf(bytes))));
+  };
+  const decoders = await fieldDecoders(fields, columns, { key: driver, load });
   // The module's names, which a `transform.column` of the app's does not rename; a query defined by
   // Hand has the server's.
   const names = columns && columns.length === fields.length ? columns.map(([name]) => name) : fields.map((field) => field.name);
-  const n = names.length;
-  const out = new Array(raw.length);
-  for (let r = 0; r < raw.length; r++) {
-    const values = raw[r] as (BufferLike | null)[];
+  const columnCount = names.length;
+  // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- Every raw row and cell was validated above, including custom row transforms.
+  const rows = raw as RawCell[][];
+  const out = new Array<Record<string, unknown>>(rows.length);
+  for (let rowIndex = 0; rowIndex < rows.length; rowIndex++) {
+    const values = rows[rowIndex]!;
     const row: Record<string, unknown> = {};
-    for (let i = 0; i < n; i++) {
-      const bytes = values[i];
-      row[names[i]!] = matchesNull(bytes) || matchesUndefined(bytes) ? null : decoders[i]!(textOf(bytes));
+    for (let columnIndex = 0; columnIndex < columnCount; columnIndex++) {
+      const bytes = values[columnIndex];
+      row[names[columnIndex]!] = matchesNull(bytes) || matchesUndefined(bytes) ? null : decoders[columnIndex]!(textOf(bytes));
     }
-    out[r] = row;
+    out[rowIndex] = row;
   }
   return out;
 };
