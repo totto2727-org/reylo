@@ -24,21 +24,36 @@ export type Structured = Readonly<{ name: string; lists: Readonly<StructuredList
 
 // BigInt calls, not literals: a project that type-checks these sources for a target below ES2020
 // Refuses a literal (TS2737), as lab/nextjs's ES2017 does.
-const TWO_63 = BigInt(2) ** BigInt(63);
-const INTEGERS: Record<string, Readonly<[bigint, bigint]>> = {
-  int2: [BigInt(-32_768), BigInt(32_767)],
-  int4: [BigInt(-2_147_483_648), BigInt(2_147_483_647)],
-  int8: [-TWO_63, TWO_63 - BigInt(1)],
-  // SQLite's INTEGER is a 64-bit integer.
-  integer: [-TWO_63, TWO_63 - BigInt(1)],
+const zero = BigInt(0);
+const one = BigInt(1);
+const two = BigInt(2);
+const signBits = 1;
+const tinyIntegerBits = 8;
+const smallIntegerBits = 16;
+const mediumIntegerBits = 24;
+const integerBits = 32;
+const bigIntegerBits = 64;
+
+type IntegerRange = Readonly<[minimum: bigint, maximum: bigint]>;
+
+const signedRange = (bits: number): IntegerRange => {
+  const ceiling = two ** BigInt(bits - signBits);
+  return [-ceiling, ceiling - one];
 };
 
-/**
- * A 64-bit integer, which JSON carries as digits: a string on Postgres, which reads one exactly, and
- * a bare number elsewhere (MySQL's `CAST(… AS SIGNED)` wraps a string out of range;
- * wiki/structured-params/verify.md). A Postgres or MySQL `int8` takes a number, a BigInt or a string
- * of digits, as its parameter type says; SQLite's `integer` takes a number or a BigInt (src/render.ts).
- */
+const tinyInteger = signedRange(tinyIntegerBits);
+const smallInteger = signedRange(smallIntegerBits);
+const mediumInteger = signedRange(mediumIntegerBits);
+const standardInteger = signedRange(integerBits);
+const bigInteger = signedRange(bigIntegerBits);
+
+const INTEGERS: Record<string, IntegerRange> = {
+  int2: smallInteger,
+  int4: standardInteger,
+  int8: bigInteger,
+  // SQLite's INTEGER is also a signed 64-bit integer.
+  integer: bigInteger,
+};
 const WIDE = new Set(["int8", "integer"]);
 
 /** Raw JSON text for a value the writer puts in as it is. */
@@ -324,43 +339,67 @@ function integer(range: Readonly<[bigint, bigint]>, digits: boolean, written: st
 }
 
 /** MySQL's integer types as a `::` cast names them, each with its range; `unsigned` doubles it from 0. */
-const MYSQL_INTEGERS: Record<string, Readonly<[bigint, bigint]>> = {
-  tinyint: [BigInt(-128), BigInt(127)],
-  smallint: INTEGERS.int2!,
-  int2: INTEGERS.int2!,
-  mediumint: [BigInt(-8_388_608), BigInt(8_388_607)],
-  int: INTEGERS.int4!,
-  integer: INTEGERS.int4!,
-  int4: INTEGERS.int4!,
-  bigint: INTEGERS.int8!,
-  int8: INTEGERS.int8!,
-  signed: INTEGERS.int8!,
+const MYSQL_INTEGERS: Record<string, IntegerRange> = {
+  bigint: bigInteger,
+  int: standardInteger,
+  int2: smallInteger,
+  int4: standardInteger,
+  int8: bigInteger,
+  integer: standardInteger,
+  mediumint: mediumInteger,
+  signed: bigInteger,
+  smallint: smallInteger,
+  tinyint: tinyInteger,
 };
 
-/**
- * A date, a time of day or both, as text MySQL's CAST reads without changing it; it turns other
- * text into NULL, an impossible date included, and rounds a fraction finer than the type keeps
- * (`::time` keeps none, and `::datetime` is written as DATETIME(6)).
- */
-const wallClock = function wallClock(base: string, written: string, v: unknown, fail: (message: string) => never): void {
-  const example = base === "date" ? `"2026-10-12"` : (base === "time" ? `"19:06:48"` : `"2026-10-12 19:06:48.282"`);
-  if (!matchesString(v)) {return void fail(`is ${written}, which takes its text (${example}), not ${describe(v)}${v instanceof Date ? ": drivers write a Date's time in different zones" : ""}.`);}
-  const s = v.trim();
-  const keeps = Number(/\(\s*(\d+)\s*\)/u.exec(written)?.[1] ?? (base === "time" ? 0 : 6));
-  const m =
-    base === "time"
-      ? /^(-?)(\d{1,3}):(\d{2})(?::(\d{2})(?:\.(\d+))?)?$/u.exec(s)
-      : /^(\d{4})-(\d{2})-(\d{2})(?:(?:[T ])(\d{2}):(\d{2})(?::(\d{2})(?:\.(\d+))?)?)?$/u.exec(s);
-  const ok = (() => {
-    if (!m) {return false;}
-    if (base === "time") {return Number(m[2]) <= 838 && Number(m[3]) < 60 && Number(m[4] ?? 0) < 60 && (m[5] ?? "").length <= keeps;}
-    const [year, month, day] = [Number(m[1]), Number(m[2]), Number(m[3])];
-    const days = new Date(Date.UTC(year, month, 0)).getUTCDate();
-    if (month < 1 || month > 12 || day < 1 || day > days) {return false;}
-    if (base === "date") {return matchesUndefined(m[4]);}
-    return Number(m[4] ?? 0) < 24 && Number(m[5] ?? 0) < 60 && Number(m[6] ?? 0) < 60 && (m[7] ?? "").length <= keeps;
-  })();
-  if (!ok) {fail(`is ${written}, as text like ${example}${keeps > 0 && base !== "date" ? ` with at most ${keeps} digits after the second's point` : (base === "time" ? " with no fraction of a second" : "")}; got ${describe(v)}, which MySQL's CAST would make NULL or change.`);}
+const CLOCK = /^-?(?<hours>\d{1,3}):(?<minutes>\d{2})(?::(?<seconds>\d{2})(?:\.(?<fraction>\d+))?)?$/u;
+const WALL_DATE = /^(?<year>\d{4})-(?<month>\d{2})-(?<day>\d{2})(?:[T ](?<hours>\d{2}):(?<minutes>\d{2})(?::(?<seconds>\d{2})(?:\.(?<fraction>\d+))?)?)?$/u;
+const FRACTION = /\(\s*(?<digits>\d+)\s*\)/u;
+const NO_FRACTION = 0;
+const DATETIME_FRACTION_DIGITS = 6;
+const MYSQL_TIME_HOUR_LIMIT = 838;
+const HOURS_PER_DAY = 24;
+const MINUTES_PER_HOUR = 60;
+const SECONDS_PER_MINUTE = 60;
+const ZERO_CLOCK_PART = 0;
+const FIRST_MONTH = 1;
+const LAST_MONTH = 12;
+const FIRST_DAY_OF_MONTH = 1;
+const LAST_DAY_OF_PREVIOUS_MONTH = 0;
+
+type ClockFields = Record<string, string | undefined>;
+
+const validClock = (parts: ClockFields, keeps: number): boolean =>
+  Number(parts.minutes ?? ZERO_CLOCK_PART) < MINUTES_PER_HOUR &&
+  Number(parts.seconds ?? ZERO_CLOCK_PART) < SECONDS_PER_MINUTE &&
+  (parts.fraction ?? "").length <= keeps;
+
+const validMysqlTime = (text: string, keeps: number): boolean => {
+  const parts = CLOCK.exec(text)?.groups;
+  return !matchesUndefined(parts) && Number(parts.hours) <= MYSQL_TIME_HOUR_LIMIT && validClock(parts, keeps);
+};
+
+const validMysqlDate = (text: string, base: string, keeps: number): boolean => {
+  const parts = WALL_DATE.exec(text)?.groups;
+  if (matchesUndefined(parts)) {return false;}
+  const month = Number(parts.month);
+  const day = Number(parts.day);
+  const days = new Date(Date.UTC(Number(parts.year), month, LAST_DAY_OF_PREVIOUS_MONTH)).getUTCDate();
+  if (month < FIRST_MONTH || month > LAST_MONTH || day < FIRST_DAY_OF_MONTH || day > days) {return false;}
+  if (base === "date") {return matchesUndefined(parts.hours);}
+  return Number(parts.hours ?? ZERO_CLOCK_PART) < HOURS_PER_DAY && validClock(parts, keeps);
+};
+
+/** Check whether MySQL would round or discard any part of a date, time or date-time. */
+const wallClock = (base: string, written: string, value: unknown, fail: RejectParameter): void => {
+  const example = base === "date" ? '"2026-10-12"' : (base === "time" ? '"19:06:48"' : '"2026-10-12 19:06:48.282"');
+  if (!matchesString(value)) {return void fail(`is ${written}, which takes its text (${example}), not ${describe(value)}${value instanceof Date ? ": drivers write a Date's time in different zones" : ""}.`);}
+  const text = value.trim();
+  const digits = FRACTION.exec(written)?.groups?.digits;
+  const keeps = Number(digits ?? (base === "time" ? NO_FRACTION : DATETIME_FRACTION_DIGITS));
+  if (base === "time" ? validMysqlTime(text, keeps) : validMysqlDate(text, base, keeps)) {return;}
+  const precision = keeps > NO_FRACTION && base !== "date" ? ` with at most ${keeps} digits after the second's point` : (base === "time" ? " with no fraction of a second" : "");
+  fail(`is ${written}, as text like ${example}${precision}; got ${describe(value)}, which MySQL's CAST would make NULL or change.`);
 };
 
 /**
@@ -378,8 +417,8 @@ export function checkCast(name: string, written: string, type: EngineType, v: un
   const base = written.replace(/\s*\(.*$/, "");
   const signed = dialect === "sqlite" ? (/int/i.test(base) ? INTEGERS.integer : undefined) : MYSQL_INTEGERS[base.replace(/\s*unsigned$/u, "") || "bigint"];
   if (signed) {
-    const range: Readonly<[bigint, bigint]> = dialect === "mysql" && base.endsWith("unsigned") ? [BigInt(0), signed[1] * BigInt(2) + BigInt(1)] : signed;
-    integer(range, dialect === "mysql" && range[1] >= INTEGERS.int8![1], written, v, fail, true);
+    const range: Readonly<[bigint, bigint]> = dialect === "mysql" && base.endsWith("unsigned") ? [zero, signed[1] * two + one] : signed;
+    integer(range, dialect === "mysql" && range[1] >= bigInteger[1], written, v, fail, true);
     return;
   }
   if (base === "uuid") {
