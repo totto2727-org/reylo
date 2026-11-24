@@ -36,7 +36,7 @@ const TOKEN_TIMEOUT = 10_000;
  * where Node opens no Unix socket, a Postgres URL that names one is an Unreachable that says so.
  */
 export async function hostUrl(url: string, env: Record<string, string | undefined> = process.env, platform: NodeJS.Platform = process.platform): Promise<HostUrl> {
-  const postgres = /^postgres(ql)?:\/\//i.test(url);
+  const postgres = /^postgres(?:ql)?:\/\//i.test(url);
   const mysql = /^mysql:\/\//i.test(url);
   if (!postgres && !mysql) {return { url, close: () => {} };}
   const [base, query = ""] = splitQuery(url);

@@ -45,7 +45,7 @@ test("native packages cover supported platforms at the exact upstream engine ver
   });
   const { key, pkg } = platformPackage();
   assert.equal(pkg, PLATFORM_PACKAGES[key]);
-  assert.match(key, /^(darwin|linux|win32)-(arm64|x64)(-musl)?$/u);
+  assert.match(key, /^(?:darwin|linux|win32)-(?:arm64|x64)(?:-musl)?$/u);
 });
 
 // oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.

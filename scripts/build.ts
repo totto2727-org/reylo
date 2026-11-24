@@ -66,12 +66,12 @@ await writeFile(join(reylo, "package.json"), `${JSON.stringify(built, null, 2)  
 
 // Nothing TypeScript ships but declarations, and no engine ships inside reylo.
 const files = await readdir(reylo, { encoding: "utf8", recursive: true });
-const source = files.filter((f) => /\.(c|m)?ts$/u.test(f) && !/\.d\.(c|m)?ts$/u.test(f));
+const source = files.filter((f) => /\.(?:c|m)?ts$/u.test(f) && !/\.d\.(?:c|m)?ts$/u.test(f));
 if (source.length) {throw new Error(`dist/reylo holds TypeScript sources: ${source.join(", ")}`);}
 const wasm = files.filter((f) => f.endsWith(".wasm"));
 if (wasm.length) {throw new Error(`dist/reylo holds an engine: ${wasm.join(", ")}`);}
 // Nor any of the build-time half, which a run-time module would drag in by importing it.
-const tooling = files.filter((f) => /^src\/(tooling|analyze|engine|engine-core|engine-worker|component|loader|commands|mapper-server|play)\.js$/u.test(f));
+const tooling = files.filter((f) => /^src\/(?:tooling|analyze|engine|engine-core|engine-worker|component|loader|commands|mapper-server|play)\.js$/u.test(f));
 if (tooling.length) {throw new Error(`dist/reylo holds the engine packages' build steps: ${tooling.join(", ")}`);}
 console.log(`dist/reylo: ${files.length} files, package ${built.name}@${built.version}`);
 
@@ -108,7 +108,7 @@ await Promise.all(DATABASES.map(async (db) => {
   if (typeof (createRequire(import.meta.url)(join(to, "tooling.js")) as { default?: { sqlModule?: unknown } }).default?.sqlModule !== "function") {throw new Error(`dist/${db}/tooling.js does not load with a require`);}
   // The engine connects to its database itself, or DuckDB's through the app's own driver: no
   // Driver, and nothing native, is bundled.
-  const native = Object.keys(half.metafile.inputs).filter((input) => /node_modules\/(postgres|mysql2|@duckdb|@bytecodealliance\/jco-node-fs)\//u.test(input));
+  const native = Object.keys(half.metafile.inputs).filter((input) => /node_modules\/(?:postgres|mysql2|@duckdb|@bytecodealliance\/jco-node-fs)\//u.test(input));
   if (native.length) {throw new Error(`dist/${db}/tooling.js bundles a driver or a native addon: ${native.join(", ")}`);}
   // A child process src/sqlite-drivers.ts starts beside the module that starts it.
   await bundle({ ...bundled, entryPoints: [join(root, "src/d1-proxy.ts")], outfile: join(to, "d1-proxy.js") });

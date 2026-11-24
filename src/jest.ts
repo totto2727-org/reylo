@@ -36,7 +36,7 @@ function commonJs(path: string, code: string): string {
     .replace(/^import \{ (defineQuery(?:, checks)?) \} from "@totto2727\/reylo";$/mu, (_, names: string) => `const { ${names} } = require("@totto2727/reylo");`)
     .replace(/^export const (\w+) = /gmu, "const $1 = exports.$1 = ")
     .replace(/^export default /mu, "exports.default = ");
-  if (/^(import|export) /mu.test(out)) {throw new Error(`${path}: reylo's module has a shape reylo/jest cannot make CommonJS.`);}
+  if (/^(?:import|export) /mu.test(out)) {throw new Error(`${path}: reylo's module has a shape reylo/jest cannot make CommonJS.`);}
   return `Object.defineProperty(exports, "__esModule", { value: true });\n${out}`;
 }
 

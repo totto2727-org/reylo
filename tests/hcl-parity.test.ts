@@ -105,7 +105,7 @@ test("direct HCL query types match the same schema applied by Atlas", { timeout:
       const actual = await declarations(hclRoot, files);
       Object.keys(files).forEach((name) => {
         // Driver-specific errors and documentation are not inferred input/result types.
-        const types = (text: string) => text.split("\n").filter((line) => /^(export type (Params|Row) =|declare const query: Query<)/u.test(line));
+        const types = (text: string) => text.split("\n").filter((line) => /^(?:export type (?:Params|Row) =|declare const query: Query<)/u.test(line));
         assert.equal(types(actual[name]!).length, 3, name);
         assert.deepEqual(types(actual[name]!), types(expected[name]!), name);
       });

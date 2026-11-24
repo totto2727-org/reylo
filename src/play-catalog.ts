@@ -95,7 +95,7 @@ export function catalog(dialect: Dialect, tables: unknown[][], functions: unknow
     tables: [...byName.values()],
     functions: (functions as [string, unknown, string[] | null, unknown][]).map(([name, aggregate, returns, rows]) => {
       // A polymorphic or pseudo return type (anyelement, record, void) says nothing worth showing.
-      const real = returns?.length === 1 && !/^(any|record|void|"any")/u.test(returns[0]!) ? shortType(returns[0]!) : undefined;
+      const real = returns?.length === 1 && !/^(?:any|record|void|"any")/u.test(returns[0]!) ? shortType(returns[0]!) : undefined;
       return { name, kind: Number(aggregate) || aggregate === true ? "aggregate" : "function", ...(real ? { returns: real } : {}), rows: Boolean(Number(rows) || rows === true) };
     }),
     types: [...new Set([...(types as [string][]).map(([t]) => t), ...SPELLED[dialect]])].sort(),

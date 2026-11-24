@@ -38,7 +38,7 @@ const built = async function (root: string, name: string, raw: string) {
 
 /** The declaration's lines that carry the two texts, their doc comments left out. */
 const texts = function (declaration: string): string[] {
-  return declaration.split("\n").filter((line) => /^export declare const (sql|raw):|^ {2}readonly (sql|raw|source):/u.test(line) || line.startsWith("declare const query:")).map((line) => line.replace(/^declare const query: Query<.*> & /, "declare const query: Query<…> & "));
+  return declaration.split("\n").filter((line) => /^export declare const (?:sql|raw):|^ {2}readonly (?:sql|raw|source):/u.test(line) || line.startsWith("declare const query:")).map((line) => line.replace(/^declare const query: Query<.*> & /, "declare const query: Query<…> & "));
 };
 
 const GET_USER = "select id, name, email from users where id = :id\n";

@@ -81,7 +81,7 @@ test("invalid static declarations fail before the engine receives a catalog", as
     const catalog = hclCatalog(join(root, "schema.hcl"), wasm);
     assert.deepEqual((await catalog.analyze(SELECT)).diagnostics, []);
     await catalog.close();
-    assert.ok(!readdirSync(root).some((name) => /\.(db|sqlite)(-|$)/u.test(name)));
+    assert.ok(!readdirSync(root).some((name) => /\.(?:db|sqlite)(?:-|$)/u.test(name)));
   } finally { await rm(root, { force: true, recursive: true }); }
 });
 
@@ -143,7 +143,7 @@ test("Atlas HCL feeds the real SQLite engine and invalidates warm caches immedia
     const restored = await session.analyze(SELECT);
     assert.ok(restored.ok, JSON.stringify(restored));
     assert.equal(restored.analysis.columns[1]!.nullable, false);
-    assert.ok(!readdirSync(root).some((name) => /\.(db|sqlite)(-|$)/u.test(name)));
+    assert.ok(!readdirSync(root).some((name) => /\.(?:db|sqlite)(?:-|$)/u.test(name)));
   } finally {
     await session.close();
     await rm(root, { force: true, recursive: true });
@@ -188,7 +188,7 @@ test("the mapper and runtime loader consume HCL directly without running migrati
     assert.match(updated.text, /name: string \| null/u);
     await writeFile(join(root, "schema.hcl"), "invalid HCL");
     await assert.rejects(sqlModule(join(root, "get.sql"), SELECT), /Cannot evaluate HCL schema/u);
-    assert.ok(!readdirSync(root).some((name) => /\.(db|sqlite)(-|$)/u.test(name)));
+    assert.ok(!readdirSync(root).some((name) => /\.(?:db|sqlite)(?:-|$)/u.test(name)));
   } finally {
     db.close();
     await handlers.closeProject!({ projectHandle: handle });
