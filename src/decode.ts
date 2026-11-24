@@ -26,17 +26,21 @@
 import { coerce, DecodeError, scalarKind, textDecoder, utf8 } from './values.ts';
 import type { Columns, Decoder, Kind, ScalarKind } from './values.ts';
 import { lexPlaceholders } from "./lex.ts";
-import { hasFunctionType, matchesNull, matchesString, matchesUndefined } from "./native-predicates.ts";
+import { hasFunctionType, isEmptyString, matchesNull, matchesString, matchesUndefined } from "./native-predicates.ts";
 
 type AnyClient = Record<string, any>;
-type Field = { name: string; oid: number };
+interface Field {
+  name: string;
+  oid: number;
+}
 
 /** Below it the built-in types, whose oids every database shares (FirstGenbkiObjectId). */
 const FIRST_USER_OID = 10_000;
 
 const SCALAR_OIDS: Readonly<Record<number, ScalarKind>> = {
-  16: "bool", 17: "bytes", 20: "int8", 21: "int", 23: "int", 26: "int", 700: "float", 701: "float",
-  1700: "decimal", 1082: "date", 1114: "timestamp", 1184: "timestamptz", 1186: "interval", 114: "json", 3802: "json",
+  16: "bool", 17: "bytes", 20: "int8", 21: "int", 23: "int", 26: "int", 114: "json",
+  700: "float", 701: "float", 1082: "date", 1114: "timestamp", 1184: "timestamptz", 1186: "interval",
+  1700: "decimal", 3802: "json",
 };
 
 // Every built-in array type and its element, as Postgres 18's pg_type lists them (none was ever
@@ -55,24 +59,43 @@ const ARRAY_OIDS = new Map<number, number>([
 ]);
 /* oxlint-enable eslint/no-magic-numbers */
 const BOX_ARRAY = 1020;
+const DEFAULT_ARRAY_DELIMITER = ",";
+const BOX_ARRAY_DELIMITER = ";";
 
-/** A built-in type's kind and its array delimiter; undefined for a type the database created. */
-const builtin = function (oid: number): { kind: Kind; delim: string } | undefined {
+interface Decoding {
+  delim: string;
+  kind: Kind;
+}
+
+const decoding = (kind: Kind, delim = DEFAULT_ARRAY_DELIMITER): Decoding => ({ delim, kind });
+const DEFAULT_DECODING = decoding("text");
+
+/**
+ * Look up the data format for a built-in PostgreSQL type.
+ * @param {number} oid - The type's catalog identifier.
+ * @returns {Decoding | undefined} The kind and delimiter of a built-in type, if known.
+ */
+const builtin = function (oid: number): Decoding | undefined {
   const scalar = SCALAR_OIDS[oid];
-  if (scalar) {return { kind: scalar, delim: "," };}
+  if (scalar) {return decoding(scalar);}
   const element = ARRAY_OIDS.get(oid);
-  if (!matchesUndefined(element)) {return { kind: `${SCALAR_OIDS[element] ?? "text"}[]`, delim: oid === BOX_ARRAY ? ";" : "," };}
-  return oid < FIRST_USER_OID ? { kind: "text", delim: "," } : undefined;
+  if (!matchesUndefined(element)) {
+    return decoding(
+      `${SCALAR_OIDS[element] ?? "text"}[]`,
+      oid === BOX_ARRAY ? BOX_ARRAY_DELIMITER : DEFAULT_ARRAY_DELIMITER,
+    );
+  }
+  return oid < FIRST_USER_OID ? DEFAULT_DECODING : undefined;
 };
 
 const builtinDecoders = new Map<number, Decoder>();
 const builtinDecoder = function (oid: number): Decoder | undefined {
-  let decoder = builtinDecoders.get(oid);
-  if (matchesUndefined(decoder)) {
-    const b = builtin(oid);
-    if (!b) {return undefined;}
-    builtinDecoders.set(oid, (decoder = textDecoder(b.kind, b.delim)));
-  }
+  const cached = builtinDecoders.get(oid);
+  if (cached) {return cached;}
+  const format = builtin(oid);
+  if (!format) {return undefined;}
+  const decoder = textDecoder(format.kind, format.delim);
+  builtinDecoders.set(oid, decoder);
   return decoder;
 };
 
@@ -80,16 +103,23 @@ const builtinDecoder = function (oid: number): Decoder | undefined {
 // The types a database created: their kind from the module's columns, or from the catalog.
 
 /** What Reylo learned of one client's types the database created: each oid's kind and delimiter. */
-type Learned = Map<number, { kind: Kind; delim: string }>;
+type Learned = Map<number, Decoding>;
 const learned = new WeakMap<object, Learned>();
 const learnedOf = (key: object): Learned => {
-  let l = learned.get(key);
-  if (!l) {learned.set(key, (l = new Map()));}
-  return l;
+  const cached = learned.get(key);
+  if (cached) {return cached;}
+  const entries: Learned = new Map();
+  learned.set(key, entries);
+  return entries;
 };
 
 /** Rows as arrays of text, from a query that reads the catalog. */
 type Load = (sql: string) => Promise<(string | null)[][]>;
+
+interface Catalog {
+  key: object;
+  load: Load;
+}
 
 // Every type among `oids`, and every array type's element, with its base type through any number
 // Of domains and that base type's name (an array of row values, or of a type whose own output is
@@ -111,8 +141,11 @@ where e.typarray = any(${list}) or (e.oid = any(${list}) and e.typcategory <> 'A
  * Reads the kinds of the oids the client has not met yet: a type the database created by its
  * name, as the engine names it (pgvector's `vector` is its numbers, an enum its text), and an array
  * of one its element's kind.
+ * @param {Catalog} catalog - The client identity and query used to load its type catalog.
+ * @param {Iterable<number>} oids - The types used by the statement.
+ * @returns {Promise<void>} Resolves after the client's type cache is updated.
  */
-const learn = async function (key: object, oids: Iterable<number>, load: Load): Promise<void> {
+const learn = async function ({ key, load }: Catalog, oids: Iterable<number>): Promise<void> {
   const known = learnedOf(key);
   const missing = new Set([...oids].filter((oid) => !known.has(oid)));
   if (!missing.size) {return;}
@@ -120,31 +153,52 @@ const learn = async function (key: object, oids: Iterable<number>, load: Load): 
   // An array oid takes its element's kind, never the text its own row as a type would give it.
   const arrays = new Set<number>();
   Iterator.from(rows).forEach(([array, base, isText, delim, oid, name]) => {
-    const element = isText === "true" ? undefined : (builtin(Number(base))?.kind ?? (name ? scalarKind(name, "postgres") : "text"));
+    const typeName = name ?? "";
+    const element = isText === "true"
+      ? undefined
+      : builtin(Number(base))?.kind ?? (isEmptyString(typeName) ? "text" : scalarKind(typeName, "postgres"));
     if (missing.has(Number(array))) {
       arrays.add(Number(array));
-      known.set(Number(array), matchesUndefined(element) || element.endsWith("[]") ? { kind: "text", delim: "," } : { kind: `${element}[]`, delim: delim ?? "," });
+      known.set(
+        Number(array),
+        matchesUndefined(element) || element.endsWith("[]")
+          ? DEFAULT_DECODING
+          : decoding(`${element}[]`, delim ?? DEFAULT_ARRAY_DELIMITER),
+      );
     }
-    if (missing.has(Number(oid)) && !arrays.has(Number(oid))) {known.set(Number(oid), { kind: element ?? "text", delim: "," });}
+    if (missing.has(Number(oid)) && !arrays.has(Number(oid))) {
+      known.set(Number(oid), decoding(element ?? "text"));
+    }
   });
-  Iterator.from(missing).forEach((oid) => {if (!known.has(oid)) {known.set(oid, { kind: "text", delim: "," });}});
+  missing.forEach((oid) => {if (!known.has(oid)) {known.set(oid, DEFAULT_DECODING);}});
 };
 
 /**
  * The decoder of each field a result named: a built-in type's by its oid, a created type's by the
  * module's column (when the module's columns match the result's) or by what the catalog said.
+ * @param {Field[]} fields - The driver's result fields in order.
+ * @param {Columns | undefined} columns - The generated module's columns when available.
+ * @param {Catalog} catalog - The client identity and catalog loader.
+ * @returns {Promise<Decoder[]>} The decoders for the result fields.
  */
-const fieldDecoders = async function (fields: Field[], columns: Columns | undefined, key: object, load: Load): Promise<Decoder[]> {
+const fieldDecoders = async function (fields: Field[], columns: Columns | undefined, catalog: Catalog): Promise<Decoder[]> {
   const byColumn = columns && columns.length === fields.length ? columns : undefined;
   const created = fields.filter((field) => field.oid >= FIRST_USER_OID);
-  const known = learnedOf(key);
-  if (byColumn) {created.forEach((field) => known.has(field.oid) || known.set(field.oid, { kind: byColumn[fields.indexOf(field)]![1], delim: byColumn[fields.indexOf(field)]![2] ?? "," }));}
-  else if (created.length) {await learn(key, created.map((field) => field.oid), load);}
+  const known = learnedOf(catalog.key);
+  if (byColumn) {
+    created.forEach((field) => {
+      if (known.has(field.oid)) {return;}
+      // oxlint-disable-next-line typescript/no-non-null-assertion -- The matched module columns contain a tuple for each field.
+      const column = byColumn[fields.indexOf(field)]!;
+      known.set(field.oid, decoding(column[1], column[2]));
+    });
+  }
+  else if (created.length) {await learn(catalog, created.map((field) => field.oid));}
   return fields.map((field) => {
     const decoder = builtinDecoder(field.oid);
     if (decoder) {return decoder;}
-    const k = known.get(field.oid) ?? { kind: "text", delim: "," };
-    return textDecoder(k.kind, k.delim);
+    const format = known.get(field.oid) ?? DEFAULT_DECODING;
+    return textDecoder(format.kind, format.delim);
   });
 };
 
@@ -166,23 +220,22 @@ const BINARY = Symbol("binary");
 /** The decoder table for one query on a pg-family client, which never falls back to the client's own parsers. */
 const pgTypes = function (key: object) {
   const known = learnedOf(key);
-  let binary = false;
-  let pending = false;
+  const observed = { binary: false, pending: false };
   const table = {
     getTypeParser(oid: number, format?: string): Decoder {
       if (!matchesUndefined(format) && format !== "text") {
-        binary = true;
+        observed.binary = true;
         return () => BINARY;
       }
       const decoder = builtinDecoder(oid);
       if (decoder) {return decoder;}
-      const k = known.get(oid);
-      if (k) {return textDecoder(k.kind, k.delim);}
-      pending = true;
+      const learnedType = known.get(oid);
+      if (learnedType) {return textDecoder(learnedType.kind, learnedType.delim);}
+      observed.pending = true;
       return (text) => new Pending(oid, text);
     },
   };
-  return { table, sawBinary: () => binary, sawPending: () => pending };
+  return { sawBinary: () => observed.binary, sawPending: () => observed.pending, table };
 };
 
 const refuseBinary = () =>
@@ -201,10 +254,12 @@ const pgFamily = async function (key: object, run: (types: object) => Promise<Pg
   if (types.sawBinary()) {throw refuseBinary();}
   if (!types.sawPending()) {return rows;}
   // Learned from the module's columns where the result has their fields, else from the catalog.
-  if (result.fields && !Array.isArray(result)) {await fieldDecoders(result.fields.map((field) => ({ name: field.name, oid: field.dataTypeID })), columns, key, load);}
+  if (result.fields && !Array.isArray(result)) {
+    await fieldDecoders(result.fields.map((field) => ({ name: field.name, oid: field.dataTypeID })), columns, { key, load });
+  }
   const oids = new Set<number>();
   Iterator.from(rows).forEach((row) => {Object.values(row).forEach((v) => {if (v instanceof Pending) {oids.add(v.oid);}});});
-  await learn(key, oids, load);
+  await learn({ key, load }, oids);
   const known = learnedOf(key);
   const decoders = new Map([...oids].map((oid) => [oid, textDecoder(known.get(oid)!.kind, known.get(oid)!.delim)]));
   Iterator.from(rows).forEach((row) => {
@@ -306,7 +361,7 @@ async function pglite(db: AnyClient, text: string, values: unknown[], columns: C
   const after = fields.map((field, index) => [field, index] as const).filter(([f]) => f.oid >= FIRST_USER_OID || !oids.has(f.oid));
   if (after.length) {
     const load: Load = async (sql) => (await db.query(sql, [], { rowMode: "array", parsers: { 25: keepText } })).rows;
-    const decoders = await fieldDecoders(fields, columns, db, load);
+    const decoders = await fieldDecoders(fields, columns, { key: db, load });
     const kinds = fields.map((field, index) => (columns && columns.length === fields.length ? columns[index]![1] : (builtin(field.oid)?.kind ?? learnedOf(db).get(field.oid)?.kind ?? "text")));
     Iterator.from(after).forEach(([f, i]) => {
       const decode = decoders[i]!;
@@ -347,7 +402,7 @@ export async function postgresJs(c: AnyClient, text: string, params: unknown[], 
     }
   });
   const load: Load = async (sql) => ((await c.unsafe(sql).raw()) as (BufferLike | null)[][]).map((r) => r.map((bytes) => (matchesNull(bytes) ? null : textOf(bytes))));
-  const decoders = await fieldDecoders(fields, columns, c, load);
+  const decoders = await fieldDecoders(fields, columns, { key: c, load });
   // The module's names, which a `transform.column` of the app's does not rename; a query defined by
   // Hand has the server's.
   const names = columns && columns.length === fields.length ? columns.map(([name]) => name) : fields.map((field) => field.name);
