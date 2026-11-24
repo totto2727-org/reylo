@@ -29,33 +29,45 @@ export class RagelState {
   public cs: number;
   public constructor(cs: number) { this.cs = cs; }
 }
+const NO_ACTIONS = 0;
+const FIRST_ACTION_OFFSET = 1;
+const DEAD_STATE = 0;
+
+const generatedEntry = (values: ArrayLike<number>, index: number): number => {
+  // oxlint-disable-next-line typescript/no-non-null-assertion -- The generated transition tables and active scanner state supply the indexed slots.
+  return values[index]!;
+};
+
 // Return true from an action to implement the generated `goto _again`.
-export function runRagel(data: Uint8Array, t: RagelTables, s: RagelState, action: (id: number) => boolean | void): void {
+export function runRagel(data: Uint8Array, tables: RagelTables, state: RagelState, action: (id: number) => boolean | void): void {
   const actions = (offset: number): boolean => {
-    const count = t.actions[offset++] ?? 0;
-    for (let n = 0; n < count; n++) {
-      if (action(t.actions[offset++]!) || s.done) {return true;}
+    const count = tables.actions[offset] ?? NO_ACTIONS;
+    let actionIndex = offset;
+    const lastAction = offset + count;
+    while (actionIndex < lastAction) {
+      actionIndex += FIRST_ACTION_OFFSET;
+      if (action(generatedEntry(tables.actions, actionIndex)) || state.done) {return true;}
     }
     return false;
   };
-  let phase: 'resume' | 'again' | 'test_eof' | 'eof_trans' = s.p === data.length ? 'test_eof' : 'resume';
+  let phase: 'resume' | 'again' | 'test_eof' | 'eof_trans' = state.p === data.length ? 'test_eof' : 'resume';
   let trans = 0;
-  executor: while (!s.done) {
+  while (!state.done) {
     switch (phase) {
       case 'resume': {
-        if (s.cs === 0) {break executor;}
-        if (t.from_state_actions) {actions(t.from_state_actions[s.cs]!);}
-        let keys = t.key_offsets[s.cs]!;
-        trans = t.index_offsets[s.cs]!;
-        let klen = t.single_lengths[s.cs]!;
+        if (state.cs === DEAD_STATE) {return;}
+        if (tables.from_state_actions) {actions(generatedEntry(tables.from_state_actions, state.cs));}
+        let keys = generatedEntry(tables.key_offsets, state.cs);
+        trans = generatedEntry(tables.index_offsets, state.cs);
+        let klen = generatedEntry(tables.single_lengths, state.cs);
         let matched = false;
         if (klen > 0) {
           let lower = keys;
           let upper = keys + klen - 1;
           while (upper >= lower) {
             const mid = lower + ((upper - lower) >> 1);
-            if (data[s.p]! < t.trans_keys[mid]!) {upper = mid - 1;}
-            else if (data[s.p]! > t.trans_keys[mid]!) {lower = mid + 1;}
+            if (generatedEntry(data, state.p) < generatedEntry(tables.trans_keys, mid)) {upper = mid - 1;}
+            else if (generatedEntry(data, state.p) > generatedEntry(tables.trans_keys, mid)) {lower = mid + 1;}
             else {
               trans += mid - keys;
               matched = true;
@@ -68,14 +80,14 @@ export function runRagel(data: Uint8Array, t: RagelTables, s: RagelState, action
           }
         }
         if (!matched) {
-          klen = t.range_lengths[s.cs]!;
+          klen = generatedEntry(tables.range_lengths, state.cs);
           if (klen > 0) {
             let lower = keys;
             let upper = keys + (klen << 1) - 2;
             while (upper >= lower) {
               const mid = lower + (((upper - lower) >> 1) & ~1);
-              if (data[s.p]! < t.trans_keys[mid]!) {upper = mid - 2;}
-              else if (data[s.p]! > t.trans_keys[mid + 1]!) {lower = mid + 2;}
+              if (generatedEntry(data, state.p) < generatedEntry(tables.trans_keys, mid)) {upper = mid - 2;}
+              else if (generatedEntry(data, state.p) > generatedEntry(tables.trans_keys, mid + 1)) {lower = mid + 2;}
               else {
                 trans += (mid - keys) >> 1;
                 matched = true;
@@ -85,33 +97,33 @@ export function runRagel(data: Uint8Array, t: RagelTables, s: RagelState, action
             if (!matched) {trans += klen;}
           }
         }
-        trans = t.indicies[trans]!;
+        trans = generatedEntry(tables.indicies, trans);
         phase = 'eof_trans';
         continue;
       }
       case 'eof_trans': {
-        s.cs = t.trans_targs[trans]!;
-        if (t.trans_actions[trans] !== 0) {actions(t.trans_actions[trans]!);}
+        state.cs = generatedEntry(tables.trans_targs, trans);
+        if (tables.trans_actions[trans] !== NO_ACTIONS) {actions(generatedEntry(tables.trans_actions, trans));}
         phase = 'again';
         continue;
       }
       case 'again': {
-        if (t.to_state_actions) {actions(t.to_state_actions[s.cs]!);}
-        if (s.done || s.cs === 0) {break executor;}
-        s.p++;
-        phase = s.p !== data.length ? 'resume' : 'test_eof';
+        if (tables.to_state_actions) {actions(generatedEntry(tables.to_state_actions, state.cs));}
+        if (state.done || state.cs === DEAD_STATE) {return;}
+        state.p += 1;
+        phase = state.p !== data.length ? 'resume' : 'test_eof';
         continue;
       }
       case 'test_eof': {
-        if (s.p === data.length) {
-          if (t.eof_trans && t.eof_trans[s.cs]! > 0) {
-            trans = t.eof_trans[s.cs]! - 1;
+        if (state.p === data.length) {
+          if (tables.eof_trans && generatedEntry(tables.eof_trans, state.cs) > 0) {
+            trans = generatedEntry(tables.eof_trans, state.cs) - 1;
             phase = 'eof_trans';
             continue;
           }
-          if (t.eof_actions) {actions(t.eof_actions[s.cs]!);}
+          if (tables.eof_actions) {actions(generatedEntry(tables.eof_actions, state.cs));}
         }
-        break executor;
+        return;
       }
     }
   }
