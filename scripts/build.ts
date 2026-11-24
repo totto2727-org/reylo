@@ -43,24 +43,30 @@ await copyFile(join(root, "README.md"), join(reylo, "README.md"));
 await mkdir(join(reylo, "docs"), { recursive: true });
 await copyFile(join(root, "docs/effect.md"), join(reylo, "docs/effect.md"));
 
-const pkg = JSON.parse(await readFile(join(root, "package.json"), "utf8"));
+// oxlint-disable-next-line import/no-relative-parent-imports -- Read the checkout's source manifest to publish the runtime.
+const { default: pkg } = await import("../package.json", { with: { type: "json" } });
 Object.entries(pkg.optionalDependencies).forEach(([name, version]) => {
   if (version !== ENGINE_VERSION) {throw new Error(`package.json: the upstream engine ${name} is ${version}, expected ${ENGINE_VERSION}`);}
 });
 const { private: _private, scripts: _scripts, devDependencies: _dev, imports: _developmentImports, bin, exports, typescript, ...rest } = pkg;
 // SQLite tooling is a peer at reylo's own fork version (src/engine-package.ts).
+const peers: {
+  peerDependencies?: Record<string, string>;
+  peerDependenciesMeta?: Record<string, { optional?: boolean }>;
+} = rest;
 Iterator.from(DATABASES).forEach((db) => {
   const name = `@totto2727/reylo-${db}`;
-  if (rest.peerDependencies?.[name] !== pkg.version) {throw new Error(`package.json: the peer ${name} is ${rest.peerDependencies?.[name]}, and reylo is ${pkg.version}; they move together`);}
-  if (!rest.peerDependenciesMeta?.[name]?.optional) {throw new Error(`package.json: the peer ${name} must be optional, since a project installs only its databases' engines`);}
+  const version = peers.peerDependencies?.[name];
+  if (version !== pkg.version) {throw new Error(`package.json: the peer ${name} is ${version}, and reylo is ${pkg.version}; they move together`);}
+  if (!peers.peerDependenciesMeta?.[name]?.optional) {throw new Error(`package.json: the peer ${name} must be optional, since a project installs only its databases' engines`);}
 });
 const built = {
   ...rest,
   // A bin path without its "./", as npm writes it: npm rewrites `./src/cli.js` to `src/cli.js` at
   // Publish and warns that the script "was invalid and removed", which it was not (0.0.1's stage).
-  bin: Object.fromEntries(Object.entries(bin as Record<string, string>).map(([name, path]) => [name, js(path).replace(/^\.\//u, "")])),
-  exports: Object.fromEntries(Object.entries(exports as Record<string, string>).map(([key, path]) => [key, { types: path.replace(/\.ts$/u, ".d.ts"), default: js(path) }])),
-  typescript: { ...typescript, contentMapper: { ...typescript.contentMapper, exec: (typescript.contentMapper.exec as string[]).map(js) } },
+  bin: Object.fromEntries(Object.entries(bin).map(([name, sourcePath]) => [name, js(sourcePath).replace(/^\.\//u, "")])),
+  exports: Object.fromEntries(Object.entries(exports).map(([key, sourcePath]) => [key, { types: sourcePath.replace(/\.ts$/u, ".d.ts"), default: js(sourcePath) }])),
+  typescript: { ...typescript, contentMapper: { ...typescript.contentMapper, exec: typescript.contentMapper.exec.map(js) } },
 };
 await writeFile(join(reylo, "package.json"), `${JSON.stringify(built, null, 2)  }\n`);
 
@@ -94,9 +100,12 @@ await Promise.all(DATABASES.map(async (db) => {
   const from = join(root, "packages", db);
   const to = join(dist, db);
   await mkdir(to);
-  const { private: _enginePrivate, exports: entries, devDependencies: _engineDev, ...engine } = JSON.parse(await readFile(join(from, "package.json"), "utf8"));
+  // oxlint-disable-next-line import/no-relative-parent-imports -- Read the checkout's source manifest to publish the SQLite tooling.
+  const { default: engineManifest } = await import("../packages/sqlite/package.json", { with: { type: "json" } });
+  const { private: _enginePrivate, exports: entries, devDependencies: _engineDev, ...engine }:
+    typeof engineManifest & { devDependencies?: Record<string, string> } = engineManifest;
   if (engine.version !== pkg.version) {throw new Error(`packages/${db}/package.json is ${engine.version}, and reylo is ${pkg.version}; they move together`);}
-  const exported = Object.fromEntries(Object.entries(entries as Record<string, string>).map(([key, path]) => [key, js(path)]));
+  const exported = Object.fromEntries(Object.entries(entries).map(([key, sourcePath]) => [key, js(sourcePath)]));
   // The tooling bundle includes the MPL-covered native HCL parser port alongside MIT code.
   await writeFile(join(to, "package.json"), `${JSON.stringify({ ...engine, license: "MIT AND MPL-2.0", files: [...engine.files, "licenses"], exports: exported }, null, 2)  }\n`);
   await cp(join(root, "licenses"), join(to, "licenses"), { recursive: true });
@@ -113,7 +122,7 @@ await Promise.all(DATABASES.map(async (db) => {
   // A child process src/sqlite-drivers.ts starts beside the module that starts it.
   await bundle({ ...bundled, entryPoints: [join(root, "src/d1-proxy.ts")], outfile: join(to, "d1-proxy.js") });
   const shipped = await readdir(to);
-  const missing = (engine.files as string[]).filter((file) => !shipped.includes(file));
+  const missing = engine.files.filter((file) => !shipped.includes(file));
   if (missing.length) {throw new Error(`dist/${db} is missing what its package.json lists: ${missing.join(", ")}`);}
   const sizes = await Promise.all(shipped
     .filter((file) => file !== "package.json" && file !== "README.md")
