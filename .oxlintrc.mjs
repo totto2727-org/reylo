@@ -22,6 +22,23 @@ export default defineConfig({
       rules: { 'eslint/sort-keys': 'off' },
     },
     {
+      // Keep the vendored Standard Schema 1.1.0 declarations byte-identical to the copied spec.
+      // Limit the exceptions to the upstream declaration, literal, and comment styles found here.
+      files: ['src/standard.ts'],
+      rules: {
+        'eslint/capitalized-comments': 'off',
+        'eslint/no-magic-numbers': 'off',
+        'rules/no-readonly': 'off',
+        'typescript/array-type': 'off',
+        'typescript/ban-types': 'off',
+        'typescript/no-duplicate-type-constituents': 'off',
+        'typescript/no-empty-interface': 'off',
+        'typescript/no-empty-object-type': 'off',
+        'typescript/no-namespace': 'off',
+        'typescript/no-unnecessary-qualifier': 'off',
+      },
+    },
+    {
       // The published package and upstream consumers use this entry path.
       files: ['src/index.ts'],
       rules: { 'rules/no-index-filename': 'off' },

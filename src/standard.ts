@@ -1,5 +1,5 @@
 // Vendored verbatim from @standard-schema/spec 1.1.0 (packages/spec/src/index.ts in
-// Github.com/standard-schema/standard-schema; MIT License, Copyright (c) 2024 Colin McDonnell).
+// github.com/standard-schema/standard-schema; MIT License, Copyright (c) 2024 Colin McDonnell).
 // The spec is designed to be copied so that implementers carry no dependency: Standard Typed,
 // Standard Schema and Standard JSON Schema, unchanged. Update by copying the file again.
 
@@ -52,7 +52,7 @@ export declare namespace StandardSchemaV1 {
     /** Validates unknown input values. */
     readonly validate: (
       value: unknown,
-      options?: Options  ,
+      options?: StandardSchemaV1.Options | undefined,
     ) => Result<Output> | Promise<Result<Output>>;
   }
 
@@ -75,7 +75,7 @@ export declare namespace StandardSchemaV1 {
   /** The result interface if validation fails. */
   export interface FailureResult {
     /** The issues of failed validation. */
-    readonly issues: readonly Issue[];
+    readonly issues: ReadonlyArray<Issue>;
   }
 
   /** The issue interface of the failure output. */
@@ -83,7 +83,7 @@ export declare namespace StandardSchemaV1 {
     /** The error message of the issue. */
     readonly message: string;
     /** The path of the issue, if any. */
-    readonly path?: readonly (PropertyKey | PathSegment)[] | undefined;
+    readonly path?: ReadonlyArray<PropertyKey | PathSegment> | undefined;
   }
 
   /** The path segment interface of the issue. */
@@ -116,18 +116,18 @@ export declare namespace StandardJSONSchemaV1 {
   export interface Props<Input = unknown, Output = Input>
     extends StandardTypedV1.Props<Input, Output> {
     /** Methods for generating the input/output JSON Schema. */
-    readonly jsonSchema: Converter;
+    readonly jsonSchema: StandardJSONSchemaV1.Converter;
   }
 
   /** The Standard JSON Schema converter interface. */
   export interface Converter {
     /** Converts the input type to JSON Schema. May throw if conversion is not supported. */
     readonly input: (
-      options: Options,
+      options: StandardJSONSchemaV1.Options,
     ) => Record<string, unknown>;
     /** Converts the output type to JSON Schema. May throw if conversion is not supported. */
     readonly output: (
-      options: Options,
+      options: StandardJSONSchemaV1.Options,
     ) => Record<string, unknown>;
   }
 
