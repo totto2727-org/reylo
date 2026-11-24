@@ -9,7 +9,7 @@ import { bunRows, neonCallable, postgresJs, queryPostgres, slonik } from "./deco
 import { mariadb, mysql2, planetscale } from "./decode-mysql.ts";
 import { normalize, runDurableObject, runSyncSqlite, runTurso } from "./decode-sqlite.ts";
 import { encodeDuckdb, isDuckdb, runDuckdb } from './decode-duckdb.ts';
-import type { DuckdbClient } from './decode-duckdb.ts';
+import type { DriverValue, DuckdbClient } from './decode-duckdb.ts';
 import { describe, hstoreText, ParameterError, postgresInterval, postgresYear, zoned } from './values.ts';
 import type { Columns } from './values.ts';
 import type { EngineType,JsonSchema } from "./engine-type.ts";
@@ -22,9 +22,6 @@ import type { Fresh } from './fresh.ts';
 import { hasFunctionType, hasObjectType, matchesBigInt, matchesBoolean, matchesNull, matchesNullish, matchesNumber, matchesString, matchesUndefined } from "./native-predicates.ts";
 
 export type Dialect = "postgres" | "mysql" | "sqlite" | "duckdb";
-
-// oxlint-disable-next-line typescript/no-explicit-any -- Keep the published structural driver contracts compatible with each driver's own parameter and callback types.
-type DriverValue = any;
 
 /**
  * Pg's Pool, Client and PoolClient; PGlite and its transactions; Neon's Pool and Client;

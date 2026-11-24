@@ -18,9 +18,12 @@ import type { EngineType } from "./engine-type.ts";
 import type { Columns } from "./values.ts";
 import { hasFunctionType, hasObjectType, matchesBigInt, matchesNull, matchesNullish, matchesNumber, matchesString, matchesUndefined } from "./native-predicates.ts";
 
+// oxlint-disable-next-line typescript/no-explicit-any -- Keep the published structural driver contracts compatible with each driver's own parameter and callback types.
+export type DriverValue = any;
+
 /** @duckdb/node-api's DuckDBConnection, a connection of a DuckDBInstance: `run` takes it. */
 export type DuckdbClient = {
-  runAndReadAll(sql: string, values?: any, types?: any): Promise<unknown>;
+  runAndReadAll(sql: string, values?: DriverValue, types?: DriverValue): Promise<unknown>;
   prepare(sql: string): Promise<unknown>;
 };
 
@@ -81,7 +84,7 @@ type NodeProcess = { argv?: string[]; cwd(): string; getBuiltinModule?(id: strin
  */
 const nodeApiOf = function (c: DuckdbClient): Promise<Api> {
   // A connection's class decides its copy; an object that only wraps one is its own.
-  const proto = Object.getPrototypeOf(c) as object | null;
+  const proto = Reflect.getPrototypeOf(c);
   const own = matchesNull(proto) || proto === Object.prototype ? c : proto;
   let found = apis.get(own);
   if (matchesUndefined(found)) {
@@ -143,10 +146,44 @@ export const isDuckdb = function isDuckdb(c: Record<string, unknown> | null | un
 };
 
 // DuckDB's type ids (duckdb_type), which node-api's types carry.
-const T = {
-  BOOLEAN: 1, TINYINT: 2, SMALLINT: 3, INTEGER: 4, BIGINT: 5, UTINYINT: 6, USMALLINT: 7, UINTEGER: 8, UBIGINT: 9, FLOAT: 10, DOUBLE: 11, TIMESTAMP: 12, DATE: 13, TIME: 14, INTERVAL: 15,
-  HUGEINT: 16, VARCHAR: 17, BLOB: 18, DECIMAL: 19, TIMESTAMP_S: 20, TIMESTAMP_MS: 21, TIMESTAMP_NS: 22, ENUM: 23, LIST: 24, STRUCT: 25, MAP: 26, UUID: 27, UNION: 28, BIT: 29, TIME_TZ: 30,
-  TIMESTAMP_TZ: 31, UHUGEINT: 32, ARRAY: 33, BIGNUM: 35, TIME_NS: 39, VARIANT: 41, TIMESTAMP_TZ_NS: 42,
+const DUCKDB_TYPE = {
+  ARRAY: 33,
+  BIGINT: 5,
+  BIGNUM: 35,
+  BIT: 29,
+  BLOB: 18,
+  BOOLEAN: 1,
+  DATE: 13,
+  DECIMAL: 19,
+  DOUBLE: 11,
+  ENUM: 23,
+  FLOAT: 10,
+  HUGEINT: 16,
+  INTEGER: 4,
+  INTERVAL: 15,
+  LIST: 24,
+  MAP: 26,
+  SMALLINT: 3,
+  STRUCT: 25,
+  TIME: 14,
+  TIMESTAMP: 12,
+  TIMESTAMP_MS: 21,
+  TIMESTAMP_NS: 22,
+  TIMESTAMP_S: 20,
+  TIMESTAMP_TZ: 31,
+  TIMESTAMP_TZ_NS: 42,
+  TIME_NS: 39,
+  TIME_TZ: 30,
+  TINYINT: 2,
+  UBIGINT: 9,
+  UHUGEINT: 32,
+  UINTEGER: 8,
+  UNION: 28,
+  USMALLINT: 7,
+  UTINYINT: 6,
+  UUID: 27,
+  VARCHAR: 17,
+  VARIANT: 41,
 } as const;
 
 /** `v` as node-api builds it for `bindType`'s type: a scalar its text, a JSON value its JSON. */
@@ -350,18 +387,35 @@ const decimal = function (value: bigint, scale: number): string {
   return `${negative ? "-" : ""}${digits.slice(0, -scale)}.${digits.slice(-scale)}`;
 };
 
+type NativeDuckValue = {
+  bytes: unknown;
+  days: number;
+  entries: Record<string, unknown> | { key: unknown; value: unknown }[];
+  items: unknown[];
+  micros: bigint;
+  millis: bigint;
+  months: number;
+  nanos: bigint;
+  scale: unknown;
+  seconds: bigint;
+  tag: string;
+  type?: DuckType;
+  value: unknown;
+};
+
 /** A value of DuckDB's type `t`, as node-api reads it, in its kind's form; `column` names it in an error. */
 function decode(v: unknown, t: DuckType, column: string): unknown {
   if (matchesNull(v) || matchesUndefined(v)) {return null;}
-  const o = v as Record<string, any>;
+  // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- Each DuckDB type ID selects the corresponding fields of the node-api value.
+  const native = v as NativeDuckValue;
   switch (t.typeId) {
-    case T.BOOLEAN: case T.TINYINT: case T.SMALLINT: case T.INTEGER: case T.UTINYINT: case T.USMALLINT: case T.UINTEGER: case T.FLOAT: case T.DOUBLE: {
+    case DUCKDB_TYPE.BOOLEAN: case DUCKDB_TYPE.TINYINT: case DUCKDB_TYPE.SMALLINT: case DUCKDB_TYPE.INTEGER: case DUCKDB_TYPE.UTINYINT: case DUCKDB_TYPE.USMALLINT: case DUCKDB_TYPE.UINTEGER: case DUCKDB_TYPE.FLOAT: case DUCKDB_TYPE.DOUBLE: {
       return v;
     }
-    case T.BIGINT: case T.UBIGINT: case T.HUGEINT: case T.UHUGEINT: case T.BIGNUM: {
+    case DUCKDB_TYPE.BIGINT: case DUCKDB_TYPE.UBIGINT: case DUCKDB_TYPE.HUGEINT: case DUCKDB_TYPE.UHUGEINT: case DUCKDB_TYPE.BIGNUM: {
       return matchesBigInt(v) ? v : BigInt(v as number);
     }
-    case T.VARCHAR: {
+    case DUCKDB_TYPE.VARCHAR: {
       if (t.alias?.toUpperCase() === "JSON" && matchesString(v)) {
         try {
           return JSON.parse(v);
@@ -371,47 +425,53 @@ function decode(v: unknown, t: DuckType, column: string): unknown {
       }
       return v;
     }
-    case T.ENUM: case T.UUID: case T.BIT: case T.TIME: case T.TIME_NS: case T.TIME_TZ: {
+    case DUCKDB_TYPE.ENUM: case DUCKDB_TYPE.UUID: case DUCKDB_TYPE.BIT: case DUCKDB_TYPE.TIME: case DUCKDB_TYPE.TIME_NS: case DUCKDB_TYPE.TIME_TZ: {
       return String(v);
     }
-    case T.BLOB: {
-      return o.bytes instanceof Uint8Array ? o.bytes : v;
+    case DUCKDB_TYPE.BLOB: {
+      return native.bytes instanceof Uint8Array ? native.bytes : v;
     }
-    case T.DECIMAL: {
-      return matchesBigInt(o.value) && matchesNumber(o.scale) ? decimal(o.value, o.scale) : String(v);
+    case DUCKDB_TYPE.DECIMAL: {
+      return matchesBigInt(native.value) && matchesNumber(native.scale) ? decimal(native.value, native.scale) : String(v);
     }
-    case T.DATE: {
-      if (o.days === DATE_INFINITY) {return "infinity";}
-      if (o.days === -DATE_INFINITY) {return "-infinity";}
-      return matchesNumber(o.days) ? civil(o.days) : String(v);
+    case DUCKDB_TYPE.DATE: {
+      if (native.days === DATE_INFINITY) {return "infinity";}
+      if (native.days === -DATE_INFINITY) {return "-infinity";}
+      return matchesNumber(native.days) ? civil(native.days) : String(v);
     }
-    case T.TIMESTAMP: { return timestamp(o.micros, BigInt("1000000"), 6, ""); }
-    case T.TIMESTAMP_S: { return timestamp(o.seconds, BigInt("1"), 0, ""); }
-    case T.TIMESTAMP_MS: { return timestamp(o.millis, BigInt("1000"), 3, ""); }
-    case T.TIMESTAMP_NS: { return timestamp(o.nanos, BigInt("1000000000"), 9, ""); }
-    case T.TIMESTAMP_TZ: { return timestamp(o.micros, BigInt("1000000"), 6, "Z"); }
-    case T.TIMESTAMP_TZ_NS: { return timestamp(o.nanos, BigInt("1000000000"), 9, "Z"); }
-    case T.INTERVAL: { return interval(o.months, o.days, o.micros); }
-    case T.LIST: case T.ARRAY: {
-      return (o.items as unknown[]).map((currentItem) => decode(currentItem, t.valueType!, column));
+    case DUCKDB_TYPE.TIMESTAMP: { return timestamp(native.micros, BigInt("1000000"), 6, ""); }
+    case DUCKDB_TYPE.TIMESTAMP_S: { return timestamp(native.seconds, BigInt("1"), 0, ""); }
+    case DUCKDB_TYPE.TIMESTAMP_MS: { return timestamp(native.millis, BigInt("1000"), 3, ""); }
+    case DUCKDB_TYPE.TIMESTAMP_NS: { return timestamp(native.nanos, BigInt("1000000000"), 9, ""); }
+    case DUCKDB_TYPE.TIMESTAMP_TZ: { return timestamp(native.micros, BigInt("1000000"), 6, "Z"); }
+    case DUCKDB_TYPE.TIMESTAMP_TZ_NS: { return timestamp(native.nanos, BigInt("1000000000"), 9, "Z"); }
+    case DUCKDB_TYPE.INTERVAL: { return interval(native.months, native.days, native.micros); }
+    case DUCKDB_TYPE.LIST: case DUCKDB_TYPE.ARRAY: {
+      return native.items.map((currentItem) => decode(currentItem, t.valueType!, column));
     }
-    case T.STRUCT: {
+    case DUCKDB_TYPE.STRUCT: {
       // A tuple, a struct whose fields have no names, is its values in order.
-      if (Array.isArray(o.items)) {return (o.items as unknown[]).map((currentItem, index) => decode(currentItem, t.entryTypes![index]!, column));}
+      if (Array.isArray(native.items)) {return native.items.map((currentItem, index) => decode(currentItem, t.entryTypes![index]!, column));}
       const out: Record<string, unknown> = {};
-      t.entryNames!.forEach((name, index) => (out[name] = decode(o.entries[name], t.entryTypes![index]!, column)));
+      t.entryNames!.forEach((name, index) => {
+        // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- DuckDB's named STRUCT exposes fields as an object.
+        const fields = native.entries as Record<string, unknown>;
+        out[name] = decode(fields[name], t.entryTypes![index]!, column);
+      });
       return out;
     }
-    case T.MAP: {
-      return (o.entries as { key: unknown; value: unknown }[]).map((entry) => ({ key: decode(entry.key, t.keyType!, column), value: decode(entry.value, t.valueType!, column) }));
+    case DUCKDB_TYPE.MAP: {
+      // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- DuckDB's MAP exposes its ordered key and value entries as an array.
+      const entries = native.entries as { key: unknown; value: unknown }[];
+      return entries.map((entry) => ({ key: decode(entry.key, t.keyType!, column), value: decode(entry.value, t.valueType!, column) }));
     }
-    case T.UNION: {
-      const at = t.memberTags!.indexOf(o.tag);
-      return { tag: o.tag, value: at === -1 ? o.value : decode(o.value, t.memberTypes![at]!, column) };
+    case DUCKDB_TYPE.UNION: {
+      const at = t.memberTags!.indexOf(native.tag);
+      return { tag: native.tag, value: at === -1 ? native.value : decode(native.value, t.memberTypes![at]!, column) };
     }
-    case T.VARIANT: {
+    case DUCKDB_TYPE.VARIANT: {
       // A VARIANT holds a value of any type, which it carries beside it.
-      return decode(o.value, (o.type ?? { typeId: 0 }) as DuckType, column);
+      return decode(native.value, native.type ?? { typeId: 0 }, column);
     }
     default: {
       // A type an extension adds (GEOMETRY): its text, where node-api gives a value of its own.
