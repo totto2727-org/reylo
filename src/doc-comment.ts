@@ -130,9 +130,9 @@ export const leadingComment = (sql: string, dialect?: Dialect): Leading => {
 };
 
 /** The statement after its leading comments, its blank edges trimmed. */
-export function statementAfter(sql: string, leading: Leading): string {
+export const statementAfter = function statementAfter(sql: string, leading: Leading): string {
   return sql.slice(leading.end).trim();
-}
+};
 
 /** The fence a Markdown text opens and never closes, which would take in what follows it. */
 const openFence = function openFence(text: string): string | undefined {
@@ -152,7 +152,7 @@ const openFence = function openFence(text: string): string | undefined {
  * backslash goes between them; the fence is longer than any run of backticks in the statement, and
  * a fence the prose leaves open is closed before the block. Empty when there is nothing to say.
  */
-export function docComment(prose: string, sql: string | undefined, note = "", indent = ""): string {
+export const docComment = function docComment(prose: string, sql: string | undefined, note = "", indent = ""): string {
   const parts: string[] = [];
   if (prose) {
     const open = openFence(prose);
@@ -167,4 +167,4 @@ export function docComment(prose: string, sql: string | undefined, note = "", in
   if (!parts.length) {return "";}
   const body = parts.join("\n\n").replaceAll("*/", String.raw`*\/`).split("\n");
   return [`${indent}/**`, ...body.map((l) => (l ? `${indent} * ${l}` : `${indent} *`)), `${indent} */`, ""].join("\n");
-}
+};

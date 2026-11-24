@@ -21,9 +21,9 @@ export type Failure = { path: string; message: string };
  * where a project's tsconfig loads no Node or DOM types (the labs set `"types": []`), and which
  * gives the same copy for a JSON value.
  */
-export function cloneJson<T>(value: T): T {
+export const cloneJson = function cloneJson<T>(value: T): T {
   return matchesUndefined(value) ? value : JSON.parse(JSON.stringify(value));
-}
+};
 
 /**
  * The value with the schema's defaults filled in, as ajv's `useDefaults` fills them (a
@@ -33,7 +33,7 @@ export function cloneJson<T>(value: T): T {
  * to the value but inside `anyOf`, `oneOf`, `not`, `if`, `contains` and `propertyNames`, whose
  * matches are unknown until the checks run. The value given is not changed: a copy comes back.
  */
-export function withDefaults(schema: Schema, value: unknown): unknown {
+export const withDefaults = function withDefaults(schema: Schema, value: unknown): unknown {
   if (!isRecord(schema)) {return value;}
   const s = schema;
   let out = value;
@@ -78,7 +78,7 @@ export function withDefaults(schema: Schema, value: unknown): unknown {
     if (!matchesUndefined(branch)) {out = withDefaults(branch as Schema, out);}
   }
   return out;
-}
+};
 
 /** The first failure of `value` against `schema`, or `undefined` when it passes. */
 export function validate(schema: Schema, value: unknown): Failure | undefined {

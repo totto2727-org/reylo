@@ -59,7 +59,7 @@ export const orNull = (type: string): string => (type === JSON_TYPE ? type : `${
 
 export const ident = (name: string): string => (/^[A-Za-z_$][\w$]*$/u.test(name) ? name : JSON.stringify(name));
 
-export function renderType(t: EngineType, inJson = false, dialect: Dialect = "postgres"): string {
+export const renderType = function renderType(t: EngineType, inJson = false, dialect: Dialect = "postgres"): string {
   switch (t.kind) {
     case "scalar": {
       // `a|b` is either: a MySQL column whose type the execution decides (`:n + 1` is a BIGINT
@@ -101,7 +101,7 @@ export function renderType(t: EngineType, inJson = false, dialect: Dialect = "po
     // (SQLite's `json_extract`, a column of no declared type) it may be any value.
     case "unknown": { return inJson ? JSON_TYPE : "unknown"; }
   }
-}
+};
 
 /** A union of JSON types: `Json` absorbs the rest, and `never` adds nothing. */
 const union = function union(parts: string[]): string {
@@ -214,9 +214,9 @@ function renderFields(fields: { name: string; type: EngineType; nullable: boolea
  * (`:p::jsonb('…')`) or a `json('…')` member's: the caller's, so a key its schema does not name is
  * left out of the type (src/render.ts, `schemaType`'s `input`); `undefined` for any other.
  */
-export function declaredType(t: EngineType, declared: unknown): string | undefined {
+export const declaredType = function declaredType(t: EngineType, declared: unknown): string | undefined {
   return !matchesUndefined(declared) && t.kind === "json" && !matchesUndefined(t.schema) ? schemaType(t.schema, true) : undefined;
-}
+};
 
 /**
  * The type a parameter accepts: what `run` returns for its SQL type, so that a row goes back in as

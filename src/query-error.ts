@@ -293,7 +293,7 @@ const mysqlNames = function mysqlNames(errno: number, message: string) {
 };
 
 /** The database's error `error` is, or undefined where it is another. */
-export async function readQueryError(dialect: Dialect, error: unknown): Promise<QueryError | undefined> {
+export const readQueryError = async function readQueryError(dialect: Dialect, error: unknown): Promise<QueryError | undefined> {
   if (dialect === "sqlite") {return readQueryErrorSync(dialect, error);}
   if (dialect === "duckdb") {
     // A plain Error, its message opening with the kind of error: Reylo's own errors are of classes of their own.
@@ -317,7 +317,7 @@ export async function readQueryError(dialect: Dialect, error: unknown): Promise<
   let code: string | undefined;
   Iterator.from(MYSQL_CODES).forEach(([first, names]) => {if (read.errno >= first && read.errno < first + names.length) {code = names[read.errno - first];}});
   return new DatabaseError(read.message, error, { code, errno: read.errno, sqlState: read.sqlState, ...mysqlNames(read.errno, read.message) }) as MysqlQueryError;
-}
+};
 
 /** What SQLite's message names, for a constraint it failed. */
 const sqliteNames = function sqliteNames(errcode: number | undefined, message: string) {

@@ -74,17 +74,17 @@ const SPELLED: Record<Dialect, string[]> = {
 };
 
 /** A type as the list shows it: Postgres's short names for the long standard ones. */
-export function shortType(type: string): string {
+export const shortType = function shortType(type: string): string {
   return type
     .replace(/^timestamp with time zone/u, "timestamptz")
     .replace(/^timestamp without time zone/u, "timestamp")
     .replace(/^time with time zone/u, "timetz")
     .replace(/^time without time zone/u, "time")
     .replace(/^character varying/u, "varchar");
-}
+};
 
 /** The catalog from its queries' rows; a database with no query for functions or types gives none, or the names it takes. */
-export function catalog(dialect: Dialect, tables: unknown[][], functions: unknown[][] = [], types: unknown[][] = []): Catalog {
+export const catalog = function catalog(dialect: Dialect, tables: unknown[][], functions: unknown[][] = [], types: unknown[][] = []): Catalog {
   const byName = new Map<string, Table>();
   Iterator.from(tables as [string, string, string, unknown][]).forEach(([table, name, type, nullable]) => {
     let t = byName.get(table);
@@ -100,4 +100,4 @@ export function catalog(dialect: Dialect, tables: unknown[][], functions: unknow
     }),
     types: [...new Set([...(types as [string][]).map(([t]) => t), ...SPELLED[dialect]])].sort(),
   };
-}
+};

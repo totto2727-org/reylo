@@ -132,7 +132,7 @@ const fixRows = function (rows: Record<string, unknown>[], fixes: (Readonly<[str
 };
 
 /** Mysql2's execute(), resolving to [rows, fields]. */
-export async function mysql2(m: AnyClient, text: string, values: unknown[], columns: Columns | undefined): Promise<unknown[]> {
+export const mysql2 = async function mysql2(m: AnyClient, text: string, values: unknown[], columns: Columns | undefined): Promise<unknown[]> {
   const [rows, fields] = await m.execute({ sql: text, ...MYSQL2_OPTIONS, typeCast: needsCast(m, columns) ? mysql2Cast : true }, values);
   if (!Array.isArray(rows)) {return [];}
   const described = (fields ?? []) as Mysql2Column[];
@@ -153,7 +153,7 @@ export async function mysql2(m: AnyClient, text: string, values: unknown[], colu
   });
   fixRows(rows as Record<string, unknown>[], fixes);
   return rows;
-}
+};
 
 // ---------------------------------------------------------------------------------------------
 // Mariadb
@@ -199,7 +199,7 @@ const columnFixes = function columnFixes(columns: Columns | undefined): (Readonl
 };
 
 /** Mariadb's query(), on its promise or its callback API, with Reylo's options. */
-export async function mariadb(c: AnyClient, text: string, values: unknown[], columns: Columns | undefined): Promise<unknown[]> {
+export const mariadb = async function mariadb(c: AnyClient, text: string, values: unknown[], columns: Columns | undefined): Promise<unknown[]> {
   const options = { sql: text, ...MARIADB_OPTIONS, ...(columns?.some(([, kind]) => kind === "unknown") ? { typeCast: mariadbGeometry } : {}) };
   // The promise API resolves to the rows with their `meta`; the callback API hands the meta over as a third argument.
   let callbackMeta: MariadbColumn[] | undefined;
@@ -228,7 +228,7 @@ export async function mariadb(c: AnyClient, text: string, values: unknown[], col
     });
   }
   return result;
-}
+};
 
 // ---------------------------------------------------------------------------------------------
 // PlanetScale 1.x
@@ -282,7 +282,7 @@ const planetscaleCast = function (field: PlanetscaleField, value: string | null)
 };
 
 /** PlanetScale's execute(): 1.x binds parameters; 2.0 takes none, and its options come second. */
-export async function planetscale(m: AnyClient, text: string, values: unknown[], columns: Columns | undefined): Promise<unknown[]> {
+export const planetscale = async function planetscale(m: AnyClient, text: string, values: unknown[], columns: Columns | undefined): Promise<unknown[]> {
   const options = { as: "object", cast: planetscaleCast };
   let result;
   try {
@@ -298,4 +298,4 @@ export async function planetscale(m: AnyClient, text: string, values: unknown[],
   if (!Array.isArray(result?.rows)) {throw new TypeError(`reylo ran this statement through execute(), as on PlanetScale's @planetscale/database, and the client answered with ${Array.isArray(result) ? "an array" : (matchesNull(result) || !hasObjectType(result) ? String(result) : "an object")} rather than a result with rows. It takes execute(text, values) as on mysql2 and PlanetScale, or a Drizzle database over one of them.`);}
   fixRows(result.rows, columnFixes(columns));
   return result.rows;
-}
+};

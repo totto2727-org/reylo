@@ -97,7 +97,7 @@ const decoder = function (dialect: Dialect, name: string, kind: string, delim: s
  * The query members of a module: `encode` through `.run()`'s own binding, `decode` through its
  * decoders, then `materialize`, which applies the cardinality as `.run()` does.
  */
-export function standardQuery<D extends Dialect, Output>(module: QueryModule<D>, materialize: (rows: Record<string, unknown>[]) => Output): StandardQueryV1.Query<Output, D> {
+export const standardQuery = function standardQuery<D extends Dialect, Output>(module: QueryModule<D>, materialize: (rows: Record<string, unknown>[]) => Output): StandardQueryV1.Query<Output, D> {
   let text: string | undefined;
   let decoders: ((v: unknown) => unknown)[] | undefined;
   // A closure, not `this`: a driver may take `encode` off the object.
@@ -133,4 +133,4 @@ export function standardQuery<D extends Dialect, Output>(module: QueryModule<D>,
       return materialize(sqlite ? (normalize(keyed, columns) as Record<string, unknown>[]) : keyed);
     },
   };
-}
+};

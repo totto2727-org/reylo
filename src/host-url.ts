@@ -109,7 +109,7 @@ const resolvePostgresFile = (pair: string): string => {
  * `url` as the engine opens it: files resolved, a Unix socket bridged. On Windows,
  * where Node opens no Unix socket, a Postgres URL that names one is an Unreachable that says so.
  */
-export async function hostUrl(url: string, env: Record<string, string | undefined> = process.env, platform: NodeJS.Platform = process.platform): Promise<HostUrl> {
+export const hostUrl = async function hostUrl(url: string, env: Record<string, string | undefined> = process.env, platform: NodeJS.Platform = process.platform): Promise<HostUrl> {
   const dialect = detectDialect(url);
   if (matchesUndefined(dialect)) {return { url, close: () => {} };}
   const postgres = dialect === "postgres";
@@ -125,7 +125,7 @@ export async function hostUrl(url: string, env: Record<string, string | undefine
   const bridge = await openBridge(socket.path, dialect, token);
   const rest = pairs.filter((pair) => !socket.params.includes(splitPair(pair)[0]));
   return { url: join(withHost(base, `127.0.0.1:${bridge.port}`), rest), bridge: token, close: bridge.close, failure: bridge.failure };
-}
+};
 
 /**
  * The socket file a Postgres URL names, as libpq reads it: a `host` that is a directory, in the

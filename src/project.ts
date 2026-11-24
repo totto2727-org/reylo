@@ -75,22 +75,22 @@ export const PROJECT_FILES = [PROJECT_FILE, ".reylo.yml"] as const;
 const DEFAULT_ENV_FILES = [".env.local", ".env"];
 
 /** The package directory: the nearest one at or above `from` that holds a `package.json`, else `from`. */
-export function packageDir(from: string): string {
+export const packageDir = function packageDir(from: string): string {
   for (let dir = resolve(from); ; dir = dirname(dir)) {
     if (existsSync(join(dir, "package.json"))) {return dir;}
     if (dirname(dir) === dir) {return resolve(from);}
   }
-}
+};
 
 /**
  * A `.sql` file's path from the root of its own project (the project file's directory, else its
  * package's), written with `/`: the query's `source`, and the file its sqlcommenter comment names.
  */
-export function sourceName(path: string, env: Record<string, string | undefined> = process.env): string {
+export const sourceName = function sourceName(path: string, env: Record<string, string | undefined> = process.env): string {
   const dir = dirname(path);
   const file = findProjectFile(dir, env);
   return relative(file ? dirname(file) : packageDir(dir), path).split(sep).join("/");
-}
+};
 
 /** The project file for a project directory: `REYLO_CONFIG`, or `.reylo.yaml` (else `.reylo.yml`) beside the package's `package.json`. */
 export function findProjectFile(from: string, env: Record<string, string | undefined> = process.env): string | undefined {
@@ -100,7 +100,7 @@ export function findProjectFile(from: string, env: Record<string, string | undef
 }
 
 /** The dialect a URL's scheme names, or undefined for a scheme reylo does not read. */
-export function dialectOf(url: string): Dialect | undefined {
+export const dialectOf = function dialectOf(url: string): Dialect | undefined {
   const scheme = /^([a-z][a-z0-9+.-]*):/i.exec(url)?.[1]?.toLowerCase();
   if (scheme === "postgres" || scheme === "postgresql") {return "postgres";}
   if (scheme === "mysql" || scheme === "mariadb") {return "mysql";}
@@ -108,17 +108,17 @@ export function dialectOf(url: string): Dialect | undefined {
   if (scheme === "duckdb") {return "duckdb";}
   if (scheme === "hcl") {return "sqlite";}
   return undefined;
-}
+};
 
 /** A single local Atlas HCL schema, never a database file or a remote source. */
-export function hclPath(url: string, root: string): string | undefined {
+export const hclPath = function hclPath(url: string, root: string): string | undefined {
   if (!url.toLowerCase().startsWith("hcl:")) {return undefined;}
   const path = url.slice(4);
   if (!path || path.startsWith("//") || path.includes("?") || path.includes("#") || path.includes("\0") || !path.endsWith(".hcl")) {throw new Error("An hcl: source must name one local .hcl file, for example hcl:./schema.hcl.");}
   return resolve(root, path);
-}
+};
 
-export function readEnvFile(path: string): Record<string, string> {
+export const readEnvFile = function readEnvFile(path: string): Record<string, string> {
   if (!existsSync(path)) {return {};}
   const out: Record<string, string> = {};
   Iterator.from(readFileSync(path, "utf8").split("\n")).forEach((line) => {
@@ -126,7 +126,7 @@ export function readEnvFile(path: string): Record<string, string> {
     if (regexMatch) {out[regexMatch[1]!] = regexMatch[2]!.replace(/^(["'])(.*)\1$/, "$2");}
   });
   return out;
-}
+};
 
 /** 1-based line and column of a byte offset, for a message that names the place in the file. */
 const place = function (text: string, offset: number): string {
@@ -240,7 +240,7 @@ const commandOutput = function (command: string, cwd: string, env: Record<string
  * The project `projectDir` belongs to. `engine` reads the project file: any database's engine does
  * (src/engine.ts, `anyEngine`), and where none is installed a project file is the project's error.
  */
-export function resolveProject(engine: Engine | MissingEngine, projectDir: string, env: Record<string, string | undefined> = process.env): ResolvedProject {
+export const resolveProject = function resolveProject(engine: Engine | MissingEngine, projectDir: string, env: Record<string, string | undefined> = process.env): ResolvedProject {
   const file = findProjectFile(projectDir, env);
   const root = file ? dirname(file) : packageDir(projectDir);
   const shown = (path: string): string => (isAbsolute(path) ? relative(projectDir, path).split(sep).join("/") || path : path);
@@ -360,20 +360,20 @@ export function resolveProject(engine: Engine | MissingEngine, projectDir: strin
   }
   // This fork supports only SQLite, including cached analysis without a URL.
   return { file, root, dialect: dialect ?? "sqlite", strictParams: config.strict_params ?? true, sqlcommenter: config.sqlcommenter ?? true, cli: config.cli ?? {}, url, urlSource, refreshUrl, watched, error, notice, missingUrl };
-}
+};
 
 /** `duckdb:./dev.duckdb`, `duckdb:///abs/dev.duckdb` → a path, relative ones resolved against baseDir; `duckdb::memory:` (or `duckdb:` alone) → `:memory:`, an empty database, for statements that read files alone. */
-export function duckdbPath(url: string, baseDir: string): string {
+export const duckdbPath = function duckdbPath(url: string, baseDir: string): string {
   let raw = url.replace(/^duckdb:(\/\/)?/i, "");
   if (raw === "" || raw === ":memory:") {return ":memory:";}
   // On Windows, `duckdb:///C:/app.duckdb` names the drive, as a file URL does.
   if (process.platform === "win32") {raw = raw.replace(/^\/(?=[A-Za-z]:[\\/])/u, "");}
   return isAbsolute(raw) ? raw : resolve(baseDir, raw);
-}
+};
 
 /** `file:./dev.db`, `file:///abs/dev.db`, `sqlite:./dev.db`, `:memory:` → a path, relative ones resolved against baseDir. */
-export function sqlitePath(url: string, baseDir: string): string {
+export const sqlitePath = function sqlitePath(url: string, baseDir: string): string {
   if (url === ":memory:" || url === "file::memory:") {return ":memory:";}
   const raw = url.startsWith("file://") ? fileURLToPath(url) : url.replace(/^(file|sqlite):(\/\/)?/u, "");
   return isAbsolute(raw) ? raw : resolve(baseDir, raw);
-}
+};

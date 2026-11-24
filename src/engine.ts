@@ -59,7 +59,7 @@ const PING_TIMEOUT = 10_000;
  * where there is no binary, where it is another upstream native release, and where it does not answer
  * as one database's engine.
  */
-export function engine(dialect: Dialect): Promise<Engine> {
+export const engine = function engine(dialect: Dialect): Promise<Engine> {
   if (dialect !== "sqlite") {return Promise.reject(new MissingEngine(`This fork supports SQLite analysis only, not ${dialect} statements`));}
   let binary: string;
   try {
@@ -94,15 +94,15 @@ export function engine(dialect: Dialect): Promise<Engine> {
     engines.set(key, loading);
   }
   return loading;
-}
+};
 
 /**
  * An engine to read the project file with, before the URL in it names the database: the core,
  * which parses the file, is every database's. A MissingEngine where there is none to run.
  */
-export async function anyEngine(): Promise<Engine | MissingEngine> {
+export const anyEngine = async function anyEngine(): Promise<Engine | MissingEngine> {
   return engine("sqlite").catch((error: unknown) => (error instanceof MissingEngine ? error : new MissingEngine((error as Error).message)));
-}
+};
 
 type Answer = { status: string; id?: number; message?: string; code?: string; conn?: number; analysis?: Analysis; rows?: unknown[][]; server?: string; params?: number[]; columns?: Described["columns"] };
 

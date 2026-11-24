@@ -263,22 +263,22 @@ const scanTokens = function (input: Uint8Array, filename: string, start: Pos, mo
   return tokens;
 };
 
-export function lexConfig(input: Uint8Array, filename: string, start: Pos = { line: 1, column: 1, byte: 0 }): { tokens: Token[]; diagnostics: Diagnostic[] } {
+export const lexConfig = function lexConfig(input: Uint8Array, filename: string, start: Pos = { line: 1, column: 1, byte: 0 }): { tokens: Token[]; diagnostics: Diagnostic[] } {
   const tokens = scanTokens(input, filename, start, 'normal');
   return { tokens, diagnostics: checkInvalidTokens(tokens) };
-}
+};
 export const lexExpression = lexConfig;
-export function lexTemplate(input: Uint8Array, filename: string, start: Pos = { line: 1, column: 1, byte: 0 }): { tokens: Token[]; diagnostics: Diagnostic[] } {
+export const lexTemplate = function lexTemplate(input: Uint8Array, filename: string, start: Pos = { line: 1, column: 1, byte: 0 }): { tokens: Token[]; diagnostics: Diagnostic[] } {
   const tokens = scanTokens(input, filename, start, 'template');
   return { tokens, diagnostics: checkInvalidTokens(tokens) };
-}
-export function validIdentifier(value: string | Uint8Array): boolean {
+};
+export const validIdentifier = function validIdentifier(value: string | Uint8Array): boolean {
   const tokens = scanTokens(typeof value === 'string' ? new TextEncoder().encode(value) : value, '', { line: 0, column: 0, byte: 0 }, 'ident');
   return tokens.length === 2 && tokens[0]!.type === 'TokenIdent' && tokens[1]!.type === 'TokenEOF';
-}
+};
 
 // Exact escape/literal segmentation from scan_string_lit.go, not string decoding.
-export function scanStringLit(data: Uint8Array, quoted: boolean): Uint8Array[] {
+export const scanStringLit = function scanStringLit(data: Uint8Array, quoted: boolean): Uint8Array[] {
   const s = new RagelState(quoted ? stringTables.en_quoted : stringTables.en_unquoted);
   const ret: Uint8Array[] = [];
   runRagel(data, stringTables, s, id => {
@@ -301,7 +301,7 @@ export function scanStringLit(data: Uint8Array, quoted: boolean): Uint8Array[] {
   if (s.te < s.p) {ret.push(data.subarray(s.te, s.p));}
   if (s.cs < stringTables.first_final) {ret.push(data.subarray(s.p));}
   return ret;
-}
+};
 
 export function checkInvalidTokens(tokens: Token[]): Diagnostic[] {
   const diagnostics: Diagnostic[] = [];

@@ -39,7 +39,7 @@ const generatedEntry = (values: ArrayLike<number>, index: number): number =>
 ;
 
 // Return true from an action to implement the generated `goto _again`.
-export function runRagel(data: Uint8Array, tables: RagelTables, state: RagelState, action: (id: number) => boolean | void): void {
+export const runRagel = function runRagel(data: Uint8Array, tables: RagelTables, state: RagelState, action: (id: number) => boolean | void): void {
   const actions = (offset: number): boolean => {
     const count = tables.actions[offset] ?? NO_ACTIONS;
     let actionIndex = offset;
@@ -127,4 +127,4 @@ export function runRagel(data: Uint8Array, tables: RagelTables, state: RagelStat
       }
     }
   }
-}
+};

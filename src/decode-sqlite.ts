@@ -84,7 +84,7 @@ const everyColumnTyped = function everyColumnTyped(columns: Columns | undefined)
  * compat Database) and returns its normalized rows; a statement that answers through a promise (no
  * such database) gives the promise, which `runSync` refuses.
  */
-export function runSyncSqlite(db: AnyClient, text: string, values: unknown[], columns: Columns | undefined): unknown[] | Promise<unknown[]> {
+export const runSyncSqlite = function runSyncSqlite(db: AnyClient, text: string, values: unknown[], columns: Columns | undefined): unknown[] | Promise<unknown[]> {
   const entry = statementFor(db, text, everyColumnTyped(columns));
   if (entry.kept) {return runStatement(entry, values, columns);}
   try {
@@ -92,7 +92,7 @@ export function runSyncSqlite(db: AnyClient, text: string, values: unknown[], co
   } finally {
     entry.st.close?.();
   }
-}
+};
 
 function runStatement({ st, exact }: Kept, values: unknown[], columns: Columns | undefined): unknown[] | Promise<unknown[]> {
   // Better-sqlite3 refuses all() on a statement that returns no rows.
@@ -127,7 +127,7 @@ function reader(st: Statement): boolean | undefined {
  * the statement (its types say a promise of it from 0.6, so it is awaited), whose all() runs a
  * statement that returns no rows as well; the statement is closed after its one run.
  */
-export async function runTurso(db: AnyClient, text: string, values: unknown[], columns: Columns | undefined): Promise<unknown[]> {
+export const runTurso = async function runTurso(db: AnyClient, text: string, values: unknown[], columns: Columns | undefined): Promise<unknown[]> {
   const typed = everyColumnTyped(columns);
   const st = (await db.prepare(text)) as Statement;
   try {
@@ -136,16 +136,16 @@ export async function runTurso(db: AnyClient, text: string, values: unknown[], c
   } finally {
     if (hasFunctionType(st.close)) {st.close();}
   }
-}
+};
 
 /**
  * Runs `text` on a SQLite-backed Durable Object's SQL storage (`ctx.storage.sql`), whose exec()
  * answers at once with a cursor, and returns its normalized rows. Its integers are numbers, so one
  * past 2^53 in an INTEGER column can only be a rounded one, and is refused.
  */
-export function runDurableObject(sql: AnyClient, text: string, values: unknown[], columns: Columns | undefined): unknown[] {
+export const runDurableObject = function runDurableObject(sql: AnyClient, text: string, values: unknown[], columns: Columns | undefined): unknown[] {
   return normalize(sql.exec(text, ...values).toArray(), columns);
-}
+};
 
 type Plan = {
   name: string;

@@ -26,7 +26,7 @@ export type PlayResult = {
  * The statement's result from its analysis, or from the error that stopped one, which is placed as
  * the content mapper places it: at the file's start. Types are broken over lines wider than `width`.
  */
-export function playResult(
+export const playResult = function playResult(
   sql: string,
   dialect: Dialect,
   outcome: { analysis: Analysis; lexed?: Pick<Lexed, "params" | "placeholders"> | undefined } | { error: { message: string; code?: number } },
@@ -51,7 +51,7 @@ export function playResult(
   } catch (error) {
     return { sql, params: "unknown", returns: "unknown", diagnostics: [placed({ message: (error as Error).message, start: 0, length: 1, code: 5 })], ms };
   }
-}
+};
 
 /**
  * For a statement, a function from a UTF-8 byte range, as the engine and the content mapper give

@@ -27,7 +27,7 @@ const skipQuoted = function skipQuoted(sql: string, start: number, quote: string
 
 // A name drops its prefix (`:id` is `id`); a positional placeholder is named by its number
 // (`$2` and `?2` are `2`), and a bare `?` takes the number after the largest so far.
-export function lexPlaceholders(sql: string, dialect: "postgres" | "mysql" | "sqlite" | "duckdb"): { params: string[]; placeholders: Placeholder[] } {
+export const lexPlaceholders = function lexPlaceholders(sql: string, dialect: "postgres" | "mysql" | "sqlite" | "duckdb"): { params: string[]; placeholders: Placeholder[] } {
   const placeholders: Placeholder[] = [];
   const params: string[] = [];
   let largest = 0;
@@ -90,7 +90,7 @@ export function lexPlaceholders(sql: string, dialect: "postgres" | "mysql" | "sq
   // Positional parameters bind by number, whatever order they appear in.
   if (params.length && params.every(isPositional)) {params.sort((left, right) => Number(left) - Number(right));}
   return { params, placeholders };
-}
+};
 
 /** Whether a parameter name is a position: a number, where a name starts with a letter or `_`. */
 export function isPositional(name: string): boolean {

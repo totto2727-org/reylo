@@ -12,7 +12,7 @@ type Node =
   | { kind: "array"; of: Node };
 
 /** The type's text as a tree. Throws on text outside the forms src/render.ts writes. */
-export function parseType(text: string): Node {
+export const parseType = function parseType(text: string): Node {
   // A doc comment is one token, the field's that follows it.
   const tokens = text.match(/\/\*\*[\s\S]*?\*\/|"(?:[^"\\]|\\.)*"|[A-Za-z_$][\w$]*(?:<[^<>]*>)?|\[\]|[{}()[\]|;:?,]/g) ?? [];
   let at = 0;
@@ -76,7 +76,7 @@ export function parseType(text: string): Node {
   const node = union();
   if (at !== tokens.length) {throw new Error(`type-format: unread text after ${tokens.slice(0, at).join(" ")} in ${text}`);}
   return node;
-}
+};
 
 /** A doc comment on one line: `/** line one line two *\/`. */
 const oneLineDoc = (doc: string): string => doc.replace(/\n\s*\*\/$/u, " */").replaceAll(/(?:\n[ \t]*\*[ \t]*)+/g, " ").replace(/^\/\*\*\s*/u, "/** ");
@@ -139,15 +139,15 @@ const print = function (node: Node, indent: number, lead: number, width: number,
 };
 
 /** The type's text, its objects broken over lines where it is wider than `width`. */
-export function formatType(text: string, width: number): string {
+export const formatType = function formatType(text: string, width: number): string {
   return print(parseType(text), 0, 0, width);
-}
+};
 
 /** What `.run()` resolves to for a statement's row type and cardinality, as the module's `Query` reads them. */
-export function resultType(row: string, cardinality: string): string {
+export const resultType = function resultType(row: string, cardinality: string): string {
   if (cardinality === "none" || row === "never") {return "void";}
   const wrapped = /\|/u.test(row.replaceAll(/\{[^{}]*\}/g, "")) ? `(${row})` : row;
   if (cardinality === "one") {return row;}
   if (cardinality === "maybeOne") {return `${row} | null`;}
   return `${wrapped}[]`;
-}
+};

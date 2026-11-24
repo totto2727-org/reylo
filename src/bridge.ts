@@ -7,7 +7,7 @@ import { MessageChannel, receiveMessageOnPort, Worker } from "node:worker_thread
 
 let worker: Worker | undefined;
 
-export function sqlModuleSync(path: string): string {
+export const sqlModuleSync = function sqlModuleSync(path: string): string {
   // The worker is this file's sibling, compiled (`.js`) or not (`.ts`).
   const extension = import.meta.url.slice(import.meta.url.lastIndexOf("."));
   worker ??= new Worker(new URL(`./register-worker${extension}`, import.meta.url), { workerData: { reyloWorker: true } });
@@ -23,4 +23,4 @@ export function sqlModuleSync(path: string): string {
   if (!reply) {throw new Error(`${path}: reylo's worker ${waited === "timed-out" ? "did not answer in 120 s" : "ended without an answer"}.`);}
   if ("error" in reply) {throw new Error(reply.error);}
   return reply.code;
-}
+};

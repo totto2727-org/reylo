@@ -279,7 +279,7 @@ const asText = { getTypeParser: () => (x: string) => x };
  * Pool, Neon's, @vercel/postgres's, pg-promise's database, tasks and transactions, PGlite and its
  * transactions, and Neon's neon(). Each is told apart by what it has.
  */
-export async function queryPostgres(c: AnyClient, text: string, values: unknown[], columns: Columns | undefined): Promise<unknown[]> {
+export const queryPostgres = async function queryPostgres(c: AnyClient, text: string, values: unknown[], columns: Columns | undefined): Promise<unknown[]> {
   // Pg-promise formats the values into the text itself (reading $1 inside a string literal
   // Too) unless it is handed a { text, values } object, which it binds.
   if (hasFunctionType(c.manyOrNone)) {return pgPromise(c, text, values, columns);}
@@ -306,7 +306,7 @@ export async function queryPostgres(c: AnyClient, text: string, values: unknown[
   }
   const result = await c.query(text, values);
   return Array.isArray(result) ? result : result.rows;
-}
+};
 
 // Pg-promise sends a { text, values, types } object to pg as it is, on the database, a task or a
 // Transaction. Its `receive` event runs on every result, Reylo's too, and may rewrite the rows: on
@@ -330,10 +330,10 @@ const refuseReceive = () =>
   new TypeError(`Reylo cannot run on this pg-promise database: its receive event rewrites every result, Reylo's rows too, so they would not have the types the query declares. Run Reylo's queries on a database initialized without receive (pgp({ ... }) with no receive), or on its pool (db.$pool).`);
 
 /** Neon's neon() before 1.0, a function called with (text, params, options), whose options take `types` (0.9 too, undocumented). */
-export function neonCallable(c: AnyClient & ((...args: unknown[]) => Promise<any>), text: string, values: unknown[], columns: Columns | undefined): Promise<unknown[]> {
+export const neonCallable = function neonCallable(c: AnyClient & ((...args: unknown[]) => Promise<any>), text: string, values: unknown[], columns: Columns | undefined): Promise<unknown[]> {
   const load: Load = async (sql) => (await c(sql, [], { arrayMode: true, fullResults: true, types: asText })).rows;
   return pgFamily(c, (types) => c(text, values, { fullResults: true, arrayMode: false, types }), columns, load);
-}
+};
 
 // ---------------------------------------------------------------------------------------------
 // PGlite
@@ -384,7 +384,7 @@ async function pglite(db: AnyClient, text: string, values: unknown[], columns: C
 type BufferLike = Uint8Array;
 const textOf = utf8;
 
-export async function postgresJs(c: AnyClient, text: string, params: unknown[], columns: Columns | undefined): Promise<unknown[]> {
+export const postgresJs = async function postgresJs(c: AnyClient, text: string, params: unknown[], columns: Columns | undefined): Promise<unknown[]> {
   // Prepared, as postgres.js prepares its own queries: its unsafe() prepares nothing by default,
   // So every run with a parameter took two round trips (Parse and Describe, then Bind and Execute)
   // Where a statement prepared on the connection takes one. A client made with `prepare: false`,
@@ -418,7 +418,7 @@ export async function postgresJs(c: AnyClient, text: string, params: unknown[], 
     out[r] = row;
   }
   return out;
-}
+};
 
 // ---------------------------------------------------------------------------------------------
 // Bun.sql (Postgres and MySQL): Bun decodes in native code, so its values are converted to Reylo's.
@@ -551,7 +551,7 @@ const slonikTemplate = function (text: string, values: Readonly<unknown[]>): [Te
   return [template, placeholders.map((placeholder) => values[Number(placeholder.name) - FIRST_PARAMETER_POSITION])];
 };
 
-export async function slonik(c: AnyClient, text: string, values: Readonly<unknown[]>, columns: Columns | undefined): Promise<unknown[]> {
+export const slonik = async function slonik(c: AnyClient, text: string, values: Readonly<unknown[]>, columns: Columns | undefined): Promise<unknown[]> {
   // An interceptor's transformRow or transformRowAsync renames the columns
   // (slonik-interceptor-field-name-transformation) or rewrites each row, which Reylo's types would
   // No longer describe. It is refused before the statement runs, since a write that committed and
@@ -566,7 +566,7 @@ export async function slonik(c: AnyClient, text: string, values: Readonly<unknow
   }
   const result = (await c.query(query)) as { rows: Record<string, unknown>[]; fields: { name: string; dataTypeId: number }[] };
   return slonikRows(result.rows, result.fields, columns);
-}
+};
 
 /** Slonik's rows in Reylo's representation, by each column's kind, or for a query defined by hand by its type's oid. */
 function slonikRows(rows: Record<string, unknown>[], fields: { name: string; dataTypeId: number }[], columns: Columns | undefined): unknown[] {

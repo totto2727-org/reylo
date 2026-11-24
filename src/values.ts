@@ -143,19 +143,19 @@ const DUCKDB_KINDS: Readonly<Record<string, ScalarKind>> = {
  * or a narrower integer (a MySQL expression a temporary table may widen, `int8|int4`) is a BIGINT's,
  * a BigInt either way, where no float shares the column: there a number may be either.
  */
-export function scalarKind(name: string, dialect: Dialect): Kind {
+export const scalarKind = function scalarKind(name: string, dialect: Dialect): Kind {
   const kinds = [...new Set(name.split("|").flatMap((part) => (dialect === "sqlite" ? (SQLITE_KINDS[part] ?? "unknown") : (dialect === "duckdb" ? (DUCKDB_KINDS[part] ?? "text") : (SQL_KINDS[part] ?? "text"))).split("|")))];
   const wide = kinds.includes("int8") && !kinds.includes("float") ? kinds.filter((k) => k !== "int") : kinds;
   return wide.join("|");
-}
+};
 
 /** The delimiter of an array's text, where the element type's is not a comma: a column carries it beside its kind. */
-export function arrayDelimiter(t: EngineType): string | undefined {
+export const arrayDelimiter = function arrayDelimiter(t: EngineType): string | undefined {
   return t.kind === "array" ? t.delimiter : undefined;
-}
+};
 
 /** The kind of a value of the engine's type `t`, standing in a result row (not inside a JSON document). */
-export function columnKind(t: EngineType, dialect: Dialect): Kind {
+export const columnKind = function columnKind(t: EngineType, dialect: Dialect): Kind {
   switch (t.kind) {
     case "scalar": {
       return scalarKind(t.name, dialect);
@@ -186,13 +186,13 @@ export function columnKind(t: EngineType, dialect: Dialect): Kind {
       return "unknown";
     }
   }
-}
+};
 
 /** The TypeScript type of a scalar kind, `a|b` as the union of both; `unknown` where any part is. */
-export function kindType(kind: Kind): string {
+export const kindType = function kindType(kind: Kind): string {
   const parts = kind.split("|").map((currentPart) => TS_TYPE[currentPart as ScalarKind] ?? "unknown");
   return parts.includes("unknown") ? "unknown" : [...new Set(parts)].join(" | ");
-}
+};
 
 // ---------------------------------------------------------------------------------------------
 // The value of each kind from the server's text, as every Postgres driver but Bun.sql hands it
@@ -310,10 +310,10 @@ export const instant = (text: string): string => {
  * millisecond, which is all a Date holds, with its fraction's trailing zeros dropped as the server
  * drops them, so that a value the driver did not cut reads alike on every driver.
  */
-export function instantOfDate(d: Date, column: string): string {
+export const instantOfDate = function instantOfDate(d: Date, column: string): string {
   validDate(d, column);
   return d.toISOString().replace(/\.?0+Z$/u, "Z");
-}
+};
 
 // Interval in IntervalStyle postgres: `1 year 2 mons 3 days 04:05:06.789`. Postgres keeps three
 // Parts, each signed on its own: months (written as years and months), days, and a time that may
@@ -403,13 +403,13 @@ const Utf8 = (globalThis as unknown as { TextDecoder: new (label?: string) => { 
 const utf8Decoder = new Utf8("utf8");
 
 /** UTF-8 bytes as text: a Buffer's own toString where the bytes are one. */
-export function utf8(bytes: Uint8Array): string {
+export const utf8 = function utf8(bytes: Uint8Array): string {
   return NodeBuffer?.isBuffer(bytes) ? (bytes as Uint8Array & { toString(encoding: string): string }).toString("utf8") : utf8Decoder.decode(bytes);
-}
+};
 const {fromHex} = (Uint8Array as unknown as { fromHex?: (hex: string) => Uint8Array });
 
 /** Bytea's text: hex (`\x0102ff`, the server's default) or the escape format (`bytea_output = escape`). */
-export function bytea(x: string): Uint8Array {
+export const bytea = function bytea(x: string): Uint8Array {
   if (x.charCodeAt(0) === 92 && x.charCodeAt(1) === 120) {
     const hex = x.slice(2);
     if (NodeBuffer) {return NodeBuffer.from(hex, "hex");}
@@ -425,7 +425,7 @@ export function bytea(x: string): Uint8Array {
     else {out.push(Number.parseInt(x.slice(i + 1, i + 4), 8)), (i += 3);}
   }
   return Uint8Array.from(out);
-}
+};
 
 interface TextCursor {
   offset: number;
@@ -489,7 +489,7 @@ export const hstore = (text: string): Record<string, string | null> => {
  * and `\` escaped, a null value a bare NULL. A key whose value is undefined is left out, as JSON
  * leaves it out.
  */
-export function hstoreText(v: object, fail: (message: string) => never): string {
+export const hstoreText = function hstoreText(v: object, fail: (message: string) => never): string {
   // Only a plain object's own keys are its pairs: a Map, a Set or a class instance would be written
   // As an empty hstore, so anything else is refused, its constructor named.
   const proto = Object.getPrototypeOf(v);
@@ -505,7 +505,7 @@ export function hstoreText(v: object, fail: (message: string) => never): string 
     pairs.push(`${quote(key)}=>${matchesNull(value) ? "NULL" : quote(value)}`);
   });
   return pairs.join(", ");
-}
+};
 
 const TEXT_DECODERS: Readonly<Record<ScalarKind, Decoder>> = {
   bool: (x) => x === "t",
@@ -571,13 +571,13 @@ export const parseArray = (text: string, element: Decoder, delimiter = ","): unk
 };
 
 /** The decoder of a Postgres value of `kind` from its text; `delim` is an array's (`;` for `box[]`). */
-export function textDecoder(kind: Kind, delim = ","): Decoder {
+export const textDecoder = function textDecoder(kind: Kind, delim = ","): Decoder {
   if (kind.endsWith("[]")) {
     const element = textDecoder(kind.slice(0, -2), delim);
     return (x) => parseArray(x, element, delim);
   }
   return TEXT_DECODERS[kind as ScalarKind] ?? identity;
-}
+};
 
 // ---------------------------------------------------------------------------------------------
 // The value of each kind from whatever a driver decoded it to: for the drivers that take no
@@ -621,7 +621,7 @@ const outOfRange = function outOfRange(value: string, column: string, rounded = 
 };
 
 /** An integer as a number, refused where a number cannot hold it exactly. */
-export function exactInteger(v: number | bigint, column: string): number {
+export const exactInteger = function exactInteger(v: number | bigint, column: string): number {
   if (matchesBigInt(v)) {
     // Exact: a BigInt past ±(2^53 - 1) converts to a number at least 2^53 in magnitude, since
     // Rounding keeps the order and 2^53 is a number. Comparing BigInts instead took a five-column
@@ -633,7 +633,7 @@ export function exactInteger(v: number | bigint, column: string): number {
   }
   if (v > MAX_SAFE || v < -MAX_SAFE) {throw outOfRange(String(v), column, true);}
   return v;
-}
+};
 
 const INTEGER = /^[+-]?\d+$/u;
 
@@ -642,13 +642,13 @@ const INTEGER = /^[+-]?\d+$/u;
  * ±(2^53 - 1) is one the driver already rounded, which no BigInt makes exact again, so it is
  * refused. Anything else (a SQLite REAL a column of INTEGER affinity kept) is left as it is.
  */
-export function bigInteger(v: number | bigint | string, column: string): unknown {
+export const bigInteger = function bigInteger(v: number | bigint | string, column: string): unknown {
   if (matchesBigInt(v)) {return v;}
   if (matchesString(v)) {return INTEGER.test(v) ? BigInt(v) : v;}
   if (Number.isSafeInteger(v)) {return BigInt(v);}
   if (Number.isInteger(v)) {throw new DecodeError(`Column "${column}" is a 64-bit integer, and the driver already rounded its value to ${v}, past ±(2^53 - 1): Reylo refuses it rather than return a BigInt of a rounded value.`);}
   return v;
-}
+};
 
 /**
  * A truth value as a boolean: true, false, 1, 0, `1n`, `0n`, `t`, `f`, `true`, `false`, `1`, `0`,
@@ -656,7 +656,7 @@ export function bigInteger(v: number | bigint | string, column: string): unknown
  * TINYINT(1), a BIT(1), a column SQLite declares BOOLEAN), which neither database holds to 0 and 1:
  * any other value is refused, naming the column, rather than read as true.
  */
-export function truth(v: unknown, column: string): boolean {
+export const truth = function truth(v: unknown, column: string): boolean {
   switch (typeof v) {
     case "boolean": {
       return v;
@@ -681,7 +681,7 @@ export function truth(v: unknown, column: string): boolean {
   }
   const shown = v instanceof Uint8Array ? `the bytes 0x${Array.from(v, (b) => b.toString(16).padStart(2, "0")).join("")}` : (matchesString(v) ? JSON.stringify(v) : String(v));
   return refuseTruth(column, shown);
-}
+};
 
 /** The error for a value of a boolean column that is not 0 or 1, `shown` as the message names it. */
 export function refuseTruth(column: string, shown: string): never {
@@ -718,18 +718,18 @@ const isBytes = (v: unknown): v is Uint8Array => v instanceof Uint8Array;
  * A MySQL VECTOR's floats from its bytes, 32-bit and little-endian, which mariadb and PlanetScale
  * hand over as they are (mysql2 decodes them itself).
  */
-export function float32s(bytes: Uint8Array, column: string): number[] {
+export const float32s = function float32s(bytes: Uint8Array, column: string): number[] {
   if (bytes.byteLength % 4 !== 0) {throw new DecodeError(`Column "${column}" is a VECTOR, whose value is 4 bytes per 32-bit float, and holds ${bytes.byteLength} bytes.`);}
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
   return Array.from({ length: bytes.byteLength / 4 }, (_unused, index) => view.getFloat32(index * 4, true));
-}
+};
 
 /**
  * `v` as a value of `kind`, from the form a driver decoded it to; `column` names it in an error. A
  * number past ±(2^53 - 1) in an integer column is one the driver already rounded, and is refused.
  * `delim` is an array's, where its text is what the driver gave.
  */
-export function coerce(kind: Kind, v: unknown, column: string, delim = ","): unknown {
+export const coerce = function coerce(kind: Kind, v: unknown, column: string, delim = ","): unknown {
   if (matchesNull(v) || matchesUndefined(v)) {return null;}
   if (kind.endsWith("[]")) {
     const element = kind.slice(0, -2);
@@ -805,7 +805,7 @@ export function coerce(kind: Kind, v: unknown, column: string, delim = ","): unk
       return v;
     }
   }
-}
+};
 
 /**
  * A value of `a|b`: by what the driver gave, since only the value says which it is. A string is a

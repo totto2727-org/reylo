@@ -180,7 +180,7 @@ const foreignKey = function (block: Block, table: Table, tables: ReadonlyMap<str
 };
 
 /** Compile the supported static Atlas SQLite declarations to individual in-memory DDL statements. */
-export function sqliteSchemaFromHcl(source: string | Uint8Array, filename = "schema.hcl"): string[] {
+export const sqliteSchemaFromHcl = function sqliteSchemaFromHcl(source: string | Uint8Array, filename = "schema.hcl"): string[] {
   const parsed = parseConfig(source, filename);
   const errors = parsed.diagnostics.filter((diagnostic) => diagnostic.severity === "error");
   if (errors.length) {throw new Error(errors.map((diagnostic) => `${diagnostic.subject?.filename ?? filename}:${diagnostic.subject?.start.line ?? 1}:${diagnostic.subject?.start.column ?? 1}: ${diagnostic.summary}: ${diagnostic.detail}`).join("\n"));}
@@ -248,4 +248,4 @@ export function sqliteSchemaFromHcl(source: string | Uint8Array, filename = "sch
     indexStatements.push(...index.statements);
   });
   return [...statements, ...indexStatements];
-}
+};

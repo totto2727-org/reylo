@@ -29,13 +29,13 @@ export type ModuleTypes = {
  * unique key's columns written as SQLite's message lists them, `a, b`; the dialect's whole error
  * type otherwise.
  */
-export function queryErrorType(dialect: Dialect, errors: Analysis["errors"]): string {
+export const queryErrorType = function queryErrorType(dialect: Dialect, errors: Analysis["errors"]): string {
   if (!errors) {return `import("@totto2727/reylo").QueryError<${JSON.stringify(dialect)}>`;}
   const name = { postgres: "PostgresQueryError", mysql: "MysqlQueryError", sqlite: "SqliteQueryError", duckdb: "DuckdbQueryError" }[dialect];
   const names = (field: string, list: string[]): string => list.map((n) => (field === "columns" ? `readonly [${n.split(", ").map((part) => JSON.stringify(part)).join(", ")}]` : JSON.stringify(n))).join(" | ");
   const codes = Object.entries(errors).map(([code, fields]) => `  ${JSON.stringify(code)}: { ${Object.entries(fields).map(([field, list]) => `${field}: ${names(field, list)}`).join("; ")} };`);
   return codes.length ? `import("@totto2727/reylo").${name}<{\n${codes.join("\n")}\n}>` : `import("@totto2727/reylo").${name}<{}>`;
-}
+};
 
 /** A parameter's TypeScript type: `unknown` when nothing in the statement types it (a CAST does), with `| null` where the statement lets the caller pass null. */
 const paramType = function (q: Analysis["params"][number], rendered: string): string {
@@ -50,22 +50,22 @@ const paramType = function (q: Analysis["params"][number], rendered: string): st
  * comment's delimiter inside a quoted name (`"/*"`) starts no comment, nor a quote inside a comment
  * a string.
  */
-export function reyloImport(...types: string[]): string {
+export const reyloImport = function reyloImport(...types: string[]): string {
   const text = types.join("\n").replaceAll(/"(?:[^"\\]|\\.)*"|\/\*[\s\S]*?\*\//g, (m) => (m.startsWith('"') ? '""' : ""));
   return `import type { ${/(?<![\w$])Json(?![\w$]|\s*\??:)/u.test(text) ? "Json, " : ""}Query } from "@totto2727/reylo";`;
-}
+};
 
 /**
  * A column's comment as the doc comment of the field that reads it, for an editor's hover: on one
  * line where the comment has one, else a block of lines after `indent` (src/doc-comment.ts), and
  * nothing where there is none.
  */
-export function fieldComment(comment: string | undefined, indent = ""): string {
+export const fieldComment = function fieldComment(comment: string | undefined, indent = ""): string {
   const text = (comment ?? "").replaceAll(/\r\n?/g, "\n").replaceAll(/[ \t]+$/gmu, "").trim();
   if (!text) {return "";}
   if (!text.includes("\n")) {return `/** ${text.replaceAll("*/", String.raw`*\/`)} */`;}
   return docComment(text, undefined, "", indent).trim();
-}
+};
 
 /**
  * An object type of `fields`, each a field's text and its column's comment: on one line, or a field
@@ -86,10 +86,10 @@ const fromUtf8 = new TextDecoder();
  * mapper's whole transform when a diagnostic runs past the end of the file ("returned an invalid
  * transform response"), and the module becomes `any`; a range that does is cut at the end.
  */
-export function withinFile(start: number, length: number, size: number): { start: number; length: number } {
+export const withinFile = function withinFile(start: number, length: number, size: number): { start: number; length: number } {
   const from = Math.max(0, Math.min(start, size));
   return { start: from, length: Math.max(0, Math.min(length, size - from)) };
-}
+};
 
 /**
  * The module's types for a statement the engine analyzed. `lexed` is the engine's lexer's reading of
@@ -97,7 +97,7 @@ export function withinFile(start: number, length: number, size: number): { start
  * the project file's `strict_params`, and `projectFile` the file the error about it names: the
  * project's own file, which may be `.reylo.yml` or another path REYLO_CONFIG names.
  */
-export function moduleTypes(sql: string, analysis: Analysis, dialect: Dialect, lexed: Pick<Lexed, "params" | "placeholders"> | undefined, strictParams: boolean, projectFile = ".reylo.yaml"): ModuleTypes {
+export const moduleTypes = function moduleTypes(sql: string, analysis: Analysis, dialect: Dialect, lexed: Pick<Lexed, "params" | "placeholders"> | undefined, strictParams: boolean, projectFile = ".reylo.yaml"): ModuleTypes {
   let names = lexed?.params ?? [];
   let placeholders = lexed?.placeholders ?? [];
   // A MySQL session reads its strings by its sql_mode, which the analysis asked for and the
@@ -143,4 +143,4 @@ export function moduleTypes(sql: string, analysis: Analysis, dialect: Dialect, l
     names,
     queryError: queryErrorType(dialect, analysis.errors),
   };
-}
+};

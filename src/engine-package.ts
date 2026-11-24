@@ -103,7 +103,7 @@ const load = async function load(from: string): Promise<Tooling> {
 };
 
 /** The build-time half, as the project of the directory `from` finds it, or reylo's own install. */
-export function tooling(from: string = process.cwd()): Promise<Tooling> {
+export const tooling = function tooling(from: string = process.cwd()): Promise<Tooling> {
   if (!loaded) {
     const loading = load(from);
     // A failure is not kept: an engine may be installed while the process runs.
@@ -113,10 +113,10 @@ export function tooling(from: string = process.cwd()): Promise<Tooling> {
     loaded = loading;
   }
   return loaded;
-}
+};
 
 /** Closes the build steps' connections, where a build step has opened any. */
-export async function releaseConnections(): Promise<void> {
+export const releaseConnections = async function releaseConnections(): Promise<void> {
   const loading = loaded;
   if (loading) {await (await loading.catch(() => undefined))?.releaseConnections();}
-}
+};

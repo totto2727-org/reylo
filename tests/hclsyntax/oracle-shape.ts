@@ -18,11 +18,11 @@ export interface Fixture {
 }
 const object = function (value: unknown): RecordValue { assert.ok(value !== null && typeof value === 'object' && !Array.isArray(value)); return value as RecordValue };
 const array = function (value: unknown): unknown[] { assert.ok(Array.isArray(value)); return value };
-export function position(value: unknown): Pos { const v = object(value); return { line: v.Line as number, column: v.Column as number, byte: v.Byte as number } }
-export function range(value: unknown): Range { const v = object(value); return { filename: v.Filename as string, start: position(v.Start), end: position(v.End) } }
-export function diagnostics(value: unknown): Diagnostic[] {
+export const position = function position(value: unknown): Pos { const v = object(value); return { line: v.Line as number, column: v.Column as number, byte: v.Byte as number } };
+export const range = function range(value: unknown): Range { const v = object(value); return { filename: v.Filename as string, start: position(v.Start), end: position(v.End) } };
+export const diagnostics = function diagnostics(value: unknown): Diagnostic[] {
   return array(value).map(item => { const d = object(item); return { severity: d.Severity === 1 ? 'error' : 'warning', summary: d.Summary as string, detail: d.Detail as string, subject: d.Subject === null ? null : range(d.Subject), context: d.Context === null ? null : range(d.Context) } });
-}
+};
 const dynamicLiteral = Symbol('upstream dynamic literal');
 const literal = function (value: unknown): unknown {
   const v = object(value);
@@ -38,7 +38,7 @@ const operators: Record<string, string> = { or: '||', and: '&&', not: '!', equal
 const steps = function (value: unknown): unknown[] {
   return array(value).map(item => { const v = object(item); return v.goType === 'TraverseIndex' ? { kind: 'index', value: literal(v.Key) === dynamicLiteral ? null : literal(v.Key), range: range(v.SrcRange), ...(literal(v.Key) === dynamicLiteral ? { dynamic: true } : {}) } : { kind: v.goType === 'TraverseRoot' ? 'root' : 'attribute', value: v.Name, range: range(v.SrcRange) } });
 };
-export function oracleAST(value: unknown): unknown {
+export const oracleAST = function oracleAST(value: unknown): unknown {
   if (value === null) {return null;}
   const v = object(value);
   const r = (): Range => range(v.ComputedRange ?? v.SrcRange);
@@ -69,14 +69,14 @@ export function oracleAST(value: unknown): unknown {
     case 'TemplateJoinExpr': { return { kind: 'templateJoin', tuple: e('Tuple'), range: r() }; }
     default: { throw new Error(`Unhandled Go AST kind ${String(v.goType)}`); }
   }
-}
+};
 /** Remove only TS convenience fields absent from the Go AST, not parser data. */
-export function actualAST(value: unknown): unknown {
+export const actualAST = function actualAST(value: unknown): unknown {
   if (value === null || typeof value !== 'object') {return value;}
   if (Array.isArray(value)) {return value.map(actualAST);}
   const v = value as RecordValue;
   if (typeof v.severity === 'string' && typeof v.summary === 'string') {return { ...v, context: v.context ?? null };}
   return Object.fromEntries(Object.entries(v).filter(([key, item]) => item !== undefined && key !== 'numberText' && key !== 'attributeOnly' && !(v.kind === 'traversal' && key === 'parts')).map(([key, item]) => [key, actualAST(item)]));
-}
-export function actualDiagnostics(value: Readonly<Diagnostic[]>): Diagnostic[] { return value.map(diagnostic => ({ ...diagnostic, context: diagnostic.context ?? null })) }
-export function oracleTokens(value: unknown): unknown[] { return array(value).map(item => { const t = object(item); const r = t.range as { Filename: string; Start: Pos; End: Pos }; return { type: t.type, bytes: Buffer.from(t.bytes as string, 'base64'), range: { filename: r.Filename, start: position(r.Start), end: position(r.End) } } }) }
+};
+export const actualDiagnostics = function actualDiagnostics(value: Readonly<Diagnostic[]>): Diagnostic[] { return value.map(diagnostic => ({ ...diagnostic, context: diagnostic.context ?? null })) };
+export const oracleTokens = function oracleTokens(value: unknown): unknown[] { return array(value).map(item => { const t = object(item); const r = t.range as { Filename: string; Start: Pos; End: Pos }; return { type: t.type, bytes: Buffer.from(t.bytes as string, 'base64'), range: { filename: r.Filename, start: position(r.Start), end: position(r.End) } } }) };

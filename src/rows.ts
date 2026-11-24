@@ -163,7 +163,7 @@ const verifyInsertColumns = (expected: InsertColumns, actual: InsertColumns, sch
  * @param {boolean} inserted - Whether every row must supply the same insert columns.
  * @returns {{ value: unknown; present: ReadonlySet<string> }} The bound value and supplied column names.
  */
-export function prepareRows(name: string, type: RowsType, value: unknown, dialect: Dialect, inserted: boolean): { value: unknown; present: ReadonlySet<string> } {
+export const prepareRows = function prepareRows(name: string, type: RowsType, value: unknown, dialect: Dialect, inserted: boolean): { value: unknown; present: ReadonlySet<string> } {
   const fail = (message: string): never => {
     throw new ParameterError(`Parameter "${name}": ${message}`);
   };
@@ -190,7 +190,7 @@ export function prepareRows(name: string, type: RowsType, value: unknown, dialec
   const shaped = type.one ? out[0] : out;
   // oxlint-disable-next-line eslint/sort-keys -- Preserve the existing field order for serialized preparation results.
   return { value: dialect === "postgres" ? shaped : write(shaped), present: keys };
-}
+};
 
 /** One value checked against its type, as the JSON the database reads; `fail` says why not. */
 function check(type: EngineType, written: string, v: unknown, dialect: Dialect, fail: (message: string) => never): unknown {
@@ -409,7 +409,7 @@ const wallClock = (base: string, written: string, value: unknown, fail: RejectPa
  * value is bound as it is. `type` is the engine's type for the parameter. On SQLite every integer
  * is 64 bits, whatever the cast calls it.
  */
-export function checkCast(name: string, written: string, type: EngineType, v: unknown, dialect: Dialect): void {
+export const checkCast = function checkCast(name: string, written: string, type: EngineType, v: unknown, dialect: Dialect): void {
   if (matchesNull(v) || matchesUndefined(v)) {return;}
   const fail = (message: string): never => {
     throw new ParameterError(`Parameter "${name}" ${message}`);
@@ -430,7 +430,7 @@ export function checkCast(name: string, written: string, type: EngineType, v: un
     return;
   }
   check(type, written, v, dialect, fail);
-}
+};
 
 /**
  * A decimal, as a number or as its digits. `numeric(p,s)` keeps `s` digits after the point and
@@ -471,7 +471,7 @@ function decimal(written: string, v: unknown, fail: (message: string) => never):
 }
 
 /** The statement with each list of a structured parameter written again for the keys present (MySQL): an entry stays when its key is required or present. */
-export function variant(text: string, structured: Structured, fields: Readonly<RowField[]>, present: ReadonlySet<string>): string {
+export const variant = function variant(text: string, structured: Structured, fields: Readonly<RowField[]>, present: ReadonlySet<string>): string {
   const lists = [...structured.lists].sort((left, right) => right.start - left.start);
   let out = text;
   Iterator.from(lists).forEach((list) => {
@@ -482,4 +482,4 @@ export function variant(text: string, structured: Structured, fields: Readonly<R
     out = out.slice(0, list.start) + kept.join(", ") + out.slice(list.end);
   });
   return out;
-}
+};

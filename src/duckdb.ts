@@ -187,7 +187,7 @@ const openCopy = async function (api: NodeApi, path: string, options: Record<str
  * opens a copy of it instead ([`copyOf`]). A NoDuckdbDriver where the project has no
  * `@duckdb/node-api`.
  */
-export function duckdbDatabase(path: string, root: string): { run<T>(work: (io: EngineIo) => Promise<T>): Promise<T> } {
+export const duckdbDatabase = function duckdbDatabase(path: string, root: string): { run<T>(work: (io: EngineIo) => Promise<T>): Promise<T> } {
   // A project without the driver can type nothing: its error is the project's, at once.
   const api = nodeApi(root);
   return {
@@ -216,4 +216,4 @@ export function duckdbDatabase(path: string, root: string): { run<T>(work: (io: 
       }
     },
   };
-}
+};

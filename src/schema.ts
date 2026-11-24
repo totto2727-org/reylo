@@ -146,7 +146,7 @@ const object = function (fields: Readonly<{ name: string }[]>, field: (f: number
 };
 
 /** The JSON Schema of a value of `t`, as a result column (`input` false) or a parameter the caller passes (`input` true), or a structured parameter's member (`inRow`). */
-export function typeSchema(t: EngineType, dialect: Dialect, input = false, inJson = false, inRow = false): Schema | JsonSchema {
+export const typeSchema = function typeSchema(t: EngineType, dialect: Dialect, input = false, inJson = false, inRow = false): Schema | JsonSchema {
   switch (t.kind) {
     case "scalar": { return scalar(t.name, dialect, inJson, input); }
     case "enum": { return { type: "string", enum: t.labels }; }
@@ -176,10 +176,10 @@ export function typeSchema(t: EngineType, dialect: Dialect, input = false, inJso
     case "union": { return { anyOf: t.members.map((m) => object([{ name: "tag" }, { name: "value" }], (i) => (i === 0 ? { const: m.name } : nullable(typeSchema(m.type, dialect, input))))) }; }
     case "unknown": { return {}; }
   }
-}
+};
 
 /** The query's input and output schemas: the parameters as an object, and the result as `run` returns it once JSON. */
-export function querySchemas(analysis: Analysis, dialect: Dialect): { input: Schema; output: Schema } {
+export const querySchemas = function querySchemas(analysis: Analysis, dialect: Dialect): { input: Schema; output: Schema } {
   // A typed JSON parameter's schema as written, with its defaults; one with a `default` at its root may be left out, as may one that takes null.
   const input = object(analysis.params, (i) => {
     const p = analysis.params[i]!;
@@ -197,4 +197,4 @@ export function querySchemas(analysis: Analysis, dialect: Dialect): { input: Sch
   });
   const output: Schema = analysis.cardinality === "many" ? { type: "array", items: row } : analysis.cardinality === "one" ? row : analysis.cardinality === "maybeOne" ? { anyOf: [row, { type: "null" }] } : { type: "null" };
   return { input: { $schema: "https://json-schema.org/draft/2020-12/schema", ...input }, output: { $schema: "https://json-schema.org/draft/2020-12/schema", ...output } };
-}
+};

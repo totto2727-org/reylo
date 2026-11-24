@@ -9,7 +9,7 @@ import type { EngineCore, EngineIo } from './engine-core.ts';
 const DDL_QUERY = "select sql from sqlite_schema where sql is not null and type in ('table', 'view', 'index', 'trigger') order by rowid";
 const FUNCTIONS_QUERY = "select name, narg, type from pragma_function_list";
 
-export function hclCatalog(path: string, engine: EngineCore) {
+export const hclCatalog = function hclCatalog(path: string, engine: EngineCore) {
   let statements: string[];
   try {
     statements = sqliteSchemaFromHcl(readFileSync(path), path);
@@ -34,4 +34,4 @@ export function hclCatalog(path: string, engine: EngineCore) {
     forget: async () => cache.clear(),
     close: async () => cache.clear(),
   };
-}
+};

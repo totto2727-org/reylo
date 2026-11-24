@@ -210,7 +210,7 @@ const isDurableObjectSql = function isDurableObjectSql(client: AnyClient | null 
  * On a synchronous SQLite client the rows come back at once and an error is thrown; on every
  * other client they come back as a promise, which rejects with the driver's own error.
  */
-export function execute<D extends Dialect>(
+export const execute = function execute<D extends Dialect>(
   client: ClientFor<D>,
   query: QueryModule<D>,
   params: ParamsInput = {},
@@ -218,7 +218,7 @@ export function execute<D extends Dialect>(
   const currentClient = underneath(client as AnyClient);
   if (query.dialect === "sqlite" && (isSyncSqlite(currentClient) || isDurableObjectSql(currentClient))) {return executeSyncSqlite(currentClient, query, params);}
   return executeAsync(currentClient, query, params);
-}
+};
 
 /**
  * The driver client a Drizzle database, transaction or savepoint runs on, which its session
@@ -237,7 +237,7 @@ function underneath(currentClient: AnyClient): AnyClient {
 }
 
 /** The synchronous path alone, for `runSync`: any other client is refused before anything runs. */
-export function executeSync<D extends Dialect>(client: SyncClientFor<D>, query: QueryModule<D>, params: ParamsInput = {}): unknown[] {
+export const executeSync = function executeSync<D extends Dialect>(client: SyncClientFor<D>, query: QueryModule<D>, params: ParamsInput = {}): unknown[] {
   const currentClient = underneath(client as unknown as AnyClient);
   const refuse = (why: string) => new TypeError(`runSync takes a synchronous SQLite client (better-sqlite3, node:sqlite, bun:sqlite, the Database of @tursodatabase/database/compat or a Durable Object's ctx.storage.sql); ${why}. run takes every client.`);
   if (query.dialect !== "sqlite") {throw refuse(`a ${query.dialect} statement has none`);}
@@ -246,7 +246,7 @@ export function executeSync<D extends Dialect>(client: SyncClientFor<D>, query: 
   if (Array.isArray(rows)) {return rows;}
   rows.catch(() => {});
   throw refuse("this client's statement answered with a promise");
-}
+};
 
 function executeSyncSqlite(client: AnyClient, query: QueryModule, params: ParamsInput): unknown[] | Promise<unknown[]> {
   checkParams(query, params);
@@ -523,12 +523,12 @@ export function sentText(query: QueryModule, text: string): string {
  * each value's text, which a driver binds with no declared type, so the server reads it as the
  * parameter's type; on MySQL and SQLite each value as a driver binds it.
  */
-export function rawStatement(query: QueryModule, params: unknown): { text: string; values: unknown[] } {
+export const rawStatement = function rawStatement(query: QueryModule, params: unknown): { text: string; values: unknown[] } {
   checkParams(query, params);
   const { text, values, names } = statement(query, params);
   if (query.dialect !== "postgres") {return { text, values };}
   return { text, values: values.map((currentValue, index) => postgresText(query, names[index]!, currentValue)) };
-}
+};
 
 /** A bound value as the text Postgres's input function reads, as `.run()` sends it through pg. */
 function postgresText(query: QueryModule, name: string, v: unknown): string | null {

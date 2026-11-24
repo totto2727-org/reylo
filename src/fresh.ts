@@ -40,15 +40,15 @@ const checked = new WeakMap<object, number>();
 const clock = (globalThis as unknown as { performance: { now(): number } }).performance;
 
 /** Whether `query` is due for a check now. */
-export function due(query: object, now = clock.now()): boolean {
+export const due = function due(query: object, now = clock.now()): boolean {
   const at = checked.get(query);
   return matchesUndefined(at) || now - at >= FRESH_FOR;
-}
+};
 
 /** Records a check of `query` that passed, or that could not run. */
-export function passed(query: object, now = clock.now()): void {
+export const passed = function passed(query: object, now = clock.now()): void {
   checked.set(query, now);
-}
+};
 
 const yes = (v: string) => v === "true" || v === "1";
 const describe = (r: Readonly<string[]>): string => `${r[2]}${yes(r[3]!) ? " not null" : ""}${yes(r[4]!) ? " with a default" : ""}`;
@@ -69,7 +69,7 @@ const COLUMNS = ["fresh_table", "fresh_column", "fresh_type", "fresh_not_null", 
  * engine gives them as declared, so a build on one and a run on the other saw the same schema. A
  * Postgres or MySQL type is compared exactly: a quoted Postgres type name keeps its case.
  */
-export function differences(fresh: Fresh, rows: Readonly<unknown[]>, dialect?: "postgres" | "mysql" | "sqlite" | "duckdb"): string[] | undefined {
+export const differences = function differences(fresh: Fresh, rows: Readonly<unknown[]>, dialect?: "postgres" | "mysql" | "sqlite" | "duckdb"): string[] | undefined {
   const now = new Map<string, string[]>();
   const width = fresh.rows[0]?.length === 6 ? 6 : 5;
   const columns = COLUMNS.slice(0, width);
@@ -99,7 +99,7 @@ export function differences(fresh: Fresh, rows: Readonly<unknown[]>, dialect?: "
     if (!seen.has(key) && fresh.inserts.includes(is[0]!) && yes(is[3]!) && !yes(is[4]!)) {out.push(`${table(is[0]!)}.${is[1]} is now ${describe(is)}, which the insert does not write`);}
   });
   return out;
-}
+};
 
 /** Where the parenthesis that opens `s` closes, its strings skipped. */
 const closes = function closes(s: string): number {
@@ -153,6 +153,6 @@ const asciiUpper = (s: string): string => s.replaceAll(/[a-z]+/gu, (m) => m.toUp
 const asciiLower = (s: string): string => s.replaceAll(/[A-Z]+/gu, (m) => m.toLowerCase());
 
 /** The error a call fails with when the schema changed under its query. */
-export function staleError(source: string | undefined, lines: Readonly<string[]>): Error {
+export const staleError = function staleError(source: string | undefined, lines: Readonly<string[]>): Error {
   return new Error(`The database changed after ${source ? `${source} was built` : "this query was built"}: ${lines.join("; ")}. Build it again (the type check, or reylo generate) and deploy the new build.`);
-}
+};

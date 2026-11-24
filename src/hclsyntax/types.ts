@@ -36,27 +36,27 @@ export interface TemplateWrap extends Node { kind: 'templateWrap'; wrapped: Expr
 export interface TemplateJoin extends Node { kind: 'templateJoin'; tuple: ForExpression }
 export type Expression = Literal | Dynamic | Traversal | RelativeTraversal | Call | Tuple | ObjectExpression | ObjectKey | Unary | Binary | Conditional | ForExpression | Splat | Anonymous | Index | Parentheses | Template | TemplateWrap | TemplateJoin;
 
-export function rangeBetween(first: Range, last: Range): Range { return { filename: first.filename, start: { ...first.start }, end: { ...last.end } } }
-export function emptyRangeAt(range: Range, at: 'start' | 'end' = 'end'): Range { return { filename: range.filename, start: { ...range[at] }, end: { ...range[at] } } }
-export function rangeString(range: Range): string {
+export const rangeBetween = function rangeBetween(first: Range, last: Range): Range { return { filename: first.filename, start: { ...first.start }, end: { ...last.end } } };
+export const emptyRangeAt = function emptyRangeAt(range: Range, at: 'start' | 'end' = 'end'): Range { return { filename: range.filename, start: { ...range[at] }, end: { ...range[at] } } };
+export const rangeString = function rangeString(range: Range): string {
   if (range.start.line === range.end.line) {return `${range.filename}:${range.start.line},${range.start.column}-${range.end.column}`;}
   return `${range.filename}:${range.start.line},${range.start.column}-${range.end.line},${range.end.column}`;
-}
+};
 /** Match upstream IsStringLiteral, including a literal dynamic error placeholder. */
-export function isStringLiteral(expression: Expression): expression is Template & { parts: [Literal | Dynamic] } {
+export const isStringLiteral = function isStringLiteral(expression: Expression): expression is Template & { parts: [Literal | Dynamic] } {
   return expression.kind === 'template' && expression.parts.length === 1 && (expression.parts[0]!.kind === 'literal' || expression.parts[0]!.kind === 'dynamic' && !expression.parts[0].diagnostics);
-}
-export function staticString(expression: Expression): string | undefined {
+};
+export const staticString = function staticString(expression: Expression): string | undefined {
   if (expression.kind === 'literal' && typeof expression.value === 'string') {return expression.value;}
   if (isStringLiteral(expression) && expression.parts[0].kind === 'literal' && typeof expression.parts[0].value === 'string') {return expression.parts[0].value;}
   return undefined;
-}
-export function staticTraversal(expression: Expression): Readonly<(string | number)[]> | undefined {
+};
+export const staticTraversal = function staticTraversal(expression: Expression): Readonly<(string | number)[]> | undefined {
   return expression.kind === 'traversal' && !expression.steps.some(step => step.dynamic || typeof step.value !== 'string' && typeof step.value !== 'number') ? expression.parts : undefined;
-}
+};
 
 /** Data-only equivalent of the upstream expression StartRange methods. */
-export function expressionStartRange(expression: Expression): Range {
+export const expressionStartRange = function expressionStartRange(expression: Expression): Range {
   switch (expression.kind) {
     case 'parentheses': { return expressionStartRange(expression.expression); }
     case 'call': { return rangeBetween(expression.nameRange, expression.openParenRange); }
@@ -70,8 +70,8 @@ export function expressionStartRange(expression: Expression): Range {
     case 'templateJoin': { return expressionStartRange(expression.tuple); }
     default: { return expression.range; }
   }
-}
-export function staticObjectKey(expression: ObjectKey): string | undefined {
+};
+export const staticObjectKey = function staticObjectKey(expression: ObjectKey): string | undefined {
   if (!expression.forceNonLiteral && expression.wrapped.kind === 'traversal' && expression.wrapped.steps.length === 1) {return expression.wrapped.parts[0] as string;}
   return staticString(expression.wrapped);
-}
+};

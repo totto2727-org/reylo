@@ -32,14 +32,14 @@ const binaryOps: Record<string, string>[] = [
 ];
 const emptyBody = (range: Range, endRange = range): Body => ({ kind: 'body', attributes: Object.create(null) as Record<string, Attribute>, blocks: [], range, endRange });
 
-export function parseConfig(source: string | Uint8Array, filename = '', start: Pos = { line: 1, column: 1, byte: 0 }): { body: Body; diagnostics: Diagnostic[] } {
+export const parseConfig = function parseConfig(source: string | Uint8Array, filename = '', start: Pos = { line: 1, column: 1, byte: 0 }): { body: Body; diagnostics: Diagnostic[] } {
   const result = lexConfig(typeof source === 'string' ? encoder.encode(source) : source, filename, start);
   const parser = new Parser(result.tokens);
   const body = parser.parseBody('TokenEOF');
   parser.assertEmptyIncludeNewlinesStack();
   return { body, diagnostics: [...result.diagnostics, ...parser.diagnostics] };
-}
-export function parseExpression(source: string | Uint8Array, filename = '', start: Pos = { line: 1, column: 1, byte: 0 }): { expression: Expression; diagnostics: Diagnostic[] } {
+};
+export const parseExpression = function parseExpression(source: string | Uint8Array, filename = '', start: Pos = { line: 1, column: 1, byte: 0 }): { expression: Expression; diagnostics: Diagnostic[] } {
   const result = lexExpression(typeof source === 'string' ? encoder.encode(source) : source, filename, start);
   const parser = new Parser(result.tokens);
   parser.pushIncludeNewlines(false);
@@ -49,14 +49,14 @@ export function parseExpression(source: string | Uint8Array, filename = '', star
   parser.popIncludeNewlines();
   parser.assertEmptyIncludeNewlinesStack();
   return { expression, diagnostics: [...result.diagnostics, ...parser.diagnostics] };
-}
-export function parseTemplate(source: string | Uint8Array, filename = '', start: Pos = { line: 1, column: 1, byte: 0 }): { expression: Expression; diagnostics: Diagnostic[] } {
+};
+export const parseTemplate = function parseTemplate(source: string | Uint8Array, filename = '', start: Pos = { line: 1, column: 1, byte: 0 }): { expression: Expression; diagnostics: Diagnostic[] } {
   const result = lexTemplate(typeof source === 'string' ? encoder.encode(source) : source, filename, start);
   const parser = new Parser(result.tokens);
   const expression = parser.parseTemplate('TokenEOF', false);
   parser.assertEmptyIncludeNewlinesStack();
   return { expression, diagnostics: [...result.diagnostics, ...parser.diagnostics] };
-}
+};
 
 const relativeTraversal = function relativeTraversal(expression: Expression, step: TraversalStep): Expression {
   if (expression.kind === 'traversal' || expression.kind === 'relativeTraversal') {

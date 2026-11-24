@@ -27,10 +27,10 @@ export class Unreachable extends Error {
  * that cannot be reached. Postgres answers with class 28 (`28P01` for a password, `28000` for the
  * rest, IAM authentication included), MySQL with error 1045.
  */
-export function refusedLogin(e: unknown): boolean {
+export const refusedLogin = function refusedLogin(e: unknown): boolean {
   const err = ((e as { cause?: unknown } | null)?.cause ?? e) as { code?: string; errno?: number } | null;
   return err?.code === "28P01" || err?.code === "28000" || err?.code === "ER_ACCESS_DENIED_ERROR" || err?.errno === 1045;
-}
+};
 
 /** A driver error as one line: a refused connection is an AggregateError with no message of its own. */
 export function reason(e: unknown): string {
@@ -56,9 +56,9 @@ export class NotMysql extends Error {
 }
 
 /** The server's name and version, when it is not MySQL: from version(), "11.8.2-MariaDB-ubu2404" on MariaDB. */
-export function notMysql(version: unknown): string | undefined {
+export const notMysql = function notMysql(version: unknown): string | undefined {
   const v = String(version ?? "");
   const regexMatch = /^(?:5\.5\.5-)?(\d+(?:\.\d+)*).*mariadb/i.exec(v);
   if (regexMatch) {return `MariaDB ${regexMatch[1]}`;}
   return /mariadb/i.test(v) ? "MariaDB" : undefined;
-}
+};

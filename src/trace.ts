@@ -52,7 +52,7 @@ const tracing = ((): Tracing | undefined => {
  * The channel, when anything subscribes to it, so that an untraced query builds no context. Bun's
  * TracingChannel has no `hasSubscribers` of its own, so each event's channel is asked.
  */
-export function listening(): Tracing | undefined {
+export const listening = function listening(): Tracing | undefined {
   const t = tracing;
   return t && (t.start.hasSubscribers || t.end.hasSubscribers || t.asyncStart.hasSubscribers || t.asyncEnd.hasSubscribers || t.error.hasSubscribers) ? t : undefined;
-}
+};

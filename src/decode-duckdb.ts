@@ -138,9 +138,9 @@ async function loadNodeApi(c: DuckdbClient): Promise<Api> {
 }
 
 /** Whether a client is @duckdb/node-api's DuckDBConnection. */
-export function isDuckdb(c: Record<string, unknown> | null | undefined): boolean {
+export const isDuckdb = function isDuckdb(c: Record<string, unknown> | null | undefined): boolean {
   return !matchesNullish(c) && hasFunctionType(c.runAndReadAll) && hasFunctionType(c.prepare) && hasFunctionType(c.run);
-}
+};
 
 // DuckDB's type ids (duckdb_type), which node-api's types carry.
 const T = {
@@ -174,7 +174,7 @@ const bindValue = function bindValue(a: Api, t: EngineType | undefined, v: unkno
  * returns its rows, each value given its kind. `columns` is empty for a statement that returns no
  * rows, whose count DuckDB returns as a row.
  */
-export async function runDuckdb(c: DuckdbClient, text: string, values: unknown[], types: (EngineType | undefined)[], columns: Columns | undefined): Promise<unknown[]> {
+export const runDuckdb = async function runDuckdb(c: DuckdbClient, text: string, values: unknown[], types: (EngineType | undefined)[], columns: Columns | undefined): Promise<unknown[]> {
   let bound = values;
   let bindTypes: unknown[] | undefined;
   if (values.some((currentValue) => !matchesNull(currentValue) && hasObjectType(currentValue))) {
@@ -191,7 +191,7 @@ export async function runDuckdb(c: DuckdbClient, text: string, values: unknown[]
     for (let nameIndex = 0; nameIndex < names.length; nameIndex++) {out[names[nameIndex]!] = decode(row[nameIndex], kinds[nameIndex]!, names[nameIndex]!);}
     return out;
   });
-}
+};
 
 // --- Binding ---------------------------------------------------------------------------------
 
@@ -230,7 +230,7 @@ const INTEGERS = new Set(["tinyint", "smallint", "integer", "bigint", "hugeint",
  * duration, which `.run()` returns for an INTERVAL and DuckDB does not read, goes as DuckDB's own
  * text. An array's elements and a struct's fields are checked by their own types.
  */
-export function encodeDuckdb(type: EngineType | undefined, v: unknown, name: string): unknown {
+export const encodeDuckdb = function encodeDuckdb(type: EngineType | undefined, v: unknown, name: string): unknown {
   if (matchesUndefined(type) || matchesNullish(v)) {return v;}
   if (type.kind === "array" && Array.isArray(v)) {return v.map((e) => encodeDuckdb(type.of, e, name));}
   if (type.kind === "tuple" && Array.isArray(v)) {return v.map((e, index) => encodeDuckdb(type.items[index], e, name));}
@@ -263,7 +263,7 @@ export function encodeDuckdb(type: EngineType | undefined, v: unknown, name: str
   // DuckDB reads a year past 9999 without the sign ISO 8601 writes before it (`+10000-01-01`).
   if (matchesString(v) && TIMES.has(type.name)) {return v.replace(/^\+0*(\d{4,})/u, "$1");}
   return v;
-}
+};
 
 const TIMES = new Set(["date", "timestamp", "timestamp_s", "timestamp_ms", "timestamp_ns", "timestamptz", "timestamptz_ns"]);
 
