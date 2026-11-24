@@ -396,11 +396,11 @@ export function bunRows(rows: unknown[], columns: Columns | undefined): unknown[
   const work: (Readonly<[string, Kind, string?]>)[] = columns ? columns.filter(([, kind]) => BUN_KINDS.test(kind)) : Object.keys(first).map((name) => [name, "unknown"] as const);
   if (!work.length) {return rows;}
   for (const row of rows as Record<string, unknown>[]) {
-    for (const [name, kind, delim] of work) {
+    Iterator.from(work).forEach(([name, kind, delim]) => {
       const v = row[name];
-      if (matchesNull(v) || matchesUndefined(v)) {continue;}
+      if (matchesNull(v) || matchesUndefined(v)) {return;}
       row[name] = kind === "unknown" ? byType(v, name) : bunValue(kind, v, name, delim);
-    }
+    });
   }
   return rows;
 }

@@ -177,15 +177,15 @@ test("SQLite: the error each driver throws reads as one, its most specific code 
     ["D1's lost connection", thrown("D1_ERROR: Network connection lost."), undefined],
     ["Turso's own error", thrown("database is closed", { code: "GenericFailure" }), undefined],
   ];
-  for (const [label, error, expected] of cases) {
+  Iterator.from(cases).forEach(([label, error, expected]) => {
     const read = readQueryErrorSync("sqlite", error);
     if (expected === undefined) {
       assert.equal(read, undefined, label);
-      continue;
+      return;
     }
     assert.deepEqual(fields(read), expected, label);
     assert.equal(read!.cause, error, label);
-  }
+  });
 });
 
 // oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.

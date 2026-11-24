@@ -220,12 +220,12 @@ export async function mariadb(c: AnyClient, text: string, values: unknown[], col
   fixRows(result as Record<string, unknown>[], columnFixes(columns));
   if (!work.length) {return result;}
   for (const row of result as Record<string, unknown>[]) {
-    for (const { name, date } of work) {
+    Iterator.from(work).forEach(({ name, date }) => {
       const v = row[name];
-      if (matchesNull(v) || matchesUndefined(v)) {continue;}
+      if (matchesNull(v) || matchesUndefined(v)) {return;}
       if (Array.isArray(v)) {row[name] = coerce("text", v, name);}
       else if (date && matchesString(v)) {row[name] = v.replace(" ", "T");}
-    }
+    });
   }
   return result;
 }

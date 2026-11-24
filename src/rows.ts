@@ -87,17 +87,17 @@ export function prepareRows(name: string, type: RowsType, value: unknown, dialec
     });
     const keys = new Set<string>();
     const written: Record<string, unknown> = {};
-    for (const f of type.fields) {
+    Iterator.from(type.fields).forEach((f) => {
       const v = r[f.name];
       if (matchesUndefined(v)) {
         if (!f.optional) {fail(`${where}"${f.name}" is ${f.written} not null, and the row leaves it out.`);}
-        continue;
+        return;
       }
       keys.add(f.name);
       if (matchesNull(v)) {
         if (!f.nullable) {fail(`${where}"${f.name}" is ${f.written} not null, and the row gives null${f.optional ? `; leave the key out for the column's default` : ""}.`);}
         written[f.name] = null;
-        continue;
+        return;
       }
       const checked = check(f.type, f.written, v, dialect, (message) => fail(`${where}"${f.name}" ${message}`));
       // A JSON member's schema fills its defaults and checks the value (wiki/typed-json-params.md).
@@ -107,7 +107,7 @@ export function prepareRows(name: string, type: RowsType, value: unknown, dialec
         if (failure) {fail(`${where}"${f.name}"${failure.path ? ` at ${failure.path}` : ""} ${failure.message}.`);}
         written[f.name] = filled;
       } else {written[f.name] = checked;}
-    }
+    });
     // One statement inserts every row of a call, so on MySQL, which copies no default, its column
     // List is the same for each: a key one row leaves out and another gives cannot have its
     // Default in one and its value in the other.

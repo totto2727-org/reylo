@@ -113,8 +113,8 @@ export function moduleTypes(sql: string, analysis: Analysis, dialect: Dialect, l
   // End, so its parameters are untyped for that reason: its own error is the one to fix first.
   if (strictParams && !analysis.diagnostics.length) {
     const bytes = utf8.encode(sql);
-    for (const q of analysis.params) {
-      if (q.type.kind !== "unknown") {continue;}
+    Iterator.from(analysis.params).forEach((q) => {
+      if (q.type.kind !== "unknown") {return;}
       const at = placeholders.find((h) => h.name === q.name);
       // The engine's offsets are UTF-8 bytes, as the diagnostics' are. A MySQL placeholder's span
       // Takes in the `::type` the engine rewrote, which is no part of its name.
@@ -123,7 +123,7 @@ export function moduleTypes(sql: string, analysis: Analysis, dialect: Dialect, l
       const length = at ? utf8.encode(written).length : 1;
       const message = `Nothing in the statement gives the parameter ${written} a type; cast it, as in ${written}::text, or set strict_params: false in ${projectFile}.`;
       diagnostics.push({ message, start: at?.start ?? 0, length, code: 12 });
-    }
+    });
   }
   const cardinality = analysis.cardinality;
   if (analysis.diagnostics.some((d) => d.code === 6) || (dialect === "postgres" && analysis.kind === "")) {return { diagnostics, params: "unknown", row: "unknown", cardinality, names, queryError: queryErrorType(dialect, undefined) };}

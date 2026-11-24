@@ -430,11 +430,11 @@ export function hstoreText(v: object, fail: (message: string) => never): string 
   }
   const quote = (s: string) => `"${s.replace(/[\\"]/g, "\\$&")}"`;
   const pairs: string[] = [];
-  for (const [key, value] of Object.entries(v)) {
-    if (matchesUndefined(value)) {continue;}
+  Iterator.from(Object.entries(v)).forEach(([key, value]) => {
+    if (matchesUndefined(value)) {return;}
     if (!matchesNull(value) && !matchesString(value)) {fail(`is an hstore, whose values are strings or null, and its key ${JSON.stringify(key)} holds ${describe(value)}.`);}
     pairs.push(`${quote(key)}=>${matchesNull(value) ? "NULL" : quote(value)}`);
-  }
+  });
   return pairs.join(", ");
 }
 

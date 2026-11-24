@@ -168,14 +168,14 @@ const foreignKey = function (block: Block, table: Table, tables: ReadonlyMap<str
   });
   if (references.length !== columns.length || !references.length || references.some((reference) => reference.table !== references[0]!.table) || new Set(references.map((reference) => reference.column)).size !== references.length) {fail(block, "Foreign key columns must match a nonempty, unique column list in one target table.");}
   let result = `CONSTRAINT ${identifier(block.labels[0]!)} FOREIGN KEY (${columns.map(identifier).join(", ")}) REFERENCES ${identifier(references[0]!.table)} (${references.map((reference) => identifier(reference.column)).join(", ")})`;
-  for (const [name, sql] of [["on_update", "ON UPDATE"], ["on_delete", "ON DELETE"]] as const) {
-    if (!block.body.attributes[name]) {continue;}
+  Iterator.from([["on_update", "ON UPDATE"], ["on_delete", "ON DELETE"]] as const).forEach(([name, sql]) => {
+    if (!block.body.attributes[name]) {return;}
     const expression = attribute(block.body, name);
     const parts = path(expression);
     const action = parts.length === 1 ? actions.get(parts[0]!) : undefined;
     if (!action) {fail(expression, `Unsupported foreign-key action ${parts.join(".")}.`);}
     result += ` ${sql} ${action}`;
-  }
+  });
   return result;
 };
 
