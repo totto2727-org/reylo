@@ -12,7 +12,7 @@ import { checks, defineQuery } from "#reylo-source/index.ts";
 import type { EngineType, JsonSchema } from "#reylo-source/engine-type.ts";
 // oxlint-disable-next-line import/no-relative-parent-imports -- Match the native driver boundary in this direct Node integration test.
 import { matchesNullish } from "#reylo-source/native-predicates.ts";
-import { nativeDriverDate, promiseDriverStub } from "./helpers.ts";
+import { nativeDriverDate, promiseDriverStub, NO_DRIVER_ERROR, NO_ROW, SQL_NULL } from "./helpers.ts";
 
 // Each fake client records what execute handed it and answers the way its driver does; the
 // Driver behaviour each one copies was checked against the real package (lab/driver-matrix).
@@ -125,8 +125,8 @@ const jsonQuery: QueryModule<"postgres"> = {
   params: ["s", "n", "b", "t", "z", "o", "e", "l"],
   inputs: { ...Object.fromEntries([..."snbtzoe"].map((k) => [k, { type: { kind: "json" as const } }])), l: { type: { kind: "array", of: { kind: "json" } } } },
 };
-const jsonValues = { s: "abc", n: 5, b: true, t: '{"a":1}', z: null, o: { d: nativeDriverDate("2026-01-02T03:04:05Z") }, e: [], l: ["x", { a: 1 }, [true]] };
-const jsonTexts = ['"abc"', "5", "true", String.raw`"{\"a\":1}"`, null, '{"d":"2026-01-02T03:04:05.000Z"}', "[]", String.raw`{"\"x\"","{\"a\":1}","[true]"}`];
+const jsonValues = { s: "abc", n: 5, b: true, t: '{"a":1}', z: SQL_NULL, o: { d: nativeDriverDate("2026-01-02T03:04:05Z") }, e: [], l: ["x", { a: 1 }, [true]] };
+const jsonTexts = ['"abc"', "5", "true", String.raw`"{\"a\":1}"`, SQL_NULL, '{"d":"2026-01-02T03:04:05.000Z"}', "[]", String.raw`{"\"x\"","{\"a\":1}","[true]"}`];
 
 // oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
 test("postgres: a JSON parameter's value is a JavaScript value, which every driver gets as its JSON text, a string as a JSON string, null as NULL", async () => {
@@ -166,8 +166,8 @@ test("postgres: a JSON parameter's value is a JavaScript value, which every driv
 test("mysql and sqlite: every driver gets a JSON parameter as its JSON text, and null as NULL", async () => {
   const json = { type: { kind: "json" } } as const;
   const mq: QueryModule<"mysql"> = { dialect: "mysql", sql: "select cast(:a as json), cast(:b as json), :name, cast(:a as json), cast(:z as json)", params: ["a", "b", "name", "z"], inputs: { a: json, b: json, z: json, name: { type: { kind: "scalar", name: "text" } } } };
-  const values = { a: [1, 2], b: "abc", name: "ada", z: null };
-  const expected = ["[1,2]", '"abc"', "ada", "[1,2]", null];
+  const values = { a: [1, 2], b: "abc", name: "ada", z: SQL_NULL };
+  const expected = ["[1,2]", '"abc"', "ada", "[1,2]", SQL_NULL];
   const seen: unknown[][] = [];
   await execute({ query: promiseDriverStub(() => [[], []] as [unknown, unknown]), execute: promiseDriverStub((_statement: unknown, boundValues?: unknown[]) => {
     seen.push(boundValues!);
@@ -188,7 +188,7 @@ test("mysql and sqlite: every driver gets a JSON parameter as its JSON text, and
   }), executeMultiple: async () => {} }, lq, values);
   assert.equal(seen.length, 4);
   // Node:sqlite would read an array as its named parameters.
-  assert.deepEqual((execute(new DatabaseSync(":memory:"), lq, values) as object[]).map((r) => ({ ...r })), [{ a: "[1,2]", again: "[1,2]", b: '"abc"', name: "ada", z: null }]);
+  assert.deepEqual((execute(new DatabaseSync(":memory:"), lq, values) as object[]).map((r) => ({ ...r })), [{ a: "[1,2]", again: "[1,2]", b: '"abc"', name: "ada", z: SQL_NULL }]);
   Iterator.from(seen).forEach((v) => {assert.deepEqual(v, expected);});
 });
 
@@ -237,15 +237,15 @@ test("a parameter the statement takes no null for refuses null and refuses to be
   }) };
   const int4 = { kind: "scalar", name: "int4" } as const;
   const fixtureQuery: QueryModule<"postgres"> = { dialect: "postgres", sql: "select :x::int + 1 as y, :email as email", params: ["x", "email"], inputs: { x: { type: int4, nullable: false }, email: { type: { kind: "scalar", name: "text" }, nullable: true } } };
-  await assert.rejects(async () => execute(client, fixtureQuery, { x: null, email: "a" }), { name: "TypeError", message: `Parameter "x" is null, and the statement takes no null for it: pass a value.` });
+  await assert.rejects(async () => execute(client, fixtureQuery, { x: SQL_NULL, email: "a" }), { name: "TypeError", message: `Parameter "x" is null, and the statement takes no null for it: pass a value.` });
   await assert.rejects(async () => execute(client, fixtureQuery, { email: "a" }), { name: "TypeError", message: `Parameter "x" is missing, and the statement takes no null for it: pass a value.` });
   assert.throws(() => executeSync(new DatabaseSync(":memory:"), { ...fixtureQuery, dialect: "sqlite", sql: "select :x + 1 as y, :email as email" }, {}), /Parameter "x" is missing/u);
   assert.equal(seen.length, 0);
   // One that takes null binds NULL, given or left out; so does one typed `unknown`, and one a
   // Query defined by hand leaves without `nullable`.
   await execute(client, fixtureQuery, { x: 1 });
-  await execute(client, { ...fixtureQuery, inputs: { x: { type: { kind: "unknown" }, nullable: false }, email: { type: int4 } } }, { x: null, email: null });
-  assert.deepEqual(seen, [[1, null], [null, null]]);
+  await execute(client, { ...fixtureQuery, inputs: { x: { type: { kind: "unknown" }, nullable: false }, email: { type: int4 } } }, { x: SQL_NULL, email: SQL_NULL });
+  assert.deepEqual(seen, [[1, SQL_NULL], [SQL_NULL, SQL_NULL]]);
   // A JSON parameter's null there is JSON's null, which pg gets as the JSON text `null`, unless its
   // Schema, the one it is written with or the one its type carries, refuses null; left out, it is
   // Refused, unless its schema has a default.
@@ -264,7 +264,7 @@ test("a parameter the statement takes no null for refuses null and refuses to be
   // Where the statement takes SQL NULL, a JSON parameter's null is SQL NULL, given or left out.
   await execute(client, untyped({ kind: "json" }, true), { p: null });
   await execute(client, untyped({ kind: "json" }, true), {});
-  assert.deepEqual(seen.slice(4), [["null"], ["null"], [null], [null]]);
+  assert.deepEqual(seen.slice(4), [["null"], ["null"], [SQL_NULL], [SQL_NULL]]);
   // A structured parameter keeps its own message, which says what to pass.
   const rows: QueryModule<"postgres"> = { dialect: "postgres", sql: "select 1", params: ["r"], inputs: { r: { type: { kind: "rows", one: true, fields: [] }, nullable: false } }, checks };
   await assert.rejects(async () => execute(client, rows, { r: null }), /pass one object/u);
@@ -320,7 +320,7 @@ test("a Date for any date or time parameter, and a string without its zone for a
   for (const tz of ["2026-10-12 19:06:48", "2026-10-12T19:06:48.282", "2026-10-12"]) {await refused({ tz }, /^Parameter "tz" is a timestamptz, an instant, so a string for it names its zone/u);}
   await refused({ tzs: ["2026-10-12T00:00:00Z", "2026-10-12 19:06"] }, /^Parameter "tzs" is a timestamptz/u);
   // An array parameter takes no null element, as its type says, in any dimension.
-  await refused({ tzs: ["2026-10-12T00:00:00Z", null] }, /^Parameter "tzs" is an array whose elements may not be null, and the element at \[1\] is/u);
+  await refused({ tzs: ["2026-10-12T00:00:00Z", SQL_NULL] }, /^Parameter "tzs" is an array whose elements may not be null, and the element at \[1\] is/u);
   await refused({ days: [["2026-10-12", undefined]] }, /^Parameter "days" is an array whose elements may not be null, and the element at \[0\]\[1\] is/u);
   assert.equal(seen.length, 1);
   // MySQL's DATETIME and TIMESTAMP are the engine's timestamp, and a placeholder compared with both is either.
@@ -409,8 +409,8 @@ test("what run returns goes back in: a SQLite truth value as 1 or 0, a Postgres 
 test("arrayLiteral writes a Postgres array literal as pg does: nesting, NULL, quotes, backslashes, binary, dates, the empty array", () => {
   assert.equal(arrayLiteral([]), "{}");
   assert.equal(arrayLiteral([1, BigInt("2"), 1.5, true]), '{"1","2","1.5","true"}');
-  assert.equal(arrayLiteral([[1, 2], [3, null], []]), '{{"1","2"},{"3",NULL},{}}');
-  assert.equal(arrayLiteral([null, undefined, "", "NULL"]), '{NULL,NULL,"","NULL"}');
+  assert.equal(arrayLiteral([[1, 2], [3, SQL_NULL], []]), '{{"1","2"},{"3",NULL},{}}');
+  assert.equal(arrayLiteral([SQL_NULL, undefined, "", "NULL"]), '{NULL,NULL,"","NULL"}');
   assert.equal(arrayLiteral(['say "hi"', String.raw`back\slash`, "a,b", "{x}", " pad "]), String.raw`{"say \"hi\"","back\\slash","a,b","{x}"," pad "}`);
   assert.equal(arrayLiteral([Uint8Array.of(1, 2, 255), Buffer.from([0, 16]), new Uint8Array([9, 171, 9]).subarray(1, 2)]), String.raw`{\\x0102ff,\\x0010,\\xab}`);
   assert.equal(arrayLiteral([{ a: 'q"' }]), String.raw`{"{\"a\":\"q\\\"\"}"}`);
@@ -420,7 +420,7 @@ test("arrayLiteral writes a Postgres array literal as pg does: nesting, NULL, qu
   const zone = `${offset < 0 ? "-" : "+"}${String(Math.floor(Math.abs(offset) / 60)).padStart(2, "0")}:${String(Math.abs(offset) % 60).padStart(2, "0")}`;
   assert.equal(arrayLiteral([d]), `{"2026-01-02T03:04:05.006${zone}"}`);
   // An element type's own delimiter, between sub-arrays too: PostGIS's geometry is `:`.
-  assert.equal(arrayLiteral(["0101", null, "0102"], ":"), '{"0101":NULL:"0102"}');
+  assert.equal(arrayLiteral(["0101", SQL_NULL, "0102"], ":"), '{"0101":NULL:"0102"}');
   assert.equal(arrayLiteral([["a"], ["b"]], ";"), '{{"a"};{"b"}}');
 });
 
@@ -441,13 +441,13 @@ test("postgres: a pgvector vector parameter takes an array of finite numbers, wr
   await execute(client as never, nearest, { q: [1, 2.5, -3, 1e-7], qs: [[1, 2], [3]], h: [0.5] });
   assert.deepEqual(seen, [["[1,2.5,-3,1e-7]", '{"[1,2]","[3]"}', "[0.5]"]]);
   // The text pgvector itself prints passes as it is.
-  await execute(client as never, nearest, { q: "[1,2]", qs: [], h: null });
-  assert.deepEqual(seen.at(-1), ["[1,2]", "{}", null]);
+  await execute(client as never, nearest, { q: "[1,2]", qs: [], h: SQL_NULL });
+  assert.deepEqual(seen.at(-1), ["[1,2]", "{}", SQL_NULL]);
   // JSON would write NaN and ±Infinity as null, and pgvector refuses them and an empty vector.
   for (const [q, why] of [[[1, Number.NaN], /pgvector vector, an array of finite numbers, and the element at \[1\] is NaN/u], [[Infinity], /element at \[0\] is Infinity/u], [["1"], /element at \[0\] is "1"/u], [[], /one dimension at least; got an empty array/u]] as const) {
-    await assert.rejects(queryPromise(execute(client as never, nearest, { q, qs: [], h: null })), why);
+    await assert.rejects(queryPromise(execute(client as never, nearest, { q, qs: [], h: SQL_NULL })), why);
   }
-  await assert.rejects(queryPromise(execute(client as never, nearest, { q: [1], qs: [[1], [Number.NaN]], h: null })), /element at \[0\] is NaN/u);
+  await assert.rejects(queryPromise(execute(client as never, nearest, { q: [1], qs: [[1], [Number.NaN]], h: SQL_NULL })), /element at \[0\] is NaN/u);
 });
 
 // oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
@@ -464,7 +464,7 @@ test("postgres: an hstore parameter takes an object of its keys, written as the 
     params: ["prefs", "history"],
     inputs: { prefs: { type: hstore }, history: { type: { kind: "array", of: hstore } } },
   };
-  await execute(client as never, save, { prefs: { theme: "dark", 'q"': "\\", gone: null }, history: [{ a: "1" }, {}] });
+  await execute(client as never, save, { prefs: { theme: "dark", 'q"': "\\", gone: SQL_NULL }, history: [{ a: "1" }, {}] });
   assert.deepEqual(seen, [[String.raw`"theme"=>"dark", "q\""=>"\\", "gone"=>NULL`, String.raw`{"\"a\"=>\"1\"",""}`]]);
   // Its text passes as it is.
   await execute(client as never, save, { prefs: '"a"=>"1"', history: [] });
@@ -512,7 +512,7 @@ test("a parameter left out binds NULL, which postgres.js, mysql2, node:sqlite an
   }) };
   await execute(client, pg, { id: 1 });
   await execute(client, { ...pg, text: "select $1, $2", order: ["name", "id"] }, { id: undefined });
-  assert.deepEqual(seen, [[1, null], [null, null]]);
+  assert.deepEqual(seen, [[1, SQL_NULL], [SQL_NULL, SQL_NULL]]);
 });
 
 // oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
@@ -567,7 +567,7 @@ test("mysql: mariadb's callback API answers through the callback, and its errors
     batch: () => ({}),
     // The callback query() returns a command object, not a promise.
     query: (options: { sql: string }, values: unknown[], done: (error: Error | null, rows?: unknown) => void) => {
-      setImmediate(() => (options.sql.startsWith("insert") ? done(failure) : done(null, [{ values }])));
+      setImmediate(() => (options.sql.startsWith("insert") ? done(failure) : done(NO_DRIVER_ERROR, [{ values }])));
       return { on() {} };
     },
   };
@@ -593,7 +593,7 @@ test("mysql: mariadb, which writes a value that is not a Buffer as JSON, gets a 
         }) }
         : { batch: () => ({}), query: (_sql: string, values: unknown[], done: (error: Error | null, rows?: unknown) => void) => {
           seen.push(values);
-          setImmediate(() => done(null, []));
+          setImmediate(() => done(NO_DRIVER_ERROR, []));
           return { on() {} };
         } };
     await execute(conn as never, bin, { plain, view, buf, n: 1 });
@@ -663,7 +663,7 @@ test("a binary parameter takes binary data alone, so base64 text is refused befo
     return { rows: [] };
   }) };
   await execute(client, fixtureQuery, { b: Buffer.from([1]), bs: [plain] });
-  await execute(client, fixtureQuery, { b: null, bs: null });
+  await execute(client, fixtureQuery, { b: SQL_NULL, bs: SQL_NULL });
   assert.equal(seen.length, 2);
   const refused = async (run: () => unknown, message: RegExp): Promise<void> => assert.rejects(Promise.resolve().then(run), (error: Error) => error instanceof TypeError && message.test(error.message));
   await refused(() => execute(client, fixtureQuery, { b: "AQL/", bs: [] }), /^Parameter "b" is binary data, so it takes a Uint8Array \(a Buffer is one\), as `\.run\(\)` returns one; got "AQL\/"\. Decode base64 or hex text into one first\.$/u);
@@ -748,7 +748,7 @@ test("sqlite: Cloudflare D1's prepare(sql).bind(...values).all() → { results }
   const bound: unknown[][] = [];
   const d1 = {
     batch: promiseDriverStub(() => []),
-    prepare: () => ({ first: promiseDriverStub(() => null), bind: (...values: unknown[]) => {
+    prepare: () => ({ first: promiseDriverStub(() => NO_ROW), bind: (...values: unknown[]) => {
       bound.push(values);
       return { all: promiseDriverStub(() => ({ results: [row], success: true, meta: {} })) };
     } }),
@@ -845,7 +845,7 @@ test("sqlite: sqlite3 and the sqlite package, which bind a BigInt as NULL, get o
   const seen: unknown[][] = [];
   const sqlite3 = { all: (_sql: string, boundValues: unknown[], cb: (error: Error | null, rows: unknown[]) => void) => {
     seen.push(boundValues);
-    return cb(null, []);
+    return cb(NO_DRIVER_ERROR, []);
   }, exec: () => {} };
   const sqlite = { all: promiseDriverStub((_sql: string, boundValues?: unknown[]) => {
     seen.push(boundValues!);
@@ -869,7 +869,7 @@ test("sqlite: sqlite3's callback all(), its errors, and the sqlite package's pro
   const sqlite3 = {
     prepare: () => ({}),
     exec: () => {},
-    all: (sql: string, values: unknown[], done: (error: Error | null, rows: unknown[]) => void) => setImmediate(() => (sql.includes("selec ") ? done(failure, []) : done(null, [{ values }]))),
+    all: (sql: string, values: unknown[], done: (error: Error | null, rows: unknown[]) => void) => setImmediate(() => (sql.includes("selec ") ? done(failure, []) : done(NO_DRIVER_ERROR, [{ values }]))),
   };
   assert.deepEqual(await execute(sqlite3, lite, { id: 1, name: "ada" }), [{ values: [1, "ada", 1] }]);
   await assert.rejects(() => queryPromise(execute(sqlite3, { dialect: "sqlite", sql: "selec 1", params: [] })), (error) => error === failure);
@@ -979,7 +979,7 @@ test("positional placeholders take an object keyed by number, bound by number on
     seen.push([options.sql, values]);
     return [[], []] as [unknown, unknown];
   }) };
-  const d1 = { batch: promiseDriverStub(() => []), prepare: (text: string) => ({ first: promiseDriverStub(() => null), bind: (...values: unknown[]) => {
+  const d1 = { batch: promiseDriverStub(() => []), prepare: (text: string) => ({ first: promiseDriverStub(() => NO_ROW), bind: (...values: unknown[]) => {
     seen.push([text, values]);
     return { all: promiseDriverStub(() => ({ results: [] })) };
   } }) };
@@ -1113,7 +1113,7 @@ test("run: on an asynchronous client every failure is a rejection, never a throw
   assert.doesNotThrow(() => void (returned = currentQuery.run(two, { id: 1 })));
   await assert.rejects(queryPromise(returned), /Expected at most one row, got 2/u);
   await assert.rejects(currentQuery.run({} as never, { id: 1 }), TypeError);
-  assert.deepEqual(await currentQuery.with({ query: promiseDriverStub(() => ({ rows: [] })) })({ id: 1 }), null);
+  assert.deepEqual(await currentQuery.with({ query: promiseDriverStub(() => ({ rows: [] })) })({ id: 1 }), NO_ROW);
 });
 
 // oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.

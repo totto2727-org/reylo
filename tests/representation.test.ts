@@ -22,7 +22,7 @@ import { renderType } from "#reylo-source/render.ts";
 import { hasFunctionType, isRecord } from "#reylo-source/native-predicates.ts";
 import type { LibsqlClient, Sqlite3Client, SqlitePromiseClient, SyncSqliteClient, TursoClient } from "#reylo-source/execute.ts";
 import type { Cardinality, Query } from "#reylo-source/index.ts";
-import { DRIVERS, forEachFixtureInOrder, INDEX } from "./helpers.ts";
+import { DRIVERS, forEachFixtureInOrder, INDEX, SQL_NULL } from "./helpers.ts";
 
 // Real SQLite drivers must return the same public value representation.
 const drivers = existsSync(join(DRIVERS, "better-sqlite3")) || "lab/drivers is not installed";
@@ -128,7 +128,7 @@ test("SQLite: one row on every driver, whatever its integer setting; an integer 
   const refused = /Column "ok" is a boolean, stored as 0 or 1, and holds "?2"?, which is neither/u;
   const rows = [
     { b: { bytes: [1, 2, 255] }, flag: true, id: 1, more: false, n: 5, r: 1.5, s: "hi", x: 7, z: 2.5 },
-    { b: null, flag: false, id: 2, more: true, n: 6, r: null, s: null, x: { bytes: [1] }, z: "abc" },
+    { b: SQL_NULL, flag: false, id: 2, more: true, n: 6, r: SQL_NULL, s: SQL_NULL, x: { bytes: [1] }, z: "abc" },
   ];
   const bigError = /Column "v" holds .*9007199254740992|Column "v" holds 9007199254740993/;
   // Better-sqlite3 with every integer a BigInt: Reylo's statement reads numbers, the app's keep its setting.
@@ -239,7 +239,7 @@ test("SQLite: libSQL's intMode \"string\" changes no value Reylo types a number 
         { id: 1, n: 2, edge: 9_007_199_254_740_991, z: 7, x: digits ? "7" : 7 },
         { id: 2, n: 2, edge: 9_007_199_254_740_991, z: 2.5, x: "abc" },
         { id: 3, n: 2, edge: 9_007_199_254_740_991, z: "abc", x: "7" },
-        { id: 4, n: 2, edge: 9_007_199_254_740_991, z: 9_007_199_254_740_991, x: null },
+        { id: 4, n: 2, edge: 9_007_199_254_740_991, z: 9_007_199_254_740_991, x: SQL_NULL },
       ],
       `libSQL with intMode ${intMode}`,
     );
@@ -267,7 +267,7 @@ test("SQLite: a column declared BIGINT or INT8 is a BigInt on every driver, exac
   const byV = await built(root, "file:./app.db", "acct_by_v", "select id, v from acct where v = :v");
   const rows = [
     { id: 1, n: 5, v: BigInt("9007199254740993"), w: BigInt("7"), most: BigInt("9007199254740993"), plus: 9_007_199_254_740_993 },
-    { id: 2, n: 6, v: BigInt("5"), w: null, most: BigInt("5"), plus: 5 },
+    { id: 2, n: 6, v: BigInt("5"), w: SQL_NULL, most: BigInt("5"), plus: 5 },
   ];
   // `v + 0` is an integer SQLite computes, a number, so row 1's is refused; the rest of the columns read alone.
   const plusError = /Column "plus" holds 9007199254740993, an integer past/u;
@@ -380,7 +380,7 @@ from users u where u.id = :id::int`,
   const bob = { profile: { posts: [], user: { id: 2, name: "bob" } } };
   const rows = [
     { doc: "[1]", glued: '{"n":"ann"}', o: { big: 9_007_199_254_740_992, doc: "[1]", flag: 1, more: 0, pair: ["ann", 1.5], score: 1.5 } },
-    { doc: null, glued: '{"n":"bob"}', o: { big: null, doc: null, flag: 0, more: 1, pair: ["bob", null], score: null } },
+    { doc: SQL_NULL, glued: '{"n":"bob"}', o: { big: SQL_NULL, doc: SQL_NULL, flag: 0, more: 1, pair: ["bob", SQL_NULL], score: SQL_NULL } },
   ];
   const check = async (label: string, run: (query: SqliteQuery, params?: QueryParams) => unknown): Promise<void> => {
     assert.deepEqual(plain(await run(profile, { id: 1 })), ann, `${label}: the profile`);

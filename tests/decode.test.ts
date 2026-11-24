@@ -8,7 +8,7 @@ import { execute } from '#reylo-source/execute.ts';
 import type { QueryModule } from '#reylo-source/execute.ts';
 import { parseArray } from "#reylo-source/decode.ts";
 import type { Columns } from "#reylo-source/values.ts";
-import { nativeDriverDate, promiseDriverStub } from "./helpers.ts";
+import { nativeDriverDate, promiseDriverStub, SQL_NULL } from "./helpers.ts";
 
 // Fakes of the Postgres drivers that decode as the real ones do (checked against
 // Lab/drivers/node_modules and wiki/driver-decoding/spike/postgres.md): a result asks a types
@@ -55,11 +55,11 @@ const COLUMNS: [string, number, string | null][] = [
   ["embeddings", VEC_ARR, '{"[1,2]",NULL,"[3]"}'],
   ["prefs", HSTORE, String.raw`"a"=>"1", "b c"=>NULL, "q\""=>"\\"`],
   ["history", HSTORE_ARR, String.raw`{"\"a\"=>\"1\"",NULL,""}`],
-  ["nothing", ROLE_ARR, null],
+  ["nothing", ROLE_ARR, SQL_NULL],
 ];
 /** What Reylo returns for each column: src/values.ts. */
 const declared = {
-  roles: ["admin", "member", null],
+  roles: ["admin", "member", SQL_NULL],
   role: "admin",
   names: ["a", "b"],
   posints: [1, 2],
@@ -67,7 +67,7 @@ const declared = {
   span: "P1Y2M",
   spans: ["P1D", "PT2H"],
   amounts: ["1.5", "12345678901234567890.1"],
-  ints: [1, null],
+  ints: [1, SQL_NULL],
   big: BigInt("9007199254740993"),
   at: "2024-01-15T08:30:00.123456Z",
   wall: "2024-01-15T10:30:00.123456",
@@ -76,12 +76,12 @@ const declared = {
   bytes: Uint8Array.from([1, 2, 255]),
   flag: true,
   boxes: ["(1,1),(0,0)", "(2,2),(1,1)"],
-  shapes: ["0101", null, "0102"],
+  shapes: ["0101", SQL_NULL, "0102"],
   embedding: [1, 2.5, -3, 1e-7],
-  embeddings: [[1, 2], null, [3]],
-  prefs: { a: "1", "b c": null, 'q"': "\\" },
-  history: [{ a: "1" }, null, {}],
-  nothing: null,
+  embeddings: [[1, 2], SQL_NULL, [3]],
+  prefs: { a: "1", "b c": SQL_NULL, 'q"': "\\" },
+  history: [{ a: "1" }, SQL_NULL, {}],
+  nothing: SQL_NULL,
 };
 /** The module's columns for the same statement, as a build step writes them (src/loader.ts). */
 const columns: Columns = [
@@ -149,7 +149,7 @@ const pgClient = function (db: Db, options: { binary?: boolean } = {}) {
       const answer = db.answer(c.text);
       const parsers = answer.fields.map((field) => types.getTypeParser(field.dataTypeID, client.binary ? "binary" : "text"));
       const rows = answer.raw.map((raw) => {
-        const values = raw.map((v, index) => (v === null ? null : parsers[index]!(v)));
+        const values = raw.map((v, index) => (v === null ? SQL_NULL : parsers[index]!(v)));
         return c.rowMode === "array" ? values : Object.fromEntries(answer.fields.map((field, index) => [field.name, values[index]]));
       });
       return { fields: answer.fields, rows };
@@ -165,8 +165,8 @@ const lateProbe: QueryModule<"postgres"> = { dialect: "postgres", sql: "select *
 // oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
 test("parseArray: quoting, escapes, NULL, nesting, bounds and box's delimiter", () => {
   assert.deepEqual(parseArray("{}", String), []);
-  assert.deepEqual(parseArray('{a,"b,c","NULL",NULL,"",\"q\\"x\\\\y\"}', String), ["a", "b,c", "NULL", null, "", String.raw`q"x\y`]);
-  assert.deepEqual(parseArray("{{1,2},{3,NULL}}", Number), [[1, 2], [3, null]]);
+  assert.deepEqual(parseArray('{a,"b,c","NULL",NULL,"",\"q\\"x\\\\y\"}', String), ["a", "b,c", "NULL", SQL_NULL, "", String.raw`q"x\y`]);
+  assert.deepEqual(parseArray("{{1,2},{3,NULL}}", Number), [[1, 2], [3, SQL_NULL]]);
   assert.deepEqual(parseArray("[0:1]={7,8}", Number), [7, 8]);
   assert.deepEqual(parseArray(String.raw`{"(1,x)","(2,\"y,z\")"}`, String), ["(1,x)", '(2,"y,z")']);
   assert.deepEqual(parseArray("{(1,1),(0,0);(2,2),(1,1)}", String, ";"), ["(1,1),(0,0)", "(2,2),(1,1)"]);
@@ -318,7 +318,7 @@ const pglite = function (db: Db, instance: Record<number, Parser> | undefined) {
       const answer = db.answer(text);
       const parsers = { ...instance, ...options?.parsers };
       const rows = answer.raw.map((raw) => {
-        const values = raw.map((v, index) => (v === null ? null : (parsers[answer.fields[index]!.dataTypeID] ? parsers[answer.fields[index]!.dataTypeID]!(v) : v)));
+        const values = raw.map((v, index) => (v === null ? SQL_NULL : (parsers[answer.fields[index]!.dataTypeID] ? parsers[answer.fields[index]!.dataTypeID]!(v) : v)));
         return options?.rowMode === "array" ? values : Object.fromEntries(answer.fields.map((field, index) => [field.name, values[index]]));
       });
       return { fields: answer.fields, rows };
@@ -371,7 +371,7 @@ const postgresJs = function (db: Db, rowTransform?: (row: unknown[]) => unknown)
     unsafe: (text: string) => ({
       raw: async () => {
         const answer = db.answer(text);
-        const rows = answer.raw.map((r) => r.map((v) => (v === null ? null : Buffer.from(v))));
+        const rows = answer.raw.map((r) => r.map((v) => (v === null ? SQL_NULL : Buffer.from(v))));
         return Object.assign(rowTransform ? rows.map(rowTransform) : rows, { columns: answer.fields.map((field) => ({ name: field.name.toUpperCase(), type: field.dataTypeID })) });
       },
     }),

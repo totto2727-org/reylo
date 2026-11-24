@@ -15,6 +15,13 @@ export const DRIVERS = join(ROOT, "lab", "drivers", "node_modules");
 export const MAPPER = join(ROOT, "src", "mapper.ts");
 export const INDEX = pathToFileURL(join(ROOT, "src", "index.ts")).href;
 
+// oxlint-disable-next-line unicorn/no-null -- These fixtures bind or receive SQL NULL as JavaScript null.
+export const SQL_NULL = null;
+// oxlint-disable-next-line unicorn/no-null -- Native database callbacks use null in the error slot on success.
+export const NO_DRIVER_ERROR = null;
+// oxlint-disable-next-line unicorn/no-null -- Query and driver APIs use null for an absent row.
+export const NO_ROW = null;
+
 /** Construct the same native date shape that driver and application inputs provide. */
 export const nativeDriverDate = (value?: string | number): Date =>
   // oxlint-disable-next-line rules/no-js-date -- These fixtures exercise the JavaScript Date type, including deliberately invalid dates.
