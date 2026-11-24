@@ -1,5 +1,5 @@
 import { matchesJsonFormat } from "./json-formats.ts";
-import { hasObjectType, matchesBoolean, matchesNull, matchesNumber, matchesString, matchesUndefined } from "./native-predicates.ts";
+import { hasObjectType, isRecord, matchesBoolean, matchesNull, matchesNumber, matchesString, matchesUndefined } from "./native-predicates.ts";
 
 // A JSON Schema 2020-12 validator for the run time, which has no dependencies: it checks a value
 // Against the schema a statement writes in a `json('…')` member of a column list or, where it is
@@ -34,11 +34,11 @@ export function cloneJson<T>(value: T): T {
  * matches are unknown until the checks run. The value given is not changed: a copy comes back.
  */
 export function withDefaults(schema: Schema, value: unknown): unknown {
-  if (matchesNull(schema) || !hasObjectType(schema) || Array.isArray(schema)) {return value;}
+  if (!isRecord(schema)) {return value;}
   const s = schema;
   let out = value;
-  if (!matchesNull(value) && hasObjectType(value) && !Array.isArray(value)) {
-    const o: Record<string, unknown> = { ...(value as Object_) };
+  if (isRecord(value)) {
+    const o: Record<string, unknown> = { ...value };
     const properties = (s.properties ?? {}) as Record<string, Schema>;
     Object.entries(properties).forEach(([key, sub]) => {
       if (! Object.hasOwn(o, key) && !matchesNull(sub) && hasObjectType(sub) && "default" in sub) {o[key] = cloneJson((sub).default);}
@@ -95,7 +95,7 @@ function check(schema: Schema, value: unknown, path: string, out: Failure[]): Ev
   const evaluated: Evaluated = new Set();
   if (schema === true) {return evaluated;}
   if (schema === false) {return fail(out, path, "no value is allowed here");}
-  if (matchesNull(schema) || !hasObjectType(schema) || Array.isArray(schema)) {return evaluated;}
+  if (!isRecord(schema)) {return evaluated;}
   const s = schema;
 
   if (!matchesUndefined(s.type)) {
@@ -137,8 +137,8 @@ function check(schema: Schema, value: unknown, path: string, out: Failure[]): Ev
       if (matchesNumber(s.maxContains) && matched > s.maxContains) {return fail(out, path, `must contain at most ${s.maxContains} items that match its \`contains\` schema`);}
     }
   }
-  if (!matchesNull(value) && hasObjectType(value) && !Array.isArray(value)) {
-    const o = value as Object_;
+  if (isRecord(value)) {
+    const o = value;
     const keys = Object.keys(o);
     if (matchesNumber(s.maxProperties) && keys.length > s.maxProperties) {return fail(out, path, `must have at most ${s.maxProperties} keys`);}
     if (matchesNumber(s.minProperties) && keys.length < s.minProperties) {return fail(out, path, `must have at least ${s.minProperties} keys`);}
@@ -223,7 +223,7 @@ function check(schema: Schema, value: unknown, path: string, out: Failure[]): Ev
       b.forEach((k) => evaluated.add(k));
     }
   }
-  if (!matchesNull(value) && hasObjectType(value) && !Array.isArray(value)) {
+  if (isRecord(value)) {
     if (s.unevaluatedProperties === false) {
       for (const key of Object.keys(value)) {if (!evaluated.has(key)) {return fail(out, `${path}/${pointer(key)}`, "is a key the schema does not allow");}}
     }
@@ -247,7 +247,7 @@ function is(type: string, v: unknown): boolean {
     case "integer": { return matchesNumber(v) && Number.isInteger(v); }
     case "string": { return matchesString(v); }
     case "array": { return Array.isArray(v); }
-    case "object": { return !matchesNull(v) && hasObjectType(v) && !Array.isArray(v); }
+    case "object": { return isRecord(v); }
     default: { return false; }
   }
 }

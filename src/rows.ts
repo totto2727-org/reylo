@@ -9,7 +9,7 @@
 import type { EngineType } from "./engine-type.ts";
 import { validate, withDefaults } from "./json-schema.ts";
 import { describe, hstoreText, ParameterError, postgresInterval, postgresYear, zoned } from "./values.ts";
-import { hasObjectType, matchesBigInt, matchesBoolean, matchesNull, matchesNumber, matchesString, matchesUndefined } from "./native-predicates.ts";
+import { hasObjectType, isRecord, matchesBigInt, matchesBoolean, matchesNull, matchesNumber, matchesString, matchesUndefined } from "./native-predicates.ts";
 
 export { describe, zoned } from "./values.ts";
 
@@ -53,20 +53,100 @@ class Raw {
 const write = function write(v: unknown): string {
   if (v instanceof Raw) {return v.text;}
   if (Array.isArray(v)) {return `[${v.map(write).join(",")}]`;}
-  if (!matchesNull(v) && hasObjectType(v)) {
-    return `{${Object.entries(v as Record<string, unknown>)
+  if (isRecord(v)) {
+    return `{${Object.entries(v)
       .map(([k, x]) => `${JSON.stringify(k)}:${write(x)}`)
       .join(",")}}`;
   }
   return JSON.stringify(v);
 };
 
+const firstRowNumber = 1;
+
+type RejectParameter = (message: string) => never;
+
+interface RowSchema {
+  dialect: Dialect;
+  fail: RejectParameter;
+  fields: RowsType["fields"];
+  known: ReadonlyMap<string, RowField>;
+}
+
+interface CheckedRow {
+  keys: Set<string>;
+  values: Record<string, unknown>;
+}
+
+interface ColumnCheck {
+  dialect: Dialect;
+  fail: RejectParameter;
+  row: CheckedRow;
+  where: string;
+}
+
+const checkColumnValue = (field: RowField, value: unknown, context: ColumnCheck): void => {
+  const { dialect, fail, row, where } = context;
+  const subject = `${where}"${field.name}"`;
+  if (matchesUndefined(value)) {
+    if (!field.optional) {fail(`${subject} is ${field.written} not null, and the row leaves it out.`);}
+    return;
+  }
+  row.keys.add(field.name);
+  if (matchesNull(value)) {
+    if (!field.nullable) {fail(`${subject} is ${field.written} not null, and the row gives null${field.optional ? "; leave the key out for the column's default" : ""}.`);}
+    row.values[field.name] = null;
+    return;
+  }
+  const checked = check(field.type, field.written, value, dialect, (message) => fail(`${subject} ${message}`));
+  if (matchesUndefined(field.schema)) {
+    row.values[field.name] = checked;
+    return;
+  }
+  // A JSON member's schema fills its defaults and checks the value (wiki/typed-json-params.md).
+  const filled = withDefaults(field.schema, checked);
+  const failure = validate(field.schema, filled);
+  if (failure) {fail(`${subject}${failure.path ? ` at ${failure.path}` : ""} ${failure.message}.`);}
+  row.values[field.name] = filled;
+};
+
+const checkRow = (value: unknown, where: string, schema: RowSchema): CheckedRow => {
+  const { dialect, fail, fields, known } = schema;
+  if (!isRecord(value) || value instanceof Date) {
+    return fail(`${where}each row is an object whose keys the column list names; got ${describe(value)}.`);
+  }
+  Object.keys(value).forEach((key) => {
+    if (!known.has(key) && !matchesUndefined(value[key])) {
+      fail(`${where}the column list names no key "${key}" (it names ${fields.map((field) => `"${field.name}"`).join(", ")}).`);
+    }
+  });
+  const row: CheckedRow = { keys: new Set(), values: {} };
+  const context: ColumnCheck = { dialect, fail, row, where };
+  Iterator.from(fields).forEach((field) => {
+    checkColumnValue(field, value[field.name], context);
+  });
+  return row;
+};
+
+interface InsertColumns {
+  keys: Set<string>;
+  rowNumber: number;
+}
+
+const verifyInsertColumns = (expected: InsertColumns, actual: InsertColumns, schema: RowSchema): void => {
+  const differ = schema.fields.find((field) => expected.keys.has(field.name) !== actual.keys.has(field.name));
+  if (matchesUndefined(differ)) {return;}
+  const givesKey = actual.keys.has(differ.name);
+  schema.fail(`row ${actual.rowNumber} ${givesKey ? "gives" : "leaves out"} "${differ.name}", which row ${expected.rowNumber} ${givesKey ? "leaves out" : "gives"}. Every row of one call gives the same keys, since one insert writes them all and a key left out takes its column's default: give "${differ.name}" in every row, or in none.`);
+};
+
 /**
- * Checks a structured parameter's value against its column list, and gives the value to bind:
- * on Postgres the JSON value, which the run time binds as it binds every JSON parameter, and on
- * MySQL and SQLite its JSON text. `inserted` is a parameter whose rows a MySQL insert writes, whose
- * lists the run time writes again, so its keys are the same in every row; `present` is the keys
- * they carry.
+ * Checks a structured parameter and produces the JSON value or text to bind.
+ * @param {string} name - The structured parameter's name.
+ * @param {RowsType} type - Its declared column list.
+ * @param {unknown} value - The supplied row or rows.
+ * @param {Dialect} dialect - The database that consumes the rows.
+ * @param {boolean} inserted - Whether every row must supply the same insert columns.
+ * @returns {{ value: unknown; present: ReadonlySet<string> }} The bound value and supplied column names.
  */
 export function prepareRows(name: string, type: RowsType, value: unknown, dialect: Dialect, inserted: boolean): { value: unknown; present: ReadonlySet<string> } {
   const fail = (message: string): never => {
@@ -74,57 +154,26 @@ export function prepareRows(name: string, type: RowsType, value: unknown, dialec
   };
   if (matchesUndefined(value) || matchesNull(value)) {fail(type.one ? "pass one object, whose keys the column list names." : "pass an array of objects, whose keys the column list names; an empty array inserts nothing.");}
   const rows = type.one ? [value] : (Array.isArray(value) ? value : fail(`pass an array of objects, one per row; got ${describe(value)}.`));
-  const known = new Map(type.fields.map((field) => [field.name, field]));
-  let present: Set<string> | undefined;
-  let first = -1;
+  const schema: RowSchema = {
+    dialect, fail, fields: type.fields, known: new Map(type.fields.map((field) => [field.name, field])),
+  };
+  // oxlint-disable-next-line rules/no-let -- An insert compares later rows with the first row it received.
+  let first: InsertColumns | undefined;
   const out: Record<string, unknown>[] = [];
   rows.forEach((row: unknown, index: number) => {
-    const where = type.one ? "" : `row ${index + 1}: `;
-    if (matchesNull(row) || !hasObjectType(row) || Array.isArray(row) || row instanceof Date) {fail(`${where}each row is an object whose keys the column list names; got ${describe(row)}.`);}
-    const r = row as Record<string, unknown>;
-    Object.keys(r).forEach((key) => {
-      if (!known.has(key) && !matchesUndefined(r[key])) {fail(`${where}the column list names no key "${key}" (it names ${type.fields.map((field) => `"${field.name}"`).join(", ")}).`);}
-    });
-    const keys = new Set<string>();
-    const written: Record<string, unknown> = {};
-    Iterator.from(type.fields).forEach((field) => {
-      const v = r[field.name];
-      if (matchesUndefined(v)) {
-        if (!field.optional) {fail(`${where}"${field.name}" is ${field.written} not null, and the row leaves it out.`);}
-        return;
-      }
-      keys.add(field.name);
-      if (matchesNull(v)) {
-        if (!field.nullable) {fail(`${where}"${field.name}" is ${field.written} not null, and the row gives null${field.optional ? `; leave the key out for the column's default` : ""}.`);}
-        written[field.name] = null;
-        return;
-      }
-      const checked = check(field.type, field.written, v, dialect, (message) => fail(`${where}"${field.name}" ${message}`));
-      // A JSON member's schema fills its defaults and checks the value (wiki/typed-json-params.md).
-      if (matchesUndefined(field.schema)) {written[field.name] = checked;} else {
-        const filled = withDefaults(field.schema, checked);
-        const failure = validate(field.schema, filled);
-        if (failure) {fail(`${where}"${field.name}"${failure.path ? ` at ${failure.path}` : ""} ${failure.message}.`);}
-        written[field.name] = filled;
-      }
-    });
-    // One statement inserts every row of a call, so on MySQL, which copies no default, its column
-    // List is the same for each: a key one row leaves out and another gives cannot have its
-    // Default in one and its value in the other.
+    const rowNumber = index + firstRowNumber;
+    const checked = checkRow(row, type.one ? "" : `row ${rowNumber}: `, schema);
     if (inserted) {
-      if (matchesUndefined(present)) {
-        present = keys;
-        first = index;
-      } else {
-        const differ = type.fields.find((field) => present!.has(field.name) !== keys.has(field.name));
-        if (differ) {fail(`row ${index + 1} ${keys.has(differ.name) ? "gives" : "leaves out"} "${differ.name}", which row ${first + 1} ${keys.has(differ.name) ? "leaves out" : "gives"}. Every row of one call gives the same keys, since one insert writes them all and a key left out takes its column's default: give "${differ.name}" in every row, or in none.`);}
-      }
+      const columns = { keys: checked.keys, rowNumber };
+      if (matchesUndefined(first)) {first = columns;}
+      else {verifyInsertColumns(first, columns, schema);}
     }
-    out.push(written);
+    out.push(checked.values);
   });
-  const keys = present ?? new Set(type.fields.map((field) => field.name));
+  const keys = first?.keys ?? new Set(type.fields.map((field) => field.name));
   if (inserted && !type.fields.some((field) => keys.has(field.name))) {fail("every key is left out, so the insert would name no column; give one at least.");}
   const shaped = type.one ? out[0] : out;
+  // oxlint-disable-next-line eslint/sort-keys -- Preserve the existing field order for serialized preparation results.
   return { value: dialect === "postgres" ? shaped : write(shaped), present: keys };
 }
 
