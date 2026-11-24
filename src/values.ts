@@ -25,7 +25,10 @@
 // Reached through `globalThis` where one exists.
 import { civilFromDays, daysFromCivil } from "./gregorian-day.ts";
 import type { EngineType } from "./engine-type.ts";
-import { hasObjectType, matchesBigInt, matchesBoolean, matchesNull, matchesNumber, matchesString, matchesUndefined } from "./native-predicates.ts";
+import {
+  hasObjectType, isEmptyArray, isEmptyString, matchesBigInt, matchesBoolean, matchesNull,
+  matchesNumber, matchesString, matchesUndefined,
+} from "./native-predicates.ts";
 
 export type Dialect = "postgres" | "mysql" | "sqlite" | "duckdb";
 
@@ -315,7 +318,39 @@ export function instantOfDate(d: Date, column: string): string {
 // Interval in IntervalStyle postgres: `1 year 2 mons 3 days 04:05:06.789`. Postgres keeps three
 // Parts, each signed on its own: months (written as years and months), days, and a time that may
 // Pass 24 hours; a part after a negative one carries `+` (`-1 days +01:00:00`).
-const INTERVAL = /^(?:([+-]?\d+) years? ?)?(?:([+-]?\d+) mons? ?)?(?:([+-]?\d+) days? ?)?(?:([+-]?)(\d+):(\d\d):(\d\d)(?:\.(\d+))?)?$/u;
+const INTERVAL = /^(?:(?<years>[+-]?\d+) years? ?)?(?:(?<months>[+-]?\d+) mons? ?)?(?:(?<days>[+-]?\d+) days? ?)?(?:(?<timeSign>[+-]?)(?<hours>\d+):(?<minutes>\d\d):(?<seconds>\d\d)(?:\.(?<fraction>\d+))?)?$/u;
+
+interface DurationPart {
+  magnitude: string;
+  negative: boolean;
+  unit: string;
+}
+
+const ZERO_DURATION = 0;
+
+const calendarPart = (digits: string | undefined, unit: string): DurationPart[] => {
+  const magnitude = Number(digits ?? ZERO_DURATION);
+  return magnitude === ZERO_DURATION
+    ? []
+    : [{ magnitude: String(Math.abs(magnitude)), negative: magnitude < ZERO_DURATION, unit }];
+};
+
+const clockPart = (magnitude: string, unit: string, negative: boolean): DurationPart[] =>
+  magnitude === "0" ? [] : [{ magnitude, negative, unit }];
+
+const intervalClock = (parts: Record<string, string | undefined>): DurationPart[] => {
+  const negative = parts.timeSign === "-";
+  const fraction = (parts.fraction ?? "").replace(/0+$/u, "");
+  const seconds = Number(parts.seconds ?? ZERO_DURATION);
+  return [
+    ...clockPart(String(Number(parts.hours ?? ZERO_DURATION)), "H", negative),
+    ...clockPart(String(Number(parts.minutes ?? ZERO_DURATION)), "M", negative),
+    ...clockPart(isEmptyString(fraction) ? String(seconds) : `${seconds}.${fraction}`, "S", negative),
+  ];
+};
+
+const writeDuration = (parts: DurationPart[], allNegative: boolean): string =>
+  parts.map(({ magnitude, negative, unit }) => `${negative && !allNegative ? "-" : ""}${magnitude}${unit}`).join("");
 
 /**
  * An interval's text as an ISO 8601 duration, which `Temporal.Duration.from` reads: `1 year 2 mons
@@ -325,39 +360,40 @@ const INTERVAL = /^(?:([+-]?\d+) years? ?)?(?:([+-]?\d+) mons? ?)?(?:([+-]?\d+) 
  * sign has no ISO 8601 form, so it keeps Postgres's, each part signed on its own: `1 mon -1 days`
  * is `P1M-1D`, which Postgres reads back and Temporal refuses. `infinity` and `-infinity` stay
  * those words.
+ * @param {string} text - Text emitted by PostgreSQL using its native interval style.
+ * @returns {string} The ISO-style duration or the original text if it does not match that style.
  */
-export function duration(x: string): string {
-  const regexMatch = INTERVAL.exec(x);
-  if (matchesNull(regexMatch) || x === "") {return x;}
-  const time = regexMatch[4] === "-" ? -1 : 1;
-  // Each designator Postgres writes, its magnitude and its sign; a zero is left out.
-  const parts: [designator: string, magnitude: string, sign: number][] = [];
-  Iterator.from([["Y", regexMatch[1]], ["M", regexMatch[2]], ["D", regexMatch[3]]] as const).forEach(([designator, digits]) => {
-    if (!matchesUndefined(digits) && +digits !== 0) {parts.push([designator, String(Math.abs(+digits)), digits.startsWith("-") ? -1 : 1]);}
-  });
-  const date = parts.length;
-  if (+(regexMatch[5] ?? 0) !== 0) {parts.push(["H", String(+regexMatch[5]!), time]);}
-  if (+(regexMatch[6] ?? 0) !== 0) {parts.push(["M", String(+regexMatch[6]!), time]);}
-  const fraction = (regexMatch[8] ?? "").replace(/0+$/u, "");
-  if (+(regexMatch[7] ?? 0) !== 0 || fraction !== "") {parts.push(["S", `${+(regexMatch[7] ?? 0)}${fraction && `.${fraction}`}`, time]);}
-  if (parts.length === 0) {return "PT0S";}
-  const negative = parts.every(([, , sign]) => sign < 0);
-  const write = ([designator, magnitude, sign]: [string, string, number]): string => `${sign < 0 && !negative ? "-" : ""}${magnitude}${designator}`;
-  const clock = parts.slice(date).map(write).join("");
-  return `${negative ? "-" : ""}P${parts.slice(0, date).map(write).join("")}${clock && `T${clock}`}`;
-}
+export const duration = (text: string): string => {
+  const parts = INTERVAL.exec(text)?.groups;
+  if (matchesUndefined(parts) || isEmptyString(text)) {return text;}
+  const calendar = [
+    ...calendarPart(parts.years, "Y"),
+    ...calendarPart(parts.months, "M"),
+    ...calendarPart(parts.days, "D"),
+  ];
+  const clock = intervalClock(parts);
+  if (isEmptyArray(calendar) && isEmptyArray(clock)) {return "PT0S";}
+  const negative = calendar.every((part) => part.negative) && clock.every((part) => part.negative);
+  const time = writeDuration(clock, negative);
+  return `${negative ? "-" : ""}P${writeDuration(calendar, negative)}${isEmptyString(time) ? "" : `T${time}`}`;
+};
 
 /**
  * An interval parameter's text as Postgres reads it, the inverse of `duration` for a negative
  * interval (the round-trip rule): Postgres refuses a sign before the `P` (`-P1DT2H`, as `.run()`
  * returns it and Temporal writes it), and reads each part signed instead (`P-1DT-2H`). Any other
  * text is left as it is.
+ * @param {string} text - A signed ISO-style duration used as a query parameter.
+ * @returns {string} The duration with a sign on each negative part, or the original text.
  */
-export function postgresInterval(text: string): string {
-  const regexMatch = /^\s*([+-])(P[^+-]*)$/i.exec(text);
-  if (matchesNull(regexMatch)) {return text;}
-  return regexMatch[1] === "+" ? regexMatch[2]! : regexMatch[2]!.replaceAll(/(\d+(?:[.,]\d+)?)([YMWDHS])/gi, "-$1$2");
-}
+export const postgresInterval = (text: string): string => {
+  const parts = /^\s*(?<sign>[+-])(?<duration>[Pp][^+-]*)$/u.exec(text)?.groups;
+  const durationText = parts?.duration;
+  if (matchesUndefined(durationText)) {return text;}
+  return parts?.sign === "+"
+    ? durationText
+    : durationText.replaceAll(/(?<magnitude>\d+(?:[.,]\d+)?)(?<unit>[YMWDHSymwdhs])/gu, "-$<magnitude>$<unit>");
+};
 
 type BufferClass = { from(data: string, encoding: string): Uint8Array; isBuffer(v: unknown): boolean };
 const NodeBuffer = (globalThis as { Buffer?: BufferClass }).Buffer;

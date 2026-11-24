@@ -28,3 +28,9 @@ export const hasObjectType = (value: unknown) => typeof value === "object";
 // oxlint-disable-next-line rules/no-type-predicate -- Native object checks narrow an indexable record without loading the optional Effect peer.
 export const isRecord = (value: unknown): value is Record<string, unknown> =>
   !matchesNull(value) && hasObjectType(value) && !Array.isArray(value);
+
+// oxlint-disable-next-line rules/force-string-empty -- Compare primitive text here so native decoders can run without loading Effect.
+export const isEmptyString = (value: string): boolean => value === "";
+
+const EMPTY_ARRAY_LENGTH = 0;
+export const isEmptyArray = (value: Readonly<unknown[]>): boolean => value.length === EMPTY_ARRAY_LENGTH;
