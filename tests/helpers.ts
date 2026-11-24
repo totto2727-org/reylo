@@ -27,6 +27,22 @@ export const promiseDriverStub = <Arguments extends unknown[], Result>(
   // oxlint-disable-next-line typescript/require-await -- Turn synchronous fixture throws into rejected driver Promises without delaying fulfilment.
   async (...args) => implementation(...args);
 
+/**
+ * @param fixtures - The fixture cases in their declared order.
+ * @param check - A check that completes before the next case uses the database.
+ * @returns Completion of every check in order, or the first failure.
+ */
+export const forEachFixtureInOrder = async <Fixture>(
+  fixtures: Iterable<Fixture>,
+  check: (fixture: Fixture) => Promise<void>,
+): Promise<void> => {
+  // oxlint-disable-next-line rules/no-for-loops -- Iterate the fixture cases in order without changing the test runner.
+  for (const fixture of fixtures) {
+    // oxlint-disable-next-line eslint/no-await-in-loop -- Each test case must finish with its shared database before the next starts.
+    await check(fixture);
+  }
+};
+
 interface ChildResult {
   status: number | null;
   stderr: string;

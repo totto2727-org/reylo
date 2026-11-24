@@ -16,7 +16,7 @@ import { renderType } from "#reylo-source/render.ts";
 import { hasFunctionType, isRecord } from "#reylo-source/native-predicates.ts";
 import type { LibsqlClient, Sqlite3Client, SqlitePromiseClient, SyncSqliteClient, TursoClient } from "#reylo-source/execute.ts";
 import type { Cardinality, Query } from "#reylo-source/index.ts";
-import { DRIVERS, INDEX } from "./helpers.ts";
+import { DRIVERS, forEachFixtureInOrder, INDEX } from "./helpers.ts";
 
 // Real SQLite drivers must return the same public value representation.
 const drivers = existsSync(join(DRIVERS, "better-sqlite3")) || "lab/drivers is not installed";
@@ -81,7 +81,7 @@ const built = async function (root: string, url: string, name: string, sql: stri
     // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- The generated query has both methods and this fixture only compiles SQLite statements.
     return query as SqliteQuery;
   } finally {
-    for (const session of Session.opened()) {await session.close();}
+    await forEachFixtureInOrder(Session.opened(), async (session) => {await session.close();});
   }
 };
 
@@ -154,7 +154,7 @@ test("SQLite: one row on every driver, whatever its integer setting; an integer 
   await assert.rejects(looseS.run(node), blobInS);
   assert.deepEqual(plain(await mixed.run(node)), [{ v: 5 }, { v: "x" }], "node:sqlite: a STRICT table's union of a number and text");
   node.close();
-  for (const intMode of ["number", "bigint", "string"]) {
+  await forEachFixtureInOrder(["number", "bigint", "string"], async (intMode) => {
     const client = createClient({ url: `file:${file}`, intMode });
     // Under intMode "string" an integer in a column with no type is its digits (wiki/driver-decoding.md).
     if (intMode !== "string") {assert.deepEqual(plain(await q.run(client)), rows, `libSQL with intMode ${intMode}`);}
@@ -162,12 +162,12 @@ test("SQLite: one row on every driver, whatever its integer setting; an integer 
     await assert.rejects(looseN.run(client), textInN);
     await assert.rejects(looseS.run(client), blobInS);
     client.close();
-  }
+  });
   // Turso's new engine on the same file: its promise API through run, in transactionAsync too, and
   // Its compat Database through runSync. At its defaults it rounds an integer past 2^53 silently.
   const turso = await importDriver<TursoAdapter>("@tursodatabase/database");
   const { Database: TursoCompat } = await importDriver<{ Database: SyncAdapter }>("@tursodatabase/database/compat");
-  for (const safe of [false, true]) {
+  await forEachFixtureInOrder([false, true], async (safe) => {
     const tdb = await turso.connect(file);
     tdb.defaultSafeIntegers(safe);
     assert.deepEqual(plain(await q.run(tdb)), rows, `Turso's engine with defaultSafeIntegers(${safe})`);
@@ -178,7 +178,7 @@ test("SQLite: one row on every driver, whatever its integer setting; an integer 
     await assert.rejects(looseS.run(tdb), blobInS);
     assert.equal((await tdb.prepare("select v from big").get()).v, safe ? BigInt("9007199254740993") : 9_007_199_254_740_992, "the control: the app's own statement");
     await tdb.close();
-  }
+  });
   const compat = new TursoCompat(file);
   // oxlint-disable-next-line rules/no-effect-runtime-run -- This test exercises Reylo's native synchronous query API, which does not run Effect.
   assert.deepEqual(plain(q.runSync(compat)), rows, "Turso's compat Database");
@@ -223,7 +223,7 @@ test("SQLite: libSQL's intMode \"string\" changes no value Reylo types a number 
   const q = await built(root, "file:./app.db", "computed", "select id, ok + 0 as n, ok + 9007199254740989 as edge, z, x from t order by id");
   const over = await built(root, "file:./app.db", "computed_over", "select ok + 9007199254740990 as edge from t where id = 1");
   const past = await built(root, "file:./app.db", "numeric_past", "select z from past");
-  for (const intMode of ["number", "bigint", "string"]) {
+  await forEachFixtureInOrder(["number", "bigint", "string"], async (intMode) => {
     const client = createClient({ url: `file:${file}`, intMode });
     const digits = intMode === "string";
     assert.deepEqual(
@@ -242,7 +242,7 @@ test("SQLite: libSQL's intMode \"string\" changes no value Reylo types a number 
     await assert.rejects(over.run(client), refused, `libSQL with intMode ${intMode}: a REAL's expression past 2^53 - 1`);
     await assert.rejects(past.run(client), intMode === "number" ? RangeError : /Column "z" holds 9007199254740992, an integer past/u, `libSQL with intMode ${intMode}: a NUMERIC past 2^53 - 1`);
     client.close();
-  }
+  });
 });
 
 // oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
@@ -284,14 +284,14 @@ test("SQLite: a column declared BIGINT or INT8 is a BigInt on every driver, exac
     assert.deepEqual(plain(byV.runSync(db, { v: exactRows[0]!.v })), [{ id: 1, v: BigInt("9007199254740993") }], "better-sqlite3: the BIGINT's value as a parameter");
     db.close();
   });
-  for (const readBigInts of [false, true]) {
+  await forEachFixtureInOrder([false, true], async (readBigInts) => {
     const node = new DatabaseSync(file, { readBigInts });
     assert.deepEqual(plain(await exact.run(node)), exactRows, `node:sqlite with readBigInts ${readBigInts}`);
     await assert.rejects(all.run(node), plusError);
     assert.deepEqual(plain(await byV.run(node, { v: BigInt("9007199254740993") })), [{ id: 1, v: BigInt("9007199254740993") }], "node:sqlite: the BIGINT's value as a parameter");
     node.close();
-  }
-  for (const intMode of ["number", "bigint", "string"]) {
+  });
+  await forEachFixtureInOrder(["number", "bigint", "string"], async (intMode) => {
     const client = createClient({ url: `file:${file}`, intMode });
     // At its default intMode libSQL refuses an integer past 2^53 itself, before Reylo sees it.
     if (intMode === "number") {await assert.rejects(exact.run(client), RangeError);}
@@ -299,17 +299,17 @@ test("SQLite: a column declared BIGINT or INT8 is a BigInt on every driver, exac
     assert.deepEqual(plain(await byV.run(client, { v: BigInt("5") })), [{ id: 2, v: BigInt("5") }], `libSQL with intMode ${intMode}: a BIGINT within 2^53`);
     if (intMode !== "number") {assert.deepEqual(plain(await byV.run(client, { v: BigInt("9007199254740993") })), [{ id: 1, v: BigInt("9007199254740993") }], `libSQL with intMode ${intMode}: the BIGINT's value as a parameter`);}
     client.close();
-  }
+  });
   const turso = await importDriver<TursoAdapter>("@tursodatabase/database");
   const { Database: TursoCompat } = await importDriver<{ Database: SyncAdapter }>("@tursodatabase/database/compat");
-  for (const safe of [false, true]) {
+  await forEachFixtureInOrder([false, true], async (safe) => {
     const tdb = await turso.connect(file);
     tdb.defaultSafeIntegers(safe);
     assert.deepEqual(plain(await exact.run(tdb)), exactRows, `Turso's engine with defaultSafeIntegers(${safe})`);
     assert.deepEqual(plain(await byV.run(tdb, { v: BigInt("9007199254740993") })), [{ id: 1, v: BigInt("9007199254740993") }], "Turso's engine: the BIGINT's value as a parameter");
     assert.equal((await tdb.prepare("select v from acct where id = 1").get()).v, safe ? BigInt("9007199254740993") : 9_007_199_254_740_992, "the control: the app's own statement");
     await tdb.close();
-  }
+  });
   const compat = new TursoCompat(file);
   // oxlint-disable-next-line rules/no-effect-runtime-run -- This test exercises Reylo's native synchronous query API, which does not run Effect.
   assert.deepEqual(plain(exact.runSync(compat)), exactRows, "Turso's compat Database");
@@ -356,11 +356,11 @@ from users u where u.id = :id::int`,
   const session = await Session.for(root);
   try {
     const types: Record<string, string> = {};
-    for (const [name, text] of Object.entries(sql)) {
+    await forEachFixtureInOrder(Object.entries(sql), async ([name, text]) => {
       const outcome = await session.analyze(text);
       assert.ok(outcome.ok, `${name}: ${outcome.ok ? "" : outcome.message}`);
       types[name] = outcome.analysis.columns.map((column) => `${column.name}: ${renderType(column.type, false, "sqlite")}${column.nullable ? " | null" : ""}`).join("; ");
-    }
+    });
     assert.deepEqual(types, {
       profile: "profile: { user: { id: number; name: string }; posts: { id: number; title: string }[] }",
       values: "o: { big: number | null; score: number | null; flag: number | string; more: number; pair: [string, number | null]; doc: string | null }; doc: string | null; glued: string",
@@ -381,24 +381,24 @@ from users u where u.id = :id::int`,
     assert.deepEqual(plain(await run(profile, { id: 2 })), bob, `${label}: a user with no posts`);
     assert.deepEqual(plain(await run(values)), rows, `${label}: the values`);
   };
-  for (const safe of [false, true]) {
+  await forEachFixtureInOrder([false, true], async (safe) => {
     const db = new Database(file);
     db.defaultSafeIntegers(safe);
     // oxlint-disable-next-line rules/no-effect-runtime-run -- This test exercises Reylo's native synchronous query API, which does not run Effect.
     await check(`better-sqlite3 with defaultSafeIntegers(${safe})`, (q, p) => q.runSync(db, p));
     assert.equal(typeof db.prepare("select json_object('a', 1) as o").get().o, "string", "the control: the app's own statement");
     db.close();
-  }
-  for (const readBigInts of [false, true]) {
+  });
+  await forEachFixtureInOrder([false, true], async (readBigInts) => {
     const node = new DatabaseSync(file, { readBigInts });
     await check(`node:sqlite with readBigInts ${readBigInts}`, (q, p) => q.run(node, p));
     node.close();
-  }
-  for (const intMode of ["number", "bigint", "string"]) {
+  });
+  await forEachFixtureInOrder(["number", "bigint", "string"], async (intMode) => {
     const client = createClient({ url: `file:${file}`, intMode });
     await check(`libSQL with intMode ${intMode}`, (q, p) => q.run(client, p));
     client.close();
-  }
+  });
   const turso = await importDriver<TursoAdapter>("@tursodatabase/database");
   const { Database: TursoCompat } = await importDriver<{ Database: SyncAdapter }>("@tursodatabase/database/compat");
   const tdb = await turso.connect(file);
