@@ -8,27 +8,31 @@ import type { SQLInputValue } from 'node:sqlite';
 import { test } from 'node:test';
 // oxlint-disable-next-line rules/no-node-imports -- The Nub test runner supplies Node's TestContext and its cleanup hooks.
 import type { TestContext } from 'node:test';
-import { Cause, Effect, Exit, Layer } from "effect";
+import { Cause, Effect, Exit, Layer, Predicate, Result } from "effect";
 import { defineQuery } from "@totto2727/reylo";
 import { makeQueryRunner, prepare, QueryDecodeError, QueryExecutionError, QueryExecutor, QueryPreparationError, run } from '@totto2727/reylo/effect';
 import type { BoundQuery } from '@totto2727/reylo/effect';
 import { DecodeError, ParameterError } from "#reylo-source/values.ts";
 
+type NoInputs = Record<never, never>;
+
 const binding = function (value: unknown): SQLInputValue {
-  if (value === null || typeof value === "string" || typeof value === "number" || typeof value === "bigint" || value instanceof Uint8Array) {return value;}
+  if (Predicate.isNull(value) || Predicate.isString(value) || Predicate.isNumber(value) || Predicate.isBigInt(value) || value instanceof Uint8Array) {
+    return value;
+  }
   throw new TypeError("Unsupported SQLite binding");
 };
 
-const database = function (testContext: TestContext) {
+const database = function (testContext: TestContext): { db: DatabaseSync; layer: Layer.Layer<QueryExecutor> } {
   const db = new DatabaseSync(":memory:");
-  testContext.after(() => db.close());
+  testContext.after(() => {db.close();});
   const layer = Layer.succeed(QueryExecutor, {
     dialect: "sqlite",
     execute: ({ text, values }) => Effect.try({
       try: () => {
         const statement = db.prepare(text);
         statement.setReadBigInts(true);
-        return statement.all(...values.map(binding));
+        return statement.all(...values.map((value) => binding(value)));
       },
       catch: (cause) => new QueryExecutionError({ cause }),
     }),
@@ -59,16 +63,15 @@ const failure = function <A, E>(effect: Effect.Effect<A, E>): E {
   const exit = Effect.runSyncExit(effect);
   assert.ok(Exit.isFailure(exit));
   const error = Cause.findError(exit.cause);
-  assert.equal(error._tag, "Success");
-  if (error._tag !== "Success") {throw new Error("Expected a typed failure");}
+  assert.ok(Result.isSuccess(error), "Expected a typed failure");
   return error.success;
 };
 
 Iterator.from([
-  [QueryPreparationError, "Failed to prepare the query"],
-  [QueryExecutionError, "Failed to execute the query"],
-  [QueryDecodeError, "Failed to decode the query result"],
-] as const).forEach(([ErrorType, message]) => {
+  [QueryPreparationError, "Failed to prepare the query", "QueryPreparationError"],
+  [QueryExecutionError, "Failed to execute the query", "QueryExecutionError"],
+  [QueryDecodeError, "Failed to decode the query result", "QueryDecodeError"],
+] as const).forEach(([ErrorType, message, tag]) => {
   // oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
   test(`${ErrorType.name} supports direct Effect failure and tagged recovery`, () => {
     const cause = new Error("original query failure");
@@ -79,9 +82,11 @@ Iterator.from([
     assert.equal(failure(program), error);
     assert.equal(error.cause, cause);
     assert.equal(error.message, message);
-    assert.ok(error instanceof Error);
+    assert.ok(Predicate.isError(error));
+    const recovered = program.pipe(Effect.catchTag(tag, (matched) => Effect.succeed(matched.cause)));
     // oxlint-disable-next-line rules/no-effect-runtime-run -- This test independently evaluates tagged error recovery.
-    assert.equal(Effect.runSync(program.pipe(Effect.catchTag(error._tag, (failure) => Effect.succeed(failure.cause)))), cause);
+    const original = Effect.runSync(recovered);
+    assert.equal(original, cause);
   });
 });
 
@@ -141,10 +146,10 @@ test("Effect retains all query cardinalities and row-count failures", (testConte
   // oxlint-disable-next-line rules/no-effect-runtime-run -- This test constructs a runner before checking its query cardinalities.
   const run = Effect.runSync(Effect.provide(makeQueryRunner, layer));
   db.exec("create table numbers(n integer); insert into numbers values(1), (2)");
-  const many = defineQuery<{}, { n: number }, "many", "sqlite">({ dialect: "sqlite", sql: "select n from numbers", params: [], columns: [["n", "int"]], cardinality: "many" });
-  const one = defineQuery<{}, { n: number }, "one", "sqlite">({ dialect: "sqlite", sql: "select n from numbers", params: [], columns: [["n", "int"]], cardinality: "one" });
-  const maybe = defineQuery<{}, { n: number }, "maybeOne", "sqlite">({ dialect: "sqlite", sql: "select n from numbers where n = 1", params: [], columns: [["n", "int"]], cardinality: "maybeOne" });
-  const none = defineQuery<{}, never, "none", "sqlite">({ dialect: "sqlite", sql: "delete from numbers", params: [], columns: [], cardinality: "none" });
+  const many = defineQuery<NoInputs, { n: number }, "many", "sqlite">({ dialect: "sqlite", sql: "select n from numbers", params: [], columns: [["n", "int"]], cardinality: "many" });
+  const one = defineQuery<NoInputs, { n: number }, "one", "sqlite">({ dialect: "sqlite", sql: "select n from numbers", params: [], columns: [["n", "int"]], cardinality: "one" });
+  const maybe = defineQuery<NoInputs, { n: number }, "maybeOne", "sqlite">({ dialect: "sqlite", sql: "select n from numbers where n = 1", params: [], columns: [["n", "int"]], cardinality: "maybeOne" });
+  const none = defineQuery<NoInputs, never, "none", "sqlite">({ dialect: "sqlite", sql: "delete from numbers", params: [], columns: [], cardinality: "none" });
   // oxlint-disable-next-line rules/no-effect-runtime-run -- This test independently checks the many-row result.
   assert.deepEqual(Effect.runSync(Effect.provide(run(many), layer)), [{ n: 1 }, { n: 2 }]);
   // oxlint-disable-next-line rules/no-effect-runtime-run -- This test independently checks the optional-row result.
@@ -176,12 +181,12 @@ test("Effect classifies encoding, decoding, and database failures with original 
   assert.ok(encoded instanceof QueryPreparationError);
   assert.ok(encoded.cause instanceof ParameterError);
   db.exec("update item set active = 2");
-  const badBoolean = defineQuery<{}, { active: boolean }, "many", "sqlite">({ dialect: "sqlite", sql: "select active from item", params: [], columns: [["active", "bool"]], cardinality: "many" });
+  const badBoolean = defineQuery<NoInputs, { active: boolean }, "many", "sqlite">({ dialect: "sqlite", sql: "select active from item", params: [], columns: [["active", "bool"]], cardinality: "many" });
   const decoded = failure(Effect.provide(run(badBoolean), layer));
   assert.ok(decoded instanceof QueryDecodeError);
   assert.ok(decoded.cause instanceof DecodeError);
   db.exec("update item set doc = '{bad json'");
-  const badJson = defineQuery<{}, { doc: unknown }, "one", "sqlite">({ dialect: "sqlite", sql: "select doc from item", params: [], columns: [["doc", "json"]], cardinality: "one" });
+  const badJson = defineQuery<NoInputs, { doc: unknown }, "one", "sqlite">({ dialect: "sqlite", sql: "select doc from item", params: [], columns: [["doc", "json"]], cardinality: "one" });
   assert.ok(failure(Effect.provide(run(badJson), layer)) instanceof QueryDecodeError);
   db.exec("drop table item");
   const executed = failure(Effect.provide(run(lookup, { id: 7, active: true }), layer));
@@ -218,7 +223,7 @@ test("captured runner preserves execution causes and validates dialect before ex
   const captured = Effect.runSync(Effect.provide(makeQueryRunner, Layer.succeed(QueryExecutor, executor)));
   assert.equal(failure(captured(lookup, { id: 7, active: true })), original);
   assert.equal(original.cause, cause);
-  const foreign = defineQuery<{}, { n: number }, "one", "postgres">({ dialect: "postgres", sql: "select 1 as n", params: [], columns: [["n", "int"]], cardinality: "one" });
+  const foreign = defineQuery<NoInputs, { n: number }, "one", "postgres">({ dialect: "postgres", sql: "select 1 as n", params: [], columns: [["n", "int"]], cardinality: "one" });
   const foreignError = failure(captured(foreign));
   assert.ok(foreignError instanceof QueryPreparationError);
   assert.ok(foreignError.cause instanceof TypeError);
@@ -237,7 +242,7 @@ test("Effect refuses non-SQLite queries and mismatched executors before executio
     execute: () => { calls++; return Effect.succeed([]); },
   };
   const layer = Layer.succeed(QueryExecutor, executor);
-  const foreign = defineQuery<{}, { n: number }, "one", "postgres">({ dialect: "postgres", sql: "select 1 as n", params: [], columns: [["n", "int"]], cardinality: "one" });
+  const foreign = defineQuery<NoInputs, { n: number }, "one", "postgres">({ dialect: "postgres", sql: "select 1 as n", params: [], columns: [["n", "int"]], cardinality: "one" });
   assert.ok(failure(Effect.provide(run(foreign), layer)) instanceof QueryPreparationError);
   Object.defineProperty(executor, "dialect", { value: "other" });
   assert.ok(failure(Effect.provide(run(lookup, { id: 7, active: true }), layer)) instanceof QueryPreparationError);
@@ -248,7 +253,7 @@ test("Effect refuses non-SQLite queries and mismatched executors before executio
 test("Effect rejects array rows and missing query metadata without changing runtime APIs", () => {
   const arrays = Layer.succeed(QueryExecutor, { dialect: "sqlite", execute: () => Effect.succeed([[7, 1]]) });
   assert.ok(failure(Effect.provide(run(lookup, { id: 7, active: true }), arrays)) instanceof QueryDecodeError);
-  const missing = defineQuery<{}, unknown, "many", "sqlite">({ dialect: "sqlite", sql: "select 1", params: [] });
+  const missing = defineQuery<NoInputs, unknown, "many", "sqlite">({ dialect: "sqlite", sql: "select 1", params: [] });
   const objects = Layer.succeed(QueryExecutor, { dialect: "sqlite", execute: () => Effect.succeed([{ n: 1 }]) });
   assert.ok(failure(Effect.provide(run(missing), objects)) instanceof QueryDecodeError);
   const missingColumn = Layer.succeed(QueryExecutor, { dialect: "sqlite", execute: () => Effect.succeed([{ id: 7 }]) });
@@ -256,7 +261,7 @@ test("Effect rejects array rows and missing query metadata without changing runt
 });
 
 // Compiled by the repository typecheck, not executed. Inputs must not widen the query's inference.
-const typeContract = function () {
+const _typeContract = function (): object {
   // @ts-expect-error factory requires an executor at construction
   // oxlint-disable-next-line rules/no-effect-runtime-run -- This type-only assertion checks that the executor requirement prevents execution.
   Effect.runSync(makeQueryRunner);
@@ -271,9 +276,9 @@ const typeContract = function () {
   captured(lookup, { id: "7", active: true });
   const one: Effect.Effect<{ id: number; active: boolean; big: bigint; doc: { name: string } }, QueryPreparationError | QueryExecutionError | QueryDecodeError, QueryExecutor> = run(lookup, { id: 7, active: true });
   const bound: Effect.Effect<BoundQuery<{ id: number; active: boolean; big: bigint; doc: { name: string } }>, QueryPreparationError> = prepare(lookup, { id: 7, active: true });
-  const manyQuery = defineQuery<{}, { n: number }, "many", "sqlite">({ dialect: "sqlite", sql: "select 1 as n", params: [], columns: [["n", "int"]], cardinality: "many" });
-  const maybeQuery = defineQuery<{}, { n: number }, "maybeOne", "sqlite">({ dialect: "sqlite", sql: "select 1 as n", params: [], columns: [["n", "int"]], cardinality: "maybeOne" });
-  const noneQuery = defineQuery<{}, never, "none", "sqlite">({ dialect: "sqlite", sql: "delete from t", params: [], columns: [], cardinality: "none" });
+  const manyQuery = defineQuery<NoInputs, { n: number }, "many", "sqlite">({ dialect: "sqlite", sql: "select 1 as n", params: [], columns: [["n", "int"]], cardinality: "many" });
+  const maybeQuery = defineQuery<NoInputs, { n: number }, "maybeOne", "sqlite">({ dialect: "sqlite", sql: "select 1 as n", params: [], columns: [["n", "int"]], cardinality: "maybeOne" });
+  const noneQuery = defineQuery<NoInputs, never, "none", "sqlite">({ dialect: "sqlite", sql: "delete from t", params: [], columns: [], cardinality: "none" });
   const many: Effect.Effect<{ n: number }[], unknown, QueryExecutor> = run(manyQuery);
   const maybe: Effect.Effect<{ n: number } | null, unknown, QueryExecutor> = run(maybeQuery);
   const none: Effect.Effect<void, unknown, QueryExecutor> = run(noneQuery);
