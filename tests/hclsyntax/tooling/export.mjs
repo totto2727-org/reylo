@@ -1,7 +1,11 @@
 // Development-only: Go is never needed by the maintained TypeScript tests.
+// oxlint-disable-next-line rules/no-node-imports -- The native build tool uses this built-in to launch the real programs whose stdout, stderr and status are consumed.
 import { execFileSync } from 'node:child_process';
+// oxlint-disable-next-line rules/no-node-imports -- The native build tool uses this built-in to inspect or write files through the host filesystem.
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+// oxlint-disable-next-line rules/no-node-imports -- The native build tool uses this built-in to resolve paths using the host platform's filesystem conventions.
 import { dirname, join, resolve } from 'node:path';
+// oxlint-disable-next-line rules/no-node-imports -- The native build tool uses this built-in to convert local module URLs with the host platform's path rules.
 import { fileURLToPath } from 'node:url';
 
 const copyLicense = function (source, target) {

@@ -4,6 +4,7 @@
 // Answer, which `reylo/register` gives.
 // oxlint-disable-next-line rules/no-node-imports -- The standalone build hook reads SQL through its native Node or Bun host.
 import { readFile } from "node:fs/promises";
+// oxlint-disable-next-line rules/no-node-imports -- This server-side entry point uses this built-in to resolve paths using the host platform's filesystem conventions.
 import { dirname } from "node:path";
 import { releaseConnections, tooling } from "./engine-package.ts";
 

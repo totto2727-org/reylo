@@ -1,4 +1,5 @@
 // Supply the engine's catalog protocol directly from static Atlas HCL, without a host database.
+// oxlint-disable-next-line rules/no-node-imports -- This server-side entry point uses this built-in to inspect or write files through the host filesystem.
 import { readFileSync } from "node:fs";
 import { nativeErrorText } from "./native-error-text.ts";
 import { sqliteSchemaFromHcl } from "./hcl-sqlite.ts";

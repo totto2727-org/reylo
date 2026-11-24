@@ -2,11 +2,17 @@
 import { test } from "node:test";
 // oxlint-disable-next-line rules/no-node-imports -- Nub's Node suite uses native assertions for driver, CLI, and protocol results.
 import assert from "node:assert/strict";
+// oxlint-disable-next-line rules/no-node-imports -- The Nub integration fixtures use this built-in to inspect or write files through the host filesystem.
 import { realpathSync, rmSync } from "node:fs";
+// oxlint-disable-next-line rules/no-node-imports -- The Nub integration fixtures use this built-in to await writes and reads through the host filesystem.
 import { copyFile, mkdir, mkdtemp, writeFile } from "node:fs/promises";
+// oxlint-disable-next-line rules/no-node-imports -- The Nub integration fixtures use this built-in to use the host resolver for the installed driver or fixture package.
 import { createRequire } from "node:module";
+// oxlint-disable-next-line rules/no-node-imports -- The Nub integration fixtures use this built-in to select the host's real temporary directory.
 import { tmpdir } from "node:os";
+// oxlint-disable-next-line rules/no-node-imports -- The Nub integration fixtures use this built-in to resolve paths using the host platform's filesystem conventions.
 import { dirname, join } from "node:path";
+// oxlint-disable-next-line rules/no-node-imports -- The Nub integration fixtures use this built-in to convert local module URLs with the host platform's path rules.
 import { pathToFileURL } from "node:url";
 import { nativeBinary, platformPackage, PLATFORM_PACKAGES } from "#reylo-source/native.ts";
 

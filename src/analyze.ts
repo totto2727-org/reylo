@@ -4,8 +4,11 @@
 // Analyzed against; while the database answers, an entry for another schema is analyzed again,
 // And while it does not, or no URL names it, the entries are used as they are, so a build that
 // Cannot reach the database runs on what `reylo generate` or an earlier type check wrote.
+// oxlint-disable-next-line rules/no-node-imports -- This server-side entry point uses this built-in to inspect or write files through the host filesystem.
 import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+// oxlint-disable-next-line rules/no-node-imports -- This server-side entry point uses this built-in to compute the existing digest using the host's hash implementation.
 import { createHash } from "node:crypto";
+// oxlint-disable-next-line rules/no-node-imports -- This server-side entry point uses this built-in to resolve paths using the host platform's filesystem conventions.
 import { join } from "node:path";
 import { anyEngine, AnswerCache, engine, reason, MissingEngine, Unreachable } from './engine.ts';
 import type { Analysis, Engine, Lexed } from './engine.ts';

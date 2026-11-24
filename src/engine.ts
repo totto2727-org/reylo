@@ -13,9 +13,13 @@
 // It unreferenced is referenced again in a Bun.build plugin's hook, which is where the esbuild
 // Plugin asks the engine, so the child is never referenced again; a timer is held and let go alike
 // In every runtime.
+// oxlint-disable-next-line rules/no-node-imports -- This server-side entry point uses this built-in to launch the real programs whose stdout, stderr and status are consumed.
 import { spawn, spawnSync } from 'node:child_process';
+// oxlint-disable-next-line rules/no-node-imports -- This server-side entry point uses this built-in to type the real subprocess status and streams.
 import type { ChildProcessWithoutNullStreams } from 'node:child_process';
+// oxlint-disable-next-line rules/no-node-imports -- This server-side entry point uses this built-in to inspect or write files through the host filesystem.
 import { readFileSync } from "node:fs";
+// oxlint-disable-next-line rules/no-node-imports -- This server-side entry point uses this built-in to resolve paths using the host platform's filesystem conventions.
 import { resolve } from "node:path";
 import { hostUrl } from './host-url.ts';
 import type { HostUrl } from './host-url.ts';

@@ -3,10 +3,15 @@
 // Check and the build steps share, and prints each file with a mark and every error in full. A
 // Build that runs where the database cannot be reached (a CI job, a container build) runs on what
 // It wrote; where the database can be reached, it only saves the build the round trips.
+// oxlint-disable-next-line rules/no-node-imports -- This server-side entry point uses this built-in to launch the real programs whose stdout, stderr and status are consumed.
 import { spawnSync } from "node:child_process";
+// oxlint-disable-next-line rules/no-node-imports -- This server-side entry point uses this built-in to inspect or write files through the host filesystem.
 import { existsSync, readFileSync, statSync } from "node:fs";
+// oxlint-disable-next-line rules/no-node-imports -- This server-side entry point uses this built-in to await writes and reads through the host filesystem.
 import { glob } from "node:fs/promises";
+// oxlint-disable-next-line rules/no-node-imports -- This server-side entry point uses this built-in to resolve paths using the host platform's filesystem conventions.
 import { dirname, relative, resolve, sep } from "node:path";
+// oxlint-disable-next-line rules/no-node-imports -- This server-side entry point uses this built-in to preserve the CLI's native terminal styling.
 import { styleText } from "node:util";
 import { Session } from "./analyze.ts";
 import { findProjectFile, PROJECT_FILE } from "./project.ts";

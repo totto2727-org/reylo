@@ -1,4 +1,6 @@
+// oxlint-disable-next-line rules/no-node-imports -- The Node integration fixture uses this built-in to exercise the host's real SQLite driver.
 import { DatabaseSync } from "node:sqlite";
+// oxlint-disable-next-line rules/no-node-imports -- The Node integration fixture uses this built-in to inspect or write files through the host filesystem.
 import { unlinkSync } from "node:fs";
 
 try { unlinkSync(new URL("lab.db", import.meta.url)); } catch {}

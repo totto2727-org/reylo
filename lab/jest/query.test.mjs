@@ -1,4 +1,5 @@
 // ESM: Jest's own linker (--experimental-vm-modules) loads the .sql file.
+// oxlint-disable-next-line rules/no-node-imports -- The Node integration fixture uses this built-in to exercise the host's real SQLite driver.
 import { DatabaseSync } from "node:sqlite";
 import query from "./query.sql";
 

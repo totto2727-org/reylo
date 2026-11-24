@@ -2,7 +2,9 @@
 // At once while the analysis waits on the database: Node's load hook and Bun's plugin under
 // `require()` (`src/register.ts`) and Jest's `process` (`src/jest.ts`). A worker thread analyzes
 // (`src/register-worker.ts`) and this thread blocks until it answers, as SafeQL's ESLint rule does.
+// oxlint-disable-next-line rules/no-node-imports -- This server-side entry point uses this built-in to inspect or write files through the host filesystem.
 import { readFileSync } from "node:fs";
+// oxlint-disable-next-line rules/no-node-imports -- This server-side entry point uses this built-in to run the engine in the native worker channel.
 import { MessageChannel, receiveMessageOnPort, Worker } from "node:worker_threads";
 
 let worker: Worker | undefined;

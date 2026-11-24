@@ -1,4 +1,6 @@
+// oxlint-disable-next-line rules/no-node-imports -- This standalone example uses this built-in to assert the native driver and subprocess results.
 import assert from "node:assert/strict";
+// oxlint-disable-next-line rules/no-node-imports -- This standalone example uses this built-in to exercise the host's real SQLite driver.
 import { DatabaseSync } from "node:sqlite";
 // oxlint-disable-next-line rules/no-node-imports, vitest/no-import-node-test -- Nub runs this suite with Node's test runner and provides the runtime used by the SQLite integration tests.
 import { after, test } from "node:test";

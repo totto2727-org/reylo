@@ -6,7 +6,9 @@
 // "pre"`, wherever it is listed): the Cloudflare Vite plugin (`@cloudflare/vite-plugin` 1.64) makes
 // Every `.sql` import in a Worker an external text module in its own resolveId, so the import never
 // Reached `load`, and `.run` was undefined on the string it gave (examples/cloudflare-workers).
+// oxlint-disable-next-line rules/no-node-imports -- This server-side entry point uses this built-in to inspect or write files through the host filesystem.
 import { existsSync, readFileSync } from "node:fs";
+// oxlint-disable-next-line rules/no-node-imports -- This server-side entry point uses this built-in to resolve paths using the host platform's filesystem conventions.
 import { dirname, isAbsolute, resolve } from "node:path";
 import { releaseConnections, tooling } from "./engine-package.ts";
 import { matchesUndefined } from "./native-predicates.ts";

@@ -2,12 +2,19 @@
 import { test } from "node:test";
 // oxlint-disable-next-line rules/no-node-imports -- Nub's Node suite uses native assertions for driver, CLI, and protocol results.
 import assert from "node:assert/strict";
+// oxlint-disable-next-line rules/no-node-imports -- The Nub integration fixtures use this built-in to launch the real programs whose stdout, stderr and status are consumed.
 import { spawnSync } from "node:child_process";
+// oxlint-disable-next-line rules/no-node-imports -- The Nub integration fixtures use this built-in to inspect or write files through the host filesystem.
 import { writeFileSync } from "node:fs";
+// oxlint-disable-next-line rules/no-node-imports -- The Nub integration fixtures use this built-in to await writes and reads through the host filesystem.
 import { mkdtemp } from "node:fs/promises";
+// oxlint-disable-next-line rules/no-node-imports -- The Nub integration fixtures use this built-in to select the host's real temporary directory.
 import { tmpdir } from "node:os";
+// oxlint-disable-next-line rules/no-node-imports -- The Nub integration fixtures use this built-in to resolve paths using the host platform's filesystem conventions.
 import { join, resolve } from "node:path";
+// oxlint-disable-next-line rules/no-node-imports -- The Nub integration fixtures use this built-in to use native sockets and their close events.
 import { connect, createServer } from 'node:net';
+// oxlint-disable-next-line rules/no-node-imports -- The Nub integration fixtures use this built-in to type the host's native address and socket.
 import type { AddressInfo, Server } from 'node:net';
 import { engine, reason, Unreachable } from "#reylo-source/engine.ts";
 import { hostUrl } from "#reylo-source/host-url.ts";

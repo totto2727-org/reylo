@@ -7,9 +7,13 @@
 // It open would stop the app from starting. Where the app holds it, the type check reads a copy.
 // A relative path in the statement (`read_parquet('logs/*.parquet')`) is read from the project's
 // Directory, where the app usually runs.
+// oxlint-disable-next-line rules/no-node-imports -- This server-side entry point uses this built-in to inspect or write files through the host filesystem.
 import { constants, copyFileSync, existsSync, mkdtempSync, rmSync, statSync } from "node:fs";
+// oxlint-disable-next-line rules/no-node-imports -- This server-side entry point uses this built-in to use the host resolver for the installed driver or fixture package.
 import { createRequire } from "node:module";
+// oxlint-disable-next-line rules/no-node-imports -- This server-side entry point uses this built-in to select the host's real temporary directory.
 import { tmpdir } from "node:os";
+// oxlint-disable-next-line rules/no-node-imports -- This server-side entry point uses this built-in to resolve paths using the host platform's filesystem conventions.
 import { basename, join } from "node:path";
 import { Unreachable } from "./connection.ts";
 import type { DuckdbDescribed, DuckdbType, EngineIo } from "./engine-core.ts";

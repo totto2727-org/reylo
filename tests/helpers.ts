@@ -1,8 +1,11 @@
 // Shared SQLite driver fixtures and the content mapper run over its JSON-RPC protocol.
 // oxlint-disable-next-line rules/no-node-imports -- Exercise Node CLI entry points and streaming protocols in native subprocesses.
 import { execFile, spawn } from "node:child_process";
+// oxlint-disable-next-line rules/no-node-imports -- The Nub integration fixtures use this built-in to use the host resolver for the installed driver or fixture package.
 import { createRequire } from "node:module";
+// oxlint-disable-next-line rules/no-node-imports -- The Nub integration fixtures use this built-in to resolve paths using the host platform's filesystem conventions.
 import { join } from "node:path";
+// oxlint-disable-next-line rules/no-node-imports -- The Nub integration fixtures use this built-in to convert local module URLs with the host platform's path rules.
 import { pathToFileURL } from "node:url";
 // oxlint-disable-next-line import/no-relative-parent-imports -- The native test runner loads this private guard directly from the source tree.
 import { hasObjectType, matchesNull, matchesNumber, matchesString, matchesUndefined } from "#reylo-source/native-predicates.ts";

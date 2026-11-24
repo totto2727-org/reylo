@@ -11,9 +11,13 @@
 // `reylo generate`, once, and by the error a project with no connection gets; never by an error of
 // Its own, since TypeScript makes every content mapper diagnostic one. With no URL, this fork
 // Defaults to SQLite for cached analysis.
+// oxlint-disable-next-line rules/no-node-imports -- This server-side entry point uses this built-in to launch the real programs whose stdout, stderr and status are consumed.
 import { spawnSync } from "node:child_process";
+// oxlint-disable-next-line rules/no-node-imports -- This server-side entry point uses this built-in to inspect or write files through the host filesystem.
 import { existsSync, readFileSync } from "node:fs";
+// oxlint-disable-next-line rules/no-node-imports -- This server-side entry point uses this built-in to resolve paths using the host platform's filesystem conventions.
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
+// oxlint-disable-next-line rules/no-node-imports -- This server-side entry point uses this built-in to convert local module URLs with the host platform's path rules.
 import { fileURLToPath } from "node:url";
 import { MissingEngine } from './engine.ts';
 import type { Engine } from './engine.ts';

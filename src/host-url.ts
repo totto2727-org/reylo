@@ -8,9 +8,13 @@
 // (Postgres's `peer`, MySQL's `auth_socket`) trusts as this process's user, so the bridge admits the
 // Engine's own connections alone: each carries the bridge's token, which only the engine is given
 // And the server never sees, and any other is closed before the server reads a byte of it.
+// oxlint-disable-next-line rules/no-node-imports -- This server-side entry point uses this built-in to compare the native protocol token with the host's timing-safe operation.
 import { randomBytes, timingSafeEqual } from "node:crypto";
+// oxlint-disable-next-line rules/no-node-imports -- This server-side entry point uses this built-in to use native sockets and their close events.
 import { createServer, connect } from 'node:net';
+// oxlint-disable-next-line rules/no-node-imports -- This server-side entry point uses this built-in to type the host's native address and socket.
 import type { AddressInfo, Socket } from 'node:net';
+// oxlint-disable-next-line rules/no-node-imports -- This server-side entry point uses this built-in to resolve paths using the host platform's filesystem conventions.
 import { resolve } from "node:path";
 import { Unreachable } from "./connection.ts";
 import { matchesUndefined } from "./native-predicates.ts";

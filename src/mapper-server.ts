@@ -2,8 +2,11 @@
 // The type check's view of a `.sql` file. The analysis itself (the
 // Database, the engine, the `.reylo/` cache shared with the bundler plugins and `reylo generate`)
 // Is `src/analyze.ts`; this file renders it as types and places its diagnostics in the file.
+// oxlint-disable-next-line rules/no-node-imports -- This server-side entry point uses this built-in to compute the existing digest using the host's hash implementation.
 import { createHash } from "node:crypto";
+// oxlint-disable-next-line rules/no-node-imports -- This server-side entry point uses this built-in to inspect or write files through the host filesystem.
 import { readFileSync } from "node:fs";
+// oxlint-disable-next-line rules/no-node-imports -- This server-side entry point uses this built-in to resolve paths using the host platform's filesystem conventions.
 import { dirname, relative, sep } from "node:path";
 import { CONTENT_MAPPER_POSITION_ENCODING, serve } from "./rpc.ts";
 import { anyEngine } from './engine.ts';

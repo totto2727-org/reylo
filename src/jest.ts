@@ -6,6 +6,7 @@
 // `src/bridge.ts`, which blocks on a worker while the analysis waits on the database. The module
 // Is ESM when Jest loads the file as one (`--experimental-vm-modules` with `extensionsToTreatAsEsm:
 // [".sql"]`), else CommonJS.
+// oxlint-disable-next-line rules/no-node-imports -- This server-side entry point uses this built-in to compute the existing digest using the host's hash implementation.
 import { createHash } from "node:crypto";
 import { sqlModuleSync } from "./bridge.ts";
 

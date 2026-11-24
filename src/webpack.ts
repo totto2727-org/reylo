@@ -3,6 +3,7 @@
 // (`src/turbopack.ts`), so that each host's config names its own host:
 //   Webpack / Rspack:  module.rules: [{ test: /\.sql$/, use: "reylo/webpack" }]
 //   Turbopack:         turbopack: { rules: { "*.sql": { loaders: ["reylo/turbopack"], as: "*.js" } } }
+// oxlint-disable-next-line rules/no-node-imports -- This server-side entry point uses this built-in to resolve paths using the host platform's filesystem conventions.
 import { dirname } from "node:path";
 import { tooling } from "./engine-package.ts";
 

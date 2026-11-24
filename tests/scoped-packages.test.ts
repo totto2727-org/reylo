@@ -2,7 +2,9 @@
 import { test } from "node:test";
 // oxlint-disable-next-line rules/no-node-imports -- Nub's Node suite uses native assertions for driver, CLI, and protocol results.
 import assert from "node:assert/strict";
+// oxlint-disable-next-line rules/no-node-imports -- The Nub integration fixtures use this built-in to use the host resolver for the installed driver or fixture package.
 import { createRequire } from "node:module";
+// oxlint-disable-next-line rules/no-node-imports -- The Nub integration fixtures use this built-in to inspect or write files through the host filesystem.
 import { readFileSync } from "node:fs";
 import { defineQuery } from "@totto2727/reylo";
 import { engine } from "#reylo-source/engine.ts";

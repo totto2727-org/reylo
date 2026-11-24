@@ -10,6 +10,7 @@
 // The analysis read; then each statement is compiled with EXPLAIN, which runs D1's checks (its
 // Allowlist of functions is an authorizer SQLite calls while it compiles) without running the
 // Statement.
+// oxlint-disable-next-line rules/no-node-imports -- This server-side entry point uses this built-in to convert local module URLs with the host platform's path rules.
 import { pathToFileURL } from "node:url";
 import { hasFunctionType, matchesUndefined } from "./native-predicates.ts";
 

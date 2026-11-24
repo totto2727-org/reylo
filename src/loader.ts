@@ -4,7 +4,9 @@
 // Database. The analysis comes from `src/analyze.ts`: `.reylo/` when it holds the statement for the
 // Current schema, else the database. A build that has neither fails, because a module built
 // Without the analysis would not do what its types say.
+// oxlint-disable-next-line rules/no-node-imports -- This server-side entry point uses this built-in to inspect or write files through the host filesystem.
 import { existsSync } from "node:fs";
+// oxlint-disable-next-line rules/no-node-imports -- This server-side entry point uses this built-in to resolve paths using the host platform's filesystem conventions.
 import { dirname } from "node:path";
 import { Session } from "./analyze.ts";
 import { sourceName } from "./project.ts";

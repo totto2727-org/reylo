@@ -9,9 +9,13 @@
 // Turns that check off and runs the same one with the flag in `compiler.runAfterProductionCompile`,
 // Which runs under Turbopack and webpack alike, after the compile and before Next's own type check
 // And the prerender (wiki/nextjs.md).
+// oxlint-disable-next-line rules/no-node-imports -- This server-side entry point uses this built-in to launch the real programs whose stdout, stderr and status are consumed.
 import { spawn } from "node:child_process";
+// oxlint-disable-next-line rules/no-node-imports -- This server-side entry point uses this built-in to inspect or write files through the host filesystem.
 import { existsSync, readFileSync } from "node:fs";
+// oxlint-disable-next-line rules/no-node-imports -- This server-side entry point uses this built-in to use the host resolver for the installed driver or fixture package.
 import { createRequire } from "node:module";
+// oxlint-disable-next-line rules/no-node-imports -- This server-side entry point uses this built-in to resolve paths using the host platform's filesystem conventions.
 import { dirname, join, resolve } from "node:path";
 
 type AfterCompile = (metadata: { projectDir: string; distDir: string }) => Promise<void>;
