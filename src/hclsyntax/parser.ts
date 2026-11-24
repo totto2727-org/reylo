@@ -6,12 +6,14 @@
 // Translated from hclsyntax/parser.go, parser_template.go and public.go at
 // Hashicorp/hcl 00057cf06d7b38a3f89e6e54d622eee98322b314.
 // The AST is data-only. cty evaluation is outside this port's boundary.
-import { lexConfig, lexExpression, lexTemplate, scanStringLit, graphemeClusters } from './scanner.ts';
+import { lexConfig, lexExpression, lexTemplate, graphemeClusters } from './scanner.ts';
 import { Peeker } from './peeker.ts';
+import { parseStringLiteralToken } from './string-literal.ts';
 import { rangeBetween as between, emptyRangeAt, rangeString, isStringLiteral } from './types.ts';
 import type { Attribute, Block, Body, Diagnostic, Expression, ForExpression, Literal, ObjectKey, Pos, Range, Token, TraversalStep } from './types.ts';
 
 export * from './types.ts';
+export { parseStringLiteralToken } from './string-literal.ts';
 
 const decoder = new TextDecoder();
 const encoder = new TextEncoder();
@@ -876,49 +878,4 @@ function meldConsecutiveStringLiterals(parts: TemplateParts): void {
       previous.value += current.value; previous.range.end = { ...current.range.end }; parts.tokens.splice(i, 1);
     } else {i++;}
   }
-}
-
-/** Resolve the scanner's literal slices, retaining byte/grapheme diagnostic ranges. */
-export function parseStringLiteralToken(token: Token): { value: string; diagnostics: Diagnostic[] } {
-  if (token.type !== 'TokenQuotedLit' && token.type !== 'TokenStringLit') {throw new Error('parseStringLiteralToken can only be used with TokenStringLit and TokenQuotedLit tokens');}
-  const quoted = token.type === 'TokenQuotedLit'; const diagnostics: Diagnostic[] = []; const output: Uint8Array[] = [];
-  let end = { ...token.range.start };
-  for (const slice of scanStringLit(token.bytes, quoted)) {
-    if (!slice.length) {continue;}
-    const start = { ...end };
-    Iterator.from(graphemeClusters(slice)).forEach((cluster) => {
-      end = { ...end, byte: end.byte + cluster.length };
-      if (cluster[0] === 13 || cluster[0] === 10) { end.line++; end.column = 1 }
-      else {end.column++;}
-    });
-    const range: Range = { filename: token.range.filename, start, end: { ...end } };
-    const invalid = (detail: string): void => { diagnostics.push(error('Invalid escape sequence', detail, range)) };
-    if (slice[0] === 92 && quoted) {
-      if (slice.length < 2) {invalid('Backslash must be followed by an escape sequence selector character.');}
-      else {
-        const escapes: Record<number, string> = { 110: '\n', 114: '\r', 116: '\t', 34: '"', 92: '\\' };
-        const escape = escapes[slice[1]!];
-        if (escape !== undefined) { output.push(encoder.encode(escape)); continue }
-        if (slice[1] === 117 || slice[1] === 85) {
-          if (slice[1] === 117 && slice.length !== 6) {invalid(String.raw`The \u escape sequence must be followed by four hexadecimal digits.`);}
-          else if (slice[1] === 85 && slice.length !== 10) {invalid(String.raw`The \U escape sequence must be followed by eight hexadecimal digits.`);}
-          else {
-            const num = Number.parseInt(decoder.decode(slice.subarray(2)), 16);
-            if (num > 0x10_FF_FF || num >= 0xD8_00 && num <= 0xDF_FF) {invalid(`Cannot encode character U+${num.toString(16).padStart(4, '0')} in UTF-8.`);}
-            else { output.push(encoder.encode(String.fromCodePoint(num))); continue }
-          }
-        } else {
-          invalid(`The symbol ${JSON.stringify(decoder.decode(slice.subarray(1)))} is not a valid escape sequence selector.`);
-          output.push(slice.subarray(1)); continue;
-        }
-      }
-    } else if ((slice[0] === 36 || slice[0] === 37) && slice.length === 3 && slice[1] === slice[0] && slice[2] === 123) {
-      output.push(slice.subarray(1)); continue;
-    }
-    output.push(slice);
-  }
-  const joined = new Uint8Array(output.reduce((length, bytes) => length + bytes.length, 0));
-  let offset = 0;
-  Iterator.from(output).forEach((slice) => { joined.set(slice, offset); offset += slice.length });
-  return { value: decoder.decode(joined), diagnostics };
 }
