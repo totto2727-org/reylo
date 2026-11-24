@@ -48,7 +48,7 @@ test("postgres: the statement, its database, and each value as the text the serv
   assert.deepEqual(q.encode({ id: 7, tags: [1, 2], doc: { a: [1] }, bytes: new Uint8Array([0, 255]), flag: true }), ["7", '{"1","2"}', '{"a":[1]}', String.raw`\x00ff`, "t"]);
   // A key left out binds NULL, as `.run()` binds it; one the statement takes no null for is refused.
   assert.deepEqual(users["~standard"].query.encode({ id: 7 }), ["7", null, null, null, null]);
-  assert.throws(() => q.encode({ tags: [1] }), (e) => e instanceof ParameterError && /"id" is missing/u.test(e.message));
+  assert.throws(() => q.encode({ tags: [1] }), (error) => error instanceof ParameterError && /"id" is missing/u.test(error.message));
   // The input is an object, as `.run()` takes it.
   assert.throws(() => q.encode([7]), ParameterError);
   // A driver may take `encode` off the object.

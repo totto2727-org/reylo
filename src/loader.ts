@@ -31,13 +31,13 @@ export async function sqlModule(path: string, sql: string): Promise<SqlModule> {
   // A statement the database refuses may have been analyzed against a schema read a few seconds
   // Before a migration (a session reads it again at most every 5 seconds, and SQLite's analysis
   // Replays it): it is analyzed again when the schema has changed since.
-  if (outcome.ok && outcome.analysis.diagnostics.some((d) => d.code === 6) && (await session.recheck())) {outcome = await session.analyze(sql);}
+  if (outcome.ok && outcome.analysis.diagnostics.some((diagnostic) => diagnostic.code === 6) && (await session.recheck())) {outcome = await session.analyze(sql);}
   if (!outcome.ok) {throw new Error(`${path}: ${outcome.message}`);}
   const { analysis } = outcome;
   // A statement whose placeholders break a rule fails the build: one the engine could not read
   // (1), named and positional mixed (2), or a parameter written more than once (3), since each
   // Parameter appears once so that one place types it.
-  const unread = analysis.diagnostics.find((d) => d.code === 1 || d.code === 2 || d.code === 3);
+  const unread = analysis.diagnostics.find((diagnostic) => diagnostic.code === 1 || diagnostic.code === 2 || diagnostic.code === 3);
   if (unread) {throw new Error(`${path}: ${unread.message}`);}
   let params: string[];
   if (session.project.dialect === "mysql") {
@@ -53,12 +53,12 @@ export async function sqlModule(path: string, sql: string): Promise<SqlModule> {
   }
   // A column list that does not read, or that disagrees with the table its insert writes, fails
   // The build too.
-  const descriptor = analysis.diagnostics.find((d) => d.code === 20 || d.code === 21);
+  const descriptor = analysis.diagnostics.find((diagnostic) => diagnostic.code === 20 || diagnostic.code === 21);
   if (descriptor) {throw new Error(`${path}: ${descriptor.message}`);}
   // So does a statement the database refuses (6: a misspelled column, a dropped table), at its line
   // And column, as the type check reports it: its module would run a statement nothing typed, with
   // No columns and any number of rows.
-  const refused = analysis.diagnostics.find((d) => d.code === 6);
+  const refused = analysis.diagnostics.find((diagnostic) => diagnostic.code === 6);
   if (refused) {throw new Error(`${path}:${place(sql, refused.start)}: ${refused.message}`);}
   // Each parameter's type, for the drivers that bind an array or a JSON value wrong, and whether it
   // Takes null, which the run time refuses for one that does not (src/execute.ts).

@@ -210,7 +210,7 @@ test("try resolves to the value or to the database's error, and rejects with eve
   assert.equal(failed.error.cause, unique);
   assert.ok(!("value" in failed));
   // A refused connection, and a row count the analysis got wrong, are not the database's.
-  await assert.rejects(many.try(failing(refused), { id: 1 }), (e) => e === refused);
+  await assert.rejects(many.try(failing(refused), { id: 1 }), (error) => error === refused);
   await assert.rejects(one.try(answering([]), { id: 1 }), /^Error: get_user\.sql: Expected exactly one row, got 0$/u);
   // A value Reylo refuses rejects with Reylo's own error, and never reaches the client.
   await assert.rejects(many.try(answering([]), 1 as never), /The parameters must be an object/u);

@@ -140,8 +140,8 @@ export async function mysql2(m: AnyClient, text: string, values: unknown[], colu
   // Says it of an either too (`:n + 1`, a BIGINT or a DOUBLE by what is bound).
   const kinds = columns && columns.length === described.length ? columns : undefined;
   const fixes: (Readonly<[string, Fix]>)[] = [];
-  described.forEach((f, i) => {
-    const fix = byKind(kinds?.[i]![1]) ?? (f.columnType === LONGLONG ? toBigInt : undefined);
+  described.forEach((f, index) => {
+    const fix = byKind(kinds?.[index]![1]) ?? (f.columnType === LONGLONG ? toBigInt : undefined);
     if (fix) {fixes.push([f.name, fix]);}
   });
   // A DATETIME's, TIMESTAMP's and TIME's text, padded to the column's own fraction digits.

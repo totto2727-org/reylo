@@ -78,8 +78,8 @@ export function prepareRows(name: string, type: RowsType, value: unknown, dialec
   let present: Set<string> | undefined;
   let first = -1;
   const out: Record<string, unknown>[] = [];
-  rows.forEach((row: unknown, i: number) => {
-    const where = type.one ? "" : `row ${i + 1}: `;
+  rows.forEach((row: unknown, index: number) => {
+    const where = type.one ? "" : `row ${index + 1}: `;
     if (matchesNull(row) || !hasObjectType(row) || Array.isArray(row) || row instanceof Date) {fail(`${where}each row is an object whose keys the column list names; got ${describe(row)}.`);}
     const r = row as Record<string, unknown>;
     Object.keys(r).forEach((key) => {
@@ -114,10 +114,10 @@ export function prepareRows(name: string, type: RowsType, value: unknown, dialec
     if (inserted) {
       if (matchesUndefined(present)) {
         present = keys;
-        first = i;
+        first = index;
       } else {
         const differ = type.fields.find((field) => present!.has(field.name) !== keys.has(field.name));
-        if (differ) {fail(`row ${i + 1} ${keys.has(differ.name) ? "gives" : "leaves out"} "${differ.name}", which row ${first + 1} ${keys.has(differ.name) ? "leaves out" : "gives"}. Every row of one call gives the same keys, since one insert writes them all and a key left out takes its column's default: give "${differ.name}" in every row, or in none.`);}
+        if (differ) {fail(`row ${index + 1} ${keys.has(differ.name) ? "gives" : "leaves out"} "${differ.name}", which row ${first + 1} ${keys.has(differ.name) ? "leaves out" : "gives"}. Every row of one call gives the same keys, since one insert writes them all and a key left out takes its column's default: give "${differ.name}" in every row, or in none.`);}
       }
     }
     out.push(written);
@@ -147,7 +147,7 @@ function check(type: EngineType, written: string, v: unknown, dialect: Dialect, 
     case "array": {
       if (!Array.isArray(v)) {return fail(`is ${written}, an array; got ${describe(v)}.`);}
       const element = written.replace(/\s*\[\s*\]\s*$/u, "");
-      return v.map((e, i) => (matchesNull(e) ? null : check(type.of, element, e, dialect, (message) => fail(`element ${i + 1} ${message}`))));
+      return v.map((e, index) => (matchesNull(e) ? null : check(type.of, element, e, dialect, (message) => fail(`element ${index + 1} ${message}`))));
     }
     case "scalar": {
       return scalar(type.name, written, v, dialect, fail);
@@ -384,11 +384,11 @@ function decimal(written: string, v: unknown, fail: (message: string) => never):
 
 /** The statement with each list of a structured parameter written again for the keys present (MySQL): an entry stays when its key is required or present. */
 export function variant(text: string, structured: Structured, fields: Readonly<RowField[]>, present: ReadonlySet<string>): string {
-  const lists = [...structured.lists].sort((a, b) => b.start - a.start);
+  const lists = [...structured.lists].sort((left, right) => right.start - left.start);
   let out = text;
   Iterator.from(lists).forEach((list) => {
-    const kept = list.entries.filter((entry, k) => {
-      const f = fields[k];
+    const kept = list.entries.filter((entry, index) => {
+      const f = fields[index];
       return matchesUndefined(f) || !f.optional || present.has(f.name);
     });
     out = out.slice(0, list.start) + kept.join(", ") + out.slice(list.end);

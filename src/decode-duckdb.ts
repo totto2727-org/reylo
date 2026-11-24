@@ -153,7 +153,7 @@ const T = {
 function bindValue(a: Api, t: EngineType | undefined, v: unknown): unknown {
   if (matchesNull(v) || matchesUndefined(v)) {return null;}
   if (v instanceof Uint8Array) {return a.blobValue(v);}
-  if (t?.kind === "tuple" && Array.isArray(v)) {return a.tupleValue(t.items.map((item, i) => bindValue(a, item, v[i])));}
+  if (t?.kind === "tuple" && Array.isArray(v)) {return a.tupleValue(t.items.map((item, index) => bindValue(a, item, v[index])));}
   if (Array.isArray(v)) {
     if (t?.kind === "map") {return a.mapValue(v.map((e) => ({ key: bindValue(a, t.key, (e as { key?: unknown } | null)?.key), value: bindValue(a, t.value, (e as { value?: unknown } | null)?.value) })));}
     return a.listValue(v.map((e) => bindValue(a, t?.kind === "array" ? t.of : undefined, e)));
@@ -179,8 +179,8 @@ export async function runDuckdb(c: DuckdbClient, text: string, values: unknown[]
   let bindTypes: unknown[] | undefined;
   if (values.some((currentValue) => !matchesNull(currentValue) && hasObjectType(currentValue))) {
     const a = await nodeApiOf(c);
-    bindTypes = values.map((currentValue, i) => (!matchesNull(currentValue) && hasObjectType(currentValue) ? bindType(a, types[i], currentValue) : undefined));
-    bound = values.map((currentValue, i) => (!matchesNull(currentValue) && hasObjectType(currentValue) ? bindValue(a, types[i], currentValue) : currentValue));
+    bindTypes = values.map((currentValue, index) => (!matchesNull(currentValue) && hasObjectType(currentValue) ? bindType(a, types[index], currentValue) : undefined));
+    bound = values.map((currentValue, index) => (!matchesNull(currentValue) && hasObjectType(currentValue) ? bindValue(a, types[index], currentValue) : currentValue));
   }
   const reader = (await c.runAndReadAll(text, bound, bindTypes)) as Reader;
   if (!matchesUndefined(columns) && columns.length === 0) {return [];}
@@ -203,7 +203,7 @@ export async function runDuckdb(c: DuckdbClient, text: string, values: unknown[]
  */
 function bindType(a: Api, t: EngineType | undefined, v: unknown): unknown {
   if (v instanceof Uint8Array) {return a.BLOB;}
-  if (t?.kind === "tuple" && Array.isArray(v)) {return a.TUPLE(t.items.map((item, i) => bindType(a, item, v[i])));}
+  if (t?.kind === "tuple" && Array.isArray(v)) {return a.TUPLE(t.items.map((item, index) => bindType(a, item, v[index])));}
   if (Array.isArray(v)) {
     if (t?.kind === "map") {return a.MAP(bindType(a, t.key, firstOf(v, "key")), bindType(a, t.value, firstOf(v, "value")));}
     return a.LIST(bindType(a, t?.kind === "array" ? t.of : undefined, v.find((e) => !matchesNullish(e))));
@@ -233,7 +233,7 @@ const INTEGERS = new Set(["tinyint", "smallint", "integer", "bigint", "hugeint",
 export function encodeDuckdb(type: EngineType | undefined, v: unknown, name: string): unknown {
   if (matchesUndefined(type) || matchesNullish(v)) {return v;}
   if (type.kind === "array" && Array.isArray(v)) {return v.map((e) => encodeDuckdb(type.of, e, name));}
-  if (type.kind === "tuple" && Array.isArray(v)) {return v.map((e, i) => encodeDuckdb(type.items[i], e, name));}
+  if (type.kind === "tuple" && Array.isArray(v)) {return v.map((e, index) => encodeDuckdb(type.items[index], e, name));}
   if (type.kind === "map" && Array.isArray(v)) {return v.map((e) => (!matchesNull(e) && hasObjectType(e) ? { ...e, key: encodeDuckdb(type.key, (e as { key?: unknown }).key, name), value: encodeDuckdb(type.value, (e as { value?: unknown }).value, name) } : e));}
   if (type.kind === "struct" && hasObjectType(v) && !Array.isArray(v)) {
     const out: Record<string, unknown> = { ...(v as Record<string, unknown>) };
@@ -278,8 +278,8 @@ export function duckdbInterval(text: string): string {
   const negate = regexMatch[1] === "-";
   const units = ["years", "months", "weeks", "days", "hours", "minutes", "seconds"];
   const parts: string[] = [];
-  units.forEach((unit, i) => {
-    const value = regexMatch[i + 2];
+  units.forEach((unit, index) => {
+    const value = regexMatch[index + 2];
     if (matchesUndefined(value)) {return;}
     const number = value.replace(",", ".");
     parts.push(`${negate ? (number.startsWith("-") ? number.slice(1) : `-${number.replace(/^\+/u, "")}`) : number} ${unit}`);
@@ -397,9 +397,9 @@ function decode(v: unknown, t: DuckType, column: string): unknown {
     }
     case T.STRUCT: {
       // A tuple, a struct whose fields have no names, is its values in order.
-      if (Array.isArray(o.items)) {return (o.items as unknown[]).map((currentItem, i) => decode(currentItem, t.entryTypes![i]!, column));}
+      if (Array.isArray(o.items)) {return (o.items as unknown[]).map((currentItem, index) => decode(currentItem, t.entryTypes![index]!, column));}
       const out: Record<string, unknown> = {};
-      t.entryNames!.forEach((name, i) => (out[name] = decode(o.entries[name], t.entryTypes![i]!, column)));
+      t.entryNames!.forEach((name, index) => (out[name] = decode(o.entries[name], t.entryTypes![index]!, column)));
       return out;
     }
     case T.MAP: {

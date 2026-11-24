@@ -301,11 +301,11 @@ async function pglite(db: AnyClient, text: string, values: unknown[], columns: C
   const fields: Field[] = (result.fields ?? []).map((f: { name: string; dataTypeID: number }) => ({ name: f.name, oid: f.dataTypeID }));
   // Created types, which the table kept as text, and an oid the table did not name, which went
   // Through the instance's parser.
-  const after = fields.map((field, i) => [field, i] as const).filter(([f]) => f.oid >= FIRST_USER_OID || !oids.has(f.oid));
+  const after = fields.map((field, index) => [field, index] as const).filter(([f]) => f.oid >= FIRST_USER_OID || !oids.has(f.oid));
   if (after.length) {
     const load: Load = async (sql) => (await db.query(sql, [], { rowMode: "array", parsers: { 25: keepText } })).rows;
     const decoders = await fieldDecoders(fields, columns, db, load);
-    const kinds = fields.map((field, i) => (columns && columns.length === fields.length ? columns[i]![1] : (builtin(field.oid)?.kind ?? learnedOf(db).get(field.oid)?.kind ?? "text")));
+    const kinds = fields.map((field, index) => (columns && columns.length === fields.length ? columns[index]![1] : (builtin(field.oid)?.kind ?? learnedOf(db).get(field.oid)?.kind ?? "text")));
     Iterator.from(after).forEach(([f, i]) => {
       const decode = decoders[i]!;
       for (const row of rows) {

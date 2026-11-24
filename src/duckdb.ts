@@ -86,8 +86,8 @@ const logical = function (api: NodeApi, t: NodeType): DuckdbType {
   if (t.keyType && t.valueType) {return Object.assign(out, { key: logical(api, t.keyType), value: logical(api, t.valueType) });}
   if (t.valueType) {out.child = logical(api, t.valueType);}
   if (!matchesUndefined(t.length) && out.id === "ARRAY") {out.size = t.length;}
-  if (t.entryNames && t.entryTypes) {out.fields = t.entryNames.map((name, i) => ({ name, type: logical(api, t.entryTypes![i]!) }));}
-  if (t.memberTags && t.memberTypes) {out.fields = t.memberTags.map((name, i) => ({ name, type: logical(api, t.memberTypes![i]!) }));}
+  if (t.entryNames && t.entryTypes) {out.fields = t.entryNames.map((name, index) => ({ name, type: logical(api, t.entryTypes![index]!) }));}
+  if (t.memberTags && t.memberTypes) {out.fields = t.memberTags.map((name, index) => ({ name, type: logical(api, t.memberTypes![index]!) }));}
   if (t.values) {out.values = [...t.values];}
   return out;
 };

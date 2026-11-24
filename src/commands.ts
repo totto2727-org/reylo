@@ -84,12 +84,12 @@ const NOT_A_QUERY = /^A typed \.sql file holds one statement and this one holds 
 
 const generate = async function (args: string[]): Promise<number> {
   const force = args.includes("--force");
-  const unknown = args.filter((a) => a.startsWith("-") && a !== "--force");
+  const unknown = args.filter((argument) => argument.startsWith("-") && argument !== "--force");
   if (unknown.length) {
     console.error(`reylo generate: unknown option ${unknown.join(", ")}\n\n${USAGE}`);
     return 2;
   }
-  const paths = args.filter((a) => !a.startsWith("-"));
+  const paths = args.filter((argument) => !argument.startsWith("-"));
   const started = performance.now();
 
   // A file named on the command line is analyzed as named; a directory is searched.
@@ -166,16 +166,16 @@ const generate = async function (args: string[]): Promise<number> {
         continue;
       }
       const { diagnostics } = outcome.analysis;
-      if (diagnostics.some((d) => NOT_A_QUERY.test(d.message))) {
+      if (diagnostics.some((diagnostic) => NOT_A_QUERY.test(diagnostic.message))) {
         skipped.push(file);
         continue;
       }
       if (diagnostics.length) {
-        fail(...diagnostics.flatMap((d) => {
-          const { at, frame } = located(sql, d.start, d.length);
+        fail(...diagnostics.flatMap((diagnostic) => {
+          const { at, frame } = located(sql, diagnostic.start, diagnostic.length);
           // An error that spans the whole statement has no place in it (SQLite names none).
-          const whole = d.start === 0 && d.length >= Buffer.byteLength(sql.trimEnd());
-          return [`${paint("bold", `${shown(file)}:${at}`)}: ${d.message}`, ...(whole ? [] : frame)];
+          const whole = diagnostic.start === 0 && diagnostic.length >= Buffer.byteLength(sql.trimEnd());
+          return [`${paint("bold", `${shown(file)}:${at}`)}: ${diagnostic.message}`, ...(whole ? [] : frame)];
         }));
         continue;
       }

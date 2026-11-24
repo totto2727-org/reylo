@@ -129,5 +129,5 @@ test("PGHOST names the socket's directory where the URL names no host, as libpq 
   assert.equal((await hostUrl("postgres://u@db/d", { PGHOST: "/var/run/postgresql" })).bridge, undefined);
   assert.equal((await hostUrl("postgres://u@/d", { PGHOST: "db.internal" })).bridge, undefined);
   // Node opens no Unix socket on Windows, so the URL is refused with what to write instead.
-  await assert.rejects(hostUrl("postgres://u@/d?host=/var/run/postgresql", {}, "win32"), (e: Error) => e instanceof Unreachable && /names the Unix socket \/var\/run\/postgresql\/\.s\.PGSQL\.5432, which Node cannot open on Windows: name the server's host and port/u.test(e.message));
+  await assert.rejects(hostUrl("postgres://u@/d?host=/var/run/postgresql", {}, "win32"), (error: Error) => error instanceof Unreachable && /names the Unix socket \/var\/run\/postgresql\/\.s\.PGSQL\.5432, which Node cannot open on Windows: name the server's host and port/u.test(error.message));
 });

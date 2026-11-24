@@ -54,7 +54,7 @@ export function parseType(text: string): Node {
     const members: { key: string; type: Node }[] = [];
     while (peek() !== "}") {
       // Its text, one line per line of the comment, without the comment's own indentation.
-      const doc = peek()?.startsWith("/**") ? take().split("\n").map((line, i) => (i ? ` ${line.trim()}` : line.trim())).join("\n") : undefined;
+      const doc = peek()?.startsWith("/**") ? take().split("\n").map((line, index) => (index ? ` ${line.trim()}` : line.trim())).join("\n") : undefined;
       let key: string;
       if (peek() === "[") {
         // An index signature, `[key: string]: unknown`.
@@ -123,8 +123,8 @@ const print = function (node: Node, indent: number, lead: number, width: number,
     case "union": {
       let line = lead;
       return node.of
-        .map((n, i) => {
-          const tail = i < node.of.length - 1 ? 3 + flat({ kind: "union", of: node.of.slice(i + 1) }).length + reserve : reserve;
+        .map((n, index) => {
+          const tail = index < node.of.length - 1 ? 3 + flat({ kind: "union", of: node.of.slice(index + 1) }).length + reserve : reserve;
           const text = print(n, indent, line, width, tail);
           const last = text.split("\n").at(-1)!;
           line = (text.includes("\n") ? last.length : line + last.length) + 3;

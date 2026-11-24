@@ -71,7 +71,7 @@ function nameSuggestion(given: string, suggestions: string[]): string {
   const chars = [...given];
   for (const suggestion of suggestions) {
     const candidate = [...suggestion];
-    let row = candidate.map((_, i) => i + 1); row.unshift(0);
+    let row = candidate.map((_, index) => index + 1); row.unshift(0);
     for (let i = 0; i < chars.length; i++) {
       const next = [i + 1];
       for (let j = 0; j < candidate.length; j++) {next.push(Math.min(next[j]! + 1, row[j + 1]! + 1, row[j]! + (chars[i] === candidate[j] ? 0 : 1)));}

@@ -160,7 +160,7 @@ function kindType(kind: string, m: Record<string, unknown>, input = false): stri
       const rest = matchesUndefined(m.items) ? JSON_TYPE : schemaType_(m.items);
       if (!prefix.length) {return rest === "never" ? "[]" : `${grouped(rest)}[]`;}
       const min = matchesNumber(m.minItems) ? m.minItems : 0;
-      const items = prefix.map((item, i) => (i < min ? item : `${grouped(item)}?`));
+      const items = prefix.map((item, index) => (index < min ? item : `${grouped(item)}?`));
       if (rest !== "never") {items.push(`...${grouped(rest)}[]`);}
       return `[${items.join(", ")}]`;
     }
@@ -200,7 +200,7 @@ function grouped(ts: string): string {
  * of one name, and so does `JSON.parse` of two keys of one name. The engine reports the columns.
  */
 export function lastOfEachName<T extends { name: string }>(items: Readonly<T[]>): T[] {
-  return items.filter((item, i) => !items.slice(i + 1).some((later) => later.name === item.name));
+  return items.filter((item, index) => !items.slice(index + 1).some((later) => later.name === item.name));
 }
 
 /** An object type of JSON-encoded fields, each nullable as the engine says. */

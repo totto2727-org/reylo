@@ -564,7 +564,7 @@ const sha256 = (text: string): string => createHash("sha256").update(text).diges
 const NS = `not (n.nspname operator(pg_catalog.=) any ('{pg_catalog,information_schema}'::pg_catalog.name[])) and n.nspname operator(pg_catalog.!~) '^pg_(toast|temp)'::pg_catalog.text`;
 const cat = (...parts: string[]): string => parts.join(" operator(pg_catalog.||) ");
 const lit = (s: string): string => `'${s}'::pg_catalog.text`;
-const line = (tag: string, ...fields: string[]): string => cat(lit(`${tag} `), ...fields.flatMap((field, i) => (i ? [lit(" "), field] : [field])));
+const line = (tag: string, ...fields: string[]): string => cat(lit(`${tag} `), ...fields.flatMap((field, index) => (index ? [lit(" "), field] : [field])));
 const out = (type: string, value: string): string => `pg_catalog.textin(pg_catalog.${type}out(${value}))`;
 const txt = (value: string): string => `${value}::pg_catalog.text`;
 const md5 = (value: string): string => `pg_catalog.md5(${value})`;

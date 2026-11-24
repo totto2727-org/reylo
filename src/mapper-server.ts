@@ -153,7 +153,7 @@ export function mapperHandlers(): MapperHandlers {
       // The types, the diagnostics the analysis gives and the untyped parameters' are one function
       // The docs site's playground shares (src/module-types.ts).
       const types = moduleTypes(sql, analysis, dialect, lexed, project.strictParams, project.projectFile);
-      diagnostics.push(...types.diagnostics.map((d) => diag(size, d.message, d.start, d.length, d.code)));
+      diagnostics.push(...types.diagnostics.map((diagnostic) => diag(size, diagnostic.message, diagnostic.start, diagnostic.length, diagnostic.code)));
       // The compiled statement, without the comment naming its file, which the run time adds where
       // It sends the statement (src/sqlcommenter.ts).
       return emit(analysis.rewritten.sql.trimEnd(), types.params, types.row, types.cardinality, types.names, types.queryError);

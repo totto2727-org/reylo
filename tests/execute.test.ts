@@ -241,7 +241,7 @@ test("a Date for any date or time parameter, and a string without its zone for a
   const ok = { at: "2026-10-12 19:06:48.282", day: "2026-10-12", tz: "1970-01-01T00:00:00Z", tzs: ["2026-10-12T19:06:48.282Z", "2026-10-12 19:06:48+09", "2026-10-12 19:06:48.5-07:30", "2026-10-12 19:06 America/Los_Angeles", "2026-10-12 19:06:48 UTC", "infinity", "-infinity", "0001-01-01 00:00:00+00 BC", "+010000-01-01T00:00:00Z"], days: [["2026-10-12"]] };
   await execute(client, q, ok);
   assert.equal(seen.length, 1);
-  const refused = async (values: Record<string, unknown>, message: RegExp): Promise<void> => assert.rejects(Promise.resolve().then(() => execute(client, q, { ...ok, ...values })), (e: Error) => e instanceof TypeError && message.test(e.message));
+  const refused = async (values: Record<string, unknown>, message: RegExp): Promise<void> => assert.rejects(Promise.resolve().then(() => execute(client, q, { ...ok, ...values })), (error: Error) => error instanceof TypeError && message.test(error.message));
   await refused({ at: nativeDriverDate() }, /^Parameter "at" is a timestamp without a time zone, so it takes the wall-clock text/u);
   await refused({ day: nativeDriverDate() }, /^Parameter "day" is a date without a time zone/u);
   await refused({ days: [[nativeDriverDate()]] }, /^Parameter "days" is a date/u);
@@ -455,7 +455,7 @@ test("mysql: mariadb's callback API answers through the callback, and its errors
     query: (options: { sql: string }, values: unknown[], done: (e: Error | null, rows?: unknown) => void) => (setImmediate(() => (options.sql.startsWith("insert") ? done(failure) : done(null, [{ values }]))), { on() {} }),
   };
   assert.deepEqual(await execute(conn as never, my, { id: 1, name: "ada" }), [{ values: [1, "ada", 1] }]);
-  await assert.rejects(() => execute(conn as never, { dialect: "mysql", sql: "insert into t values (:a)", params: ["a"] }, { a: 1 }) as Promise<unknown>, (e) => e === failure);
+  await assert.rejects(() => execute(conn as never, { dialect: "mysql", sql: "insert into t values (:a)", params: ["a"] }, { a: 1 }) as Promise<unknown>, (error) => error === failure);
 });
 
 // A plain Uint8Array (TextEncoder's, getRandomValues') and a view into a larger buffer, neither a Buffer.
@@ -520,7 +520,7 @@ test("a binary parameter takes binary data alone, so base64 text is refused befo
   await execute(client, q, { b: Buffer.from([1]), bs: [plain] });
   await execute(client, q, { b: null, bs: null });
   assert.equal(seen.length, 2);
-  const refused = async (run: () => unknown, message: RegExp): Promise<void> => assert.rejects(Promise.resolve().then(run), (e: Error) => e instanceof TypeError && message.test(e.message));
+  const refused = async (run: () => unknown, message: RegExp): Promise<void> => assert.rejects(Promise.resolve().then(run), (error: Error) => error instanceof TypeError && message.test(error.message));
   await refused(() => execute(client, q, { b: "AQL/", bs: [] }), /^Parameter "b" is binary data, so it takes a Uint8Array \(a Buffer is one\), as `\.run\(\)` returns one; got "AQL\/"\. Decode base64 or hex text into one first\.$/u);
   await refused(() => execute(client, q, { b: plain, bs: [plain, String.raw`\x01`] }), /^Parameter "bs" is binary data, .*got "\\\\x01"/);
   await refused(() => execute(client, q, { b: plain.buffer, bs: [] }), /^Parameter "b" is binary data, .*got an object\. Wrap an ArrayBuffer in one: new Uint8Array\(buffer\)\.$/);
@@ -544,7 +544,7 @@ test("mysql: PlanetScale 2.0, which binds no parameters, runs a statement withou
     },
   };
   assert.deepEqual(await execute(conn, { dialect: "mysql", sql: "select 1", params: [] }), [row]);
-  await assert.rejects(() => execute(conn, my, { id: 1, name: "ada" }) as Promise<unknown>, (e: TypeError) => e instanceof TypeError && /2\.0 binds no parameters/u.test(e.message) && /not supported/u.test((e.cause as Error).message));
+  await assert.rejects(() => execute(conn, my, { id: 1, name: "ada" }) as Promise<unknown>, (error: TypeError) => error instanceof TypeError && /2\.0 binds no parameters/u.test(error.message) && /not supported/u.test((error.cause as Error).message));
   // 1.x's form first, then 2.0's, with Reylo's cast either way.
   assert.deepEqual(calls[0]!.slice(0, 2), ["select 1", null]);
   assert.deepEqual([calls[1]![0], Object.keys(calls[1]![1] as object)], ["select 1", ["as", "cast"]]);
@@ -696,7 +696,7 @@ test("sqlite: sqlite3's callback all(), its errors, and the sqlite package's pro
     all: (sql: string, values: unknown[], done: (e: Error | null, rows: unknown[]) => void) => setImmediate(() => (sql.includes("selec ") ? done(failure, []) : done(null, [{ values }]))),
   };
   assert.deepEqual(await execute(sqlite3, lite, { id: 1, name: "ada" }), [{ values: [1, "ada", 1] }]);
-  await assert.rejects(() => execute(sqlite3, { dialect: "sqlite", sql: "selec 1", params: [] }) as Promise<unknown>, (e) => e === failure);
+  await assert.rejects(() => execute(sqlite3, { dialect: "sqlite", sql: "selec 1", params: [] }) as Promise<unknown>, (error) => error === failure);
   const wrapper = { getDatabaseInstance: () => sqlite3, prepare: promiseDriverStub(() => ({})), all: promiseDriverStub((_: string, values: unknown[]) => [{ values }]) };
   assert.deepEqual(await execute(wrapper, lite, { id: 2, name: "bo" }), [{ values: [2, "bo", 2] }]);
 });
@@ -709,14 +709,14 @@ test("sqlite: Bun.sql's SQLite adapter, which has unsafe() and no prepare()", as
 // oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
 test("the driver's own error comes through unchanged", async () => {
   const duplicate = Object.assign(new Error("duplicate key value violates unique constraint"), { code: "23505" });
-  await assert.rejects(() => execute({ query: async () => { throw duplicate; } }, pg, { id: 1 }) as Promise<unknown>, (e) => e === duplicate);
+  await assert.rejects(() => execute({ query: async () => { throw duplicate; } }, pg, { id: 1 }) as Promise<unknown>, (error) => error === duplicate);
   const db = new DatabaseSync(":memory:");
   assert.throws(() => execute(db, { dialect: "sqlite", sql: "selec 1", params: [] }), /syntax error/u);
 });
 
 // oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
 test("an unsupported client rejects, naming what it has and what reylo takes", async () => {
-  await assert.rejects(() => execute({ connect() {}, end() {} } as never, pg) as Promise<unknown>, (e: TypeError) => e instanceof TypeError && /postgres statement on an object with connect, end\. It takes a client with query\(text, values\)/u.test(e.message));
+  await assert.rejects(() => execute({ connect() {}, end() {} } as never, pg) as Promise<unknown>, (error: TypeError) => error instanceof TypeError && /postgres statement on an object with connect, end\. It takes a client with query\(text, values\)/u.test(error.message));
   // An object with Drizzle's select() but no session over a client is no Drizzle database.
   await assert.rejects(() => execute({ $client: {}, select() {} } as never, pg) as Promise<unknown>, /object with select\. .*or a Drizzle database over one of them\./);
   // Kysely and Prisma decode their values themselves, so each is told to pass the driver's client.
@@ -930,15 +930,15 @@ test("a query's source names its file, and Reylo's own errors about the query st
   // A column's value Reylo cannot give its kind.
   const truth = defineQuery<{}, unknown, "many", "sqlite">({ dialect: "sqlite", sql: "select 2 as b", params: [], columns: [["b", "bool"]], source: "truth.sql" });
   // oxlint-disable-next-line rules/no-effect-runtime-run -- This test exercises Reylo's native synchronous query API, which does not run Effect.
-  assert.throws(() => truth.runSync(db), (e: Error) => e instanceof TypeError && e.message.startsWith('truth.sql: Column "b" is a boolean'));
-  await assert.rejects(truth.run(db), (e: Error) => e.message.startsWith('truth.sql: Column "b" is a boolean'));
+  assert.throws(() => truth.runSync(db), (error: Error) => error instanceof TypeError && error.message.startsWith('truth.sql: Column "b" is a boolean'));
+  await assert.rejects(truth.run(db), (error: Error) => error.message.startsWith('truth.sql: Column "b" is a boolean'));
   // The driver's own error passes through as it is.
   const insert = defineQuery<{ email: string }, unknown, "none", "sqlite">({ dialect: "sqlite", sql: "insert into users (email) values (:email)", params: ["email"], cardinality: "none", source: "insert.sql" });
   // oxlint-disable-next-line rules/no-effect-runtime-run -- This test exercises Reylo's native synchronous query API, which does not run Effect.
   insert.runSync(db, { email: "ada@example.com" });
   // oxlint-disable-next-line rules/no-effect-runtime-run -- This test exercises Reylo's native synchronous query API, which does not run Effect.
-  assert.throws(() => insert.runSync(db, { email: "ada@example.com" }), (e: Error) => e.message.startsWith('UNIQUE constraint failed'));
-  await assert.rejects(insert.run(db, { email: "ada@example.com" }), (e: Error) => e.message.startsWith('UNIQUE constraint failed'));
+  assert.throws(() => insert.runSync(db, { email: "ada@example.com" }), (error: Error) => error.message.startsWith('UNIQUE constraint failed'));
+  await assert.rejects(insert.run(db, { email: "ada@example.com" }), (error: Error) => error.message.startsWith('UNIQUE constraint failed'));
   // A query defined by hand, with no file, keeps its messages as they are.
   const bare = defineQuery<{}, unknown, "one", "sqlite">({ dialect: "sqlite", sql: "select 1 where 0", params: [], cardinality: "one" });
   assert.equal(bare.source, undefined);

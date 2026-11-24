@@ -643,7 +643,7 @@ const isBytes = (v: unknown): v is Uint8Array => v instanceof Uint8Array;
 export function float32s(bytes: Uint8Array, column: string): number[] {
   if (bytes.byteLength % 4 !== 0) {throw new DecodeError(`Column "${column}" is a VECTOR, whose value is 4 bytes per 32-bit float, and holds ${bytes.byteLength} bytes.`);}
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
-  return Array.from({ length: bytes.byteLength / 4 }, (_, i) => view.getFloat32(i * 4, true));
+  return Array.from({ length: bytes.byteLength / 4 }, (_unused, index) => view.getFloat32(index * 4, true));
 }
 
 /**

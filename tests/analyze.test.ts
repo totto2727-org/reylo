@@ -103,7 +103,7 @@ test("two databases the project uses in turn keep an entry each, so neither anal
   // The time it records, which a copy that resets the files' times (cp -r, fs.cpSync) keeps.
   Iterator.from(["app.db", "test.db"]).forEach((f) => {renameSync(join(root, f), join(root, `${f}.gone`));});
   const queries = join(root, ".reylo", "queries");
-  const [older, newer] = readdirSync(queries).map((n) => join(queries, n)).sort((a, b) => JSON.parse(readFileSync(a, "utf8")).at - JSON.parse(readFileSync(b, "utf8")).at);
+  const [older, newer] = readdirSync(queries).map((n) => join(queries, n)).sort((left, right) => JSON.parse(readFileSync(left, "utf8")).at - JSON.parse(readFileSync(right, "utf8")).at);
   utimesSync(newer!, new Date(2000, 0, 1), new Date(2000, 0, 1));
   utimesSync(older!, new Date(), new Date());
   const offline = await analyze(root, { DATABASE_URL: "file:./elsewhere.db" }, "select * from users");
@@ -203,7 +203,7 @@ test("one statement of another kind is a command: DDL resolves to nothing and ru
   // A CREATE of a table the database has is SQLite's error, with how to leave a migration out.
   const existing = await analyze(root, env, "create table users (id integer primary key)");
   assert.ok(existing.ok);
-  assert.deepEqual(existing.analysis.diagnostics.map((d) => [d.code, d.message]), [[6, 'table users already exists, so if it is a migration or a schema file, leave it out of the type check with "exclude" in tsconfig.json, as in "exclude": ["db/**"].']]);
+  assert.deepEqual(existing.analysis.diagnostics.map((diagnostic) => [diagnostic.code, diagnostic.message]), [[6, 'table users already exists, so if it is a migration or a schema file, leave it out of the type check with "exclude" in tsconfig.json, as in "exclude": ["db/**"].']]);
 });
 
 // oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
@@ -232,7 +232,7 @@ test("a parameter written twice is an error at each later use, which the type ch
     assert.ok(outcome.ok);
     // Byte offsets, as the content mapper hands them to the type check: the second and third :q.
     const second = twice.indexOf(":q or id");
-    assert.deepEqual(outcome.analysis.diagnostics.map((d) => [d.code, d.start, d.length]), [[3, second, 2], [3, twice.lastIndexOf(":q"), 2]]);
+    assert.deepEqual(outcome.analysis.diagnostics.map((diagnostic) => [diagnostic.code, diagnostic.start, diagnostic.length]), [[3, second, 2], [3, twice.lastIndexOf(":q"), 2]]);
     assert.equal(outcome.analysis.diagnostics[0]!.message, "The parameter :q appears more than once; use each parameter once, and select it in a with to read it twice, cast to its type, as in: with input as (select :q::<type> as q) select … from input");
     const file = join(root, "search.sql");
     await writeFile(file, twice);
@@ -241,7 +241,7 @@ test("a parameter written twice is an error at each later use, which the type ch
     for (const sql of ["select id from users where name = @q or name = @q", "select id from users where id = ?1 or id = ?1", "select id from users where id = ? or id = ?1"]) {
       const refused = await session.analyze(sql);
       assert.ok(refused.ok);
-      assert.deepEqual(refused.analysis.diagnostics.map((d) => d.code), [3], sql);
+      assert.deepEqual(refused.analysis.diagnostics.map((diagnostic) => diagnostic.code), [3], sql);
     }
     const bare = await session.analyze("select id from users where id = ? or id = ?");
     assert.ok(bare.ok);
@@ -270,7 +270,7 @@ test("a parameter as a whole sort key is an error the type check places, and a b
     const session = await Session.for(root);
     const outcome = await session.analyze(sql);
     assert.ok(outcome.ok);
-    assert.deepEqual(outcome.analysis.diagnostics.map((d) => [d.code, d.start, d.length]), [[17, sql.indexOf(":sort"), 5]]);
+    assert.deepEqual(outcome.analysis.diagnostics.map((diagnostic) => [diagnostic.code, diagnostic.start, diagnostic.length]), [[17, sql.indexOf(":sort"), 5]]);
     assert.deepEqual(outcome.analysis.columns.map((column) => column.name), ["id", "name"]);
     // As an ON CONFLICT target no key matches, the error is the type check's: the module is built.
     const file = join(root, "sorted.sql");

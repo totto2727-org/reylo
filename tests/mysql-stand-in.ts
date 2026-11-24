@@ -31,7 +31,7 @@ const scrambled = function (password: string, salt: Buffer): Buffer {
   if (password === "") {return Buffer.alloc(0);}
   const once = sha1(Buffer.from(password));
   const mask = sha1(salt, sha1(once));
-  return Buffer.from(once.map((b, i) => b ^ mask[i]!));
+  return Buffer.from(once.map((b, index) => b ^ mask[index]!));
 };
 
 const lenenc = function (n: number): Buffer {
@@ -71,7 +71,7 @@ export async function mysqlStandIn(options: { version: string; accepts?: () => s
     };
     const resultSet = (name: string, value: string): void => {
       const column = Buffer.concat([str("def"), str(""), str(""), str(""), str(name), str(""), Buffer.from([0x0C]), u16(33), Buffer.from([255, 0, 0, 0, 0xFD]), u16(0), Buffer.from([0x1F, 0, 0])]);
-      [Buffer.from([1]), column, EOF, str(value), EOF].forEach((payload, i) => send(i + 1, payload));
+      [Buffer.from([1]), column, EOF, str(value), EOF].forEach((payload, index) => send(index + 1, payload));
     };
     socket.on("close", () => {
       sockets.delete(socket);

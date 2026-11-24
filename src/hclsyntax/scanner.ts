@@ -31,7 +31,7 @@ const lfLength = 1;
 const crlfLength = 2;
 
 function equalBytes(a: Uint8Array, b: Uint8Array): boolean {
-  return a.length === b.length && a.every((v, i) => v === b[i]);
+  return a.length === b.length && a.every((v, index) => v === b[index]);
 }
 // Bytes.TrimSpace uses Unicode White_Space, which deliberately excludes BOM.
 function trimSpace(data: Uint8Array): Uint8Array {

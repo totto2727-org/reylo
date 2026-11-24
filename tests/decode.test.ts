@@ -148,8 +148,8 @@ const pgClient = function (db: Db, options: { binary?: boolean } = {}) {
       const answer = db.answer(c.text);
       const parsers = answer.fields.map((field) => types.getTypeParser(field.dataTypeID, client.binary ? "binary" : "text"));
       const rows = answer.raw.map((raw) => {
-        const values = raw.map((v, i) => (v === null ? null : parsers[i]!(v)));
-        return c.rowMode === "array" ? values : Object.fromEntries(answer.fields.map((field, i) => [field.name, values[i]]));
+        const values = raw.map((v, index) => (v === null ? null : parsers[index]!(v)));
+        return c.rowMode === "array" ? values : Object.fromEntries(answer.fields.map((field, index) => [field.name, values[index]]));
       });
       return { fields: answer.fields, rows };
     },
@@ -296,7 +296,7 @@ test("pg-promise: result({ text, values, types }) on the database, a task and a 
   same(row, declared);
   assert.deepEqual(Object.keys(calls.at(-1) as object), ["text", "values", "types"]);
   // On the database the receive event can be read: refused before anything runs.
-  const camel = (e: { data: Record<string, unknown>[] }): void => e.data.forEach((r) => Object.keys(r).forEach((k) => ((r[k.toUpperCase()] = r[k]), delete r[k])));
+  const camel = (e: { data: Record<string, unknown>[] }): void => e.data.forEach((r) => Object.keys(r).forEach((key) => ((r[key.toUpperCase()] = r[key]), delete r[key])));
   const withReceive = Object.assign(make(camel), { $config: { options: { receive: camel } } });
   const before = calls.length;
   await assert.rejects(execute(withReceive as never, built, { id: 1 }) as Promise<unknown>, /receive event rewrites every result/u);
@@ -317,8 +317,8 @@ const pglite = function (db: Db, instance: Record<number, Parser> | undefined) {
       const answer = db.answer(text);
       const parsers = { ...instance, ...options?.parsers };
       const rows = answer.raw.map((raw) => {
-        const values = raw.map((v, i) => (v === null ? null : (parsers[answer.fields[i]!.dataTypeID] ? parsers[answer.fields[i]!.dataTypeID]!(v) : v)));
-        return options?.rowMode === "array" ? values : Object.fromEntries(answer.fields.map((field, i) => [field.name, values[i]]));
+        const values = raw.map((v, index) => (v === null ? null : (parsers[answer.fields[index]!.dataTypeID] ? parsers[answer.fields[index]!.dataTypeID]!(v) : v)));
+        return options?.rowMode === "array" ? values : Object.fromEntries(answer.fields.map((field, index) => [field.name, values[index]]));
       });
       return { fields: answer.fields, rows };
     },
@@ -338,7 +338,7 @@ test("PGlite: per-query parsers that name the statement's oids, every oid the in
   const first = Object.keys(lite.seen[0]!).map(Number);
   assert.ok(first.includes(20) && first.includes(1082) && first.includes(POSINT_ARR) && first.includes(ROLE), "a first run names every oid the instance parses");
   await execute(lite as never, q, { id: 1 });
-  assert.deepEqual(Object.keys(lite.seen[1]!).map(Number).sort(), COLUMNS.map(([, oid]) => oid).filter((o, i, all) => all.indexOf(o) === i).sort(), "a later run names only the statement's oids");
+  assert.deepEqual(Object.keys(lite.seen[1]!).map(Number).sort(), COLUMNS.map(([, oid]) => oid).filter((o, index, all) => all.indexOf(o) === index).sort(), "a later run names only the statement's oids");
   // A transaction exposes no table; what it does not name went through the instance's parser, and is decoded from what it gave.
   const [inTx] = (await execute(pglite(db, undefined) as never, { ...built, sql: "select * from probe where id = :id -- tx" }, { id: 1 })) as Record<string, unknown>[];
   same(inTx, declared);

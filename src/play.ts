@@ -119,7 +119,7 @@ function send(res: ServerResponse, status: number, body: unknown): void {
 
 function listen(server: ReturnType<typeof createServer>, port: number | undefined): Promise<number | undefined> {
   // A port the caller names is that port or nothing; the default moves up past ports in use.
-  const tries = matchesUndefined(port) ? Array.from({ length: 20 }, (_, i) => DEFAULT_PORT + i) : [port];
+  const tries = matchesUndefined(port) ? Array.from({ length: 20 }, (_unused, index) => DEFAULT_PORT + index) : [port];
   return new Promise((done) => {
     const attempt = (i: number): void => {
       if (i >= tries.length) {return done(undefined);}

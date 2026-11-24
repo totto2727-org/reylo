@@ -26,8 +26,8 @@ function link(root: string, driver: string): void {
 
 const project = function (drivers: string[]): { root: string; env: Record<string, string> } {
   const root = mkdtempSync(join(tmpdir(), "reylo-drivers-"));
-  writeFileSync(join(root, "package.json"), JSON.stringify({ dependencies: Object.fromEntries(drivers.map((d) => [d, "*"])) }));
-  Iterator.from(drivers).forEach((d) => {link(root, d);});
+  writeFileSync(join(root, "package.json"), JSON.stringify({ dependencies: Object.fromEntries(drivers.map((driver) => [driver, "*"])) }));
+  Iterator.from(drivers).forEach((driver) => {link(root, driver);});
   const db = new DatabaseSync(join(root, "app.db"));
   db.exec("create table notes (id integer primary key, body text not null, meta text)");
   db.close();

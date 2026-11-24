@@ -88,7 +88,7 @@ export function lexPlaceholders(sql: string, dialect: "postgres" | "mysql" | "sq
     i += 1;
   }
   // Positional parameters bind by number, whatever order they appear in.
-  if (params.length && params.every(isPositional)) {params.sort((a, b) => Number(a) - Number(b));}
+  if (params.length && params.every(isPositional)) {params.sort((left, right) => Number(left) - Number(right));}
   return { params, placeholders };
 }
 

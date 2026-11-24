@@ -13,7 +13,7 @@ import { Session } from "../src/analyze.ts";
 
 // The embedded SQLite reads an expression 350 deep, where SQLite's own bound is 1,000.
 const nested = function (shape: string, n: number): string {
-  const fold = (start: string, f: (s: string, i: number) => string): string => Array.from({ length: n }, (_, i) => i).reduce(f, start);
+  const fold = (start: string, f: (s: string, i: number) => string): string => Array.from({ length: n }, (_unused, index) => index).reduce(f, start);
   switch (shape) {
     case "sum": { return `select ${Array(n).fill("id").join(" + ")} as x from users`; }
     case "concat": { return `select ${Array(n).fill("name").join(" || ")} as x from users`; }
@@ -22,7 +22,7 @@ const nested = function (shape: string, n: number): string {
     case "coalesce": { return `select ${fold("nick", (s) => `coalesce(${s}, name)`)} as x from users`; }
     case "json": { return `select ${fold("id", (s) => `json_build_object('a', ${s})`)} as x from users`; }
     case "subquery": { return `select (${fold("select 1", (s) => `select (${s})`)}) as x from users`; }
-    case "or": { return `select id from users where ${Array.from({ length: n }, (_, i) => `id = ${i}`).join(" or ")}`; }
+    case "or": { return `select id from users where ${Array.from({ length: n }, (_unused, index) => `id = ${index}`).join(" or ")}`; }
     case "parens": { return `select ${"(".repeat(n)}id${")".repeat(n)} as x from users`; }
   }
   throw new Error(`no shape ${shape}`);
@@ -74,7 +74,7 @@ test("a SQLite statement nested to the engine's bound is typed, and one level pa
       assert.ok(at.ok && at.analysis.kind === "select" && at.analysis.diagnostics.length === 0, `${shape} at ${n}: ${JSON.stringify(at).slice(0, 300)}`);
       const past = await session.analyze(nested(shape, n + 1), { force: true });
       assert.ok(past.ok, `${shape} at ${n + 1}`);
-      assert.deepEqual(past.ok && past.analysis.diagnostics.map((d) => d.message), ["Expression tree is too large (maximum depth 350)"], `${shape} at ${n + 1}`);
+      assert.deepEqual(past.ok && past.analysis.diagnostics.map((diagnostic) => diagnostic.message), ["Expression tree is too large (maximum depth 350)"], `${shape} at ${n + 1}`);
     }
     const plain = await session.analyze("select id, name from users where id = :id", { force: true });
     assert.ok(plain.ok && plain.analysis.cardinality === "maybeOne");

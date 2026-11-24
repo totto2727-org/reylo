@@ -75,7 +75,7 @@ export function fieldComment(comment: string | undefined, indent = ""): string {
 const objectType = function (fields: (Readonly<[text: string, comment: string | undefined]>)[]): string {
   const docs = fields.map(([, comment]) => fieldComment(comment, "  "));
   if (!docs.some(Boolean)) {return `{ ${fields.map(([text]) => text).join("; ")} }`;}
-  return `{\n${fields.map(([text], i) => `${docs[i] ? `  ${docs[i]}\n` : ""}  ${text};`).join("\n")}\n}`;
+  return `{\n${fields.map(([text], index) => `${docs[index] ? `  ${docs[index]}\n` : ""}  ${text};`).join("\n")}\n}`;
 };
 
 const utf8 = new TextEncoder();
@@ -104,9 +104,9 @@ export function moduleTypes(sql: string, analysis: Analysis, dialect: Dialect, l
   // Lexer alone does not know: the placeholders are the ones the analysis read.
   if (dialect === "mysql") {
     names = analysis.params.map((parameter) => parameter.name);
-    placeholders = analysis.rewritten.spans.map(([start, end], k) => ({ name: analysis.rewritten.order[k]!, start, end }));
+    placeholders = analysis.rewritten.spans.map(([start, end], index) => ({ name: analysis.rewritten.order[index]!, start, end }));
   }
-  const diagnostics: FileDiagnostic[] = analysis.diagnostics.map((d) => ({ message: d.message, start: d.start, length: d.length, code: d.code }));
+  const diagnostics: FileDiagnostic[] = analysis.diagnostics.map((diagnostic) => ({ message: diagnostic.message, start: diagnostic.start, length: diagnostic.length, code: diagnostic.code }));
   // A parameter nothing in the statement types is an error at its first use, unless the project
   // File says `strict_params: false` (the default is true since 2026-10-20). A statement the engine
   // Already refused (a parameter written twice, an error from the server) was not analysed to its
@@ -126,7 +126,7 @@ export function moduleTypes(sql: string, analysis: Analysis, dialect: Dialect, l
     });
   }
   const {cardinality} = analysis;
-  if (analysis.diagnostics.some((d) => d.code === 6) || (dialect === "postgres" && analysis.kind === "")) {return { diagnostics, params: "unknown", row: "unknown", cardinality, names, queryError: queryErrorType(dialect, undefined) };}
+  if (analysis.diagnostics.some((diagnostic) => diagnostic.code === 6) || (dialect === "postgres" && analysis.kind === "")) {return { diagnostics, params: "unknown", row: "unknown", cardinality, names, queryError: queryErrorType(dialect, undefined) };}
   const columns = lastOfEachName(analysis.columns).map((c) => [`${ident(c.name)}: ${c.nullable ? orNull(renderType(c.type, false, dialect)) : renderType(c.type, false, dialect)}`, c.comment] as const);
   // A parameter is typed from its context (a column it is compared with or written to, a CAST);
   // One no context types is `unknown`.

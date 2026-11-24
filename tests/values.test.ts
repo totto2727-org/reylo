@@ -250,7 +250,7 @@ test("SQLite: a BIGINT column on node:sqlite exact past 2^53 beside an INTEGER r
   const q: QueryModule<"sqlite"> = { dialect: "sqlite", sql: "select n, big from t", params: [], columns: [["n", "int"], ["big", "int8"]] };
   const d1 = (results: unknown[]) => ({ batch: promiseDriverStub(() => []), prepare: () => ({ first: promiseDriverStub(() => null), bind: () => ({ all: promiseDriverStub(() => ({ results })) }) }) });
   assert.deepEqual(await execute(d1([{ n: 5, big: 9_007_199_254_740_991 }, { n: 6, big: -3 }]), q), [{ n: 5, big: BigInt("9007199254740991") }, { n: 6, big: -BigInt("3") }]);
-  await assert.rejects(execute(d1([{ n: 5, big: 9_007_199_254_740_992 }]), q) as Promise<unknown>, (e: Error) => e instanceof DecodeError && e.message.startsWith('Column "big" is a 64-bit integer, and the driver already rounded its value to 9007199254740992'));
+  await assert.rejects(execute(d1([{ n: 5, big: 9_007_199_254_740_992 }]), q) as Promise<unknown>, (error: Error) => error instanceof DecodeError && error.message.startsWith('Column "big" is a 64-bit integer, and the driver already rounded its value to 9007199254740992'));
   // LibSQL under each intMode: a number, a BigInt or the digits.
   const libsql = (rows: unknown[]) => ({ execute: promiseDriverStub(() => ({ rows })), executeMultiple: async () => {} });
   for (const big of [7, BigInt("7"), "7"]) {assert.deepEqual(await execute(libsql([{ n: 5, big }]), q), [{ n: 5, big: BigInt("7") }], typeof big);}
@@ -266,14 +266,14 @@ test("coerce: a value a driver decoded, given its kind; an integer a number cann
   assert.equal(coerce("int8", BigInt("9007199254740993"), "c"), BigInt("9007199254740993"));
   assert.equal(coerce("int8", "9007199254740993", "c"), BigInt("9007199254740993"), "a driver's exact text");
   assert.equal(coerce("int8", 42, "c"), BigInt("42"));
-  assert.throws(() => coerce("int8", 9_007_199_254_740_992, "big_id"), (e: Error) => e instanceof DecodeError && e.message.startsWith('Column "big_id" is a 64-bit integer, and the driver already rounded its value to 9007199254740992'));
+  assert.throws(() => coerce("int8", 9_007_199_254_740_992, "big_id"), (error: Error) => error instanceof DecodeError && error.message.startsWith('Column "big_id" is a 64-bit integer, and the driver already rounded its value to 9007199254740992'));
   assert.deepEqual(coerce("int8[]", ["1", BigInt("2")], "c"), [BigInt("1"), BigInt("2")]);
   assert.equal(coerce("decimal", 1.5, "c"), "1.5");
   assert.equal(coerce("date", nativeDriverDate("2026-10-20T00:00:00Z"), "c"), "2026-10-20");
   // Bun.sql decodes a date or timestamp before 1 AD as an Invalid Date (its infinities are ±Infinity):
   // Refused, never read as infinity.
   Iterator.from(["date", "timestamp", "timestamptz", "timestamp|timestamptz"]).forEach((kind) => {
-    assert.throws(() => coerce(kind, nativeDriverDate(Number.NaN), "born"), (e: Error) => e instanceof DecodeError && e.message.startsWith('Column "born": the driver returned an Invalid Date'), kind);
+    assert.throws(() => coerce(kind, nativeDriverDate(Number.NaN), "born"), (error: Error) => error instanceof DecodeError && error.message.startsWith('Column "born": the driver returned an Invalid Date'), kind);
   });
   assert.equal(coerce("timestamptz", Infinity, "c"), "infinity");
   assert.equal(coerce("timestamptz", -Infinity, "c"), "-infinity");
@@ -293,7 +293,7 @@ test("coerce: a value a driver decoded, given its kind; an integer a number cann
   // The bounds, exactly: ±(2^53 - 1) is a number, ±2^53 refused.
   assert.deepEqual([BigInt("9007199254740991"), -BigInt("9007199254740991"), BigInt("0")].map((v) => coerce("int", v, "n")), [9_007_199_254_740_991, -9_007_199_254_740_991, 0]);
   Iterator.from([BigInt("9007199254740992"), -BigInt("9007199254740992"), BigInt("2") ** BigInt("63") - BigInt("1"), -(BigInt("2") ** BigInt("63"))]).forEach((v) => {assert.throws(() => coerce("int", v, "n"), DecodeError, String(v));});
-  assert.throws(() => coerce("int", BigInt("9007199254740993"), "big_id"), (e: Error) => e instanceof DecodeError && e.message.startsWith('Column "big_id" holds 9007199254740993, an integer past ±(2^53 - 1)'));
+  assert.throws(() => coerce("int", BigInt("9007199254740993"), "big_id"), (error: Error) => error instanceof DecodeError && error.message.startsWith('Column "big_id" holds 9007199254740993, an integer past ±(2^53 - 1)'));
   assert.throws(() => coerce("int", 9_007_199_254_740_992, "big_id"), /Column "big_id" holds an integer past ±\(2\^53 - 1\), which the driver already rounded to 9007199254740992/);
   // A NUMERIC may hold a REAL past 2^53, which is no rounded integer.
   assert.equal(coerce("int|float|text", 1e20, "c"), 1e20);
@@ -309,7 +309,7 @@ test("a truth value: 0 or 1 in every form a driver gives it, and any other value
   Iterator.from([false, 0, BigInt("0"), "0", "f", "false", Uint8Array.of(0)]).forEach((v) => {assert.equal(coerce("bool", v, "c"), false, String(v));});
   // The failing control: a MySQL TINYINT(1) or a SQLite BOOLEAN holds any integer the database lets in.
   Iterator.from([[2, "2"], [-1, "-1"], [BigInt("255"), "255"], ["yes", '"yes"'], [0.5, "0.5"], [Uint8Array.of(2), "the bytes 0x02"]] as const).forEach(([v, shown]) => {
-    assert.throws(() => coerce("bool", v, "active"), (e: Error) => e instanceof DecodeError && e.message.startsWith(`Column "active" is a boolean, stored as 0 or 1, and holds ${shown}, which is neither`), String(v));
+    assert.throws(() => coerce("bool", v, "active"), (error: Error) => error instanceof DecodeError && error.message.startsWith(`Column "active" is a boolean, stored as 0 or 1, and holds ${shown}, which is neither`), String(v));
   });
 });
 
@@ -339,7 +339,7 @@ test("SQLite: Reylo's own statement per database and text, with integers read as
   assert.deepEqual(row, { id: 1, n: 5, r: 1.5, b: Uint8Array.of(1, 2), doc: { a: 1 }, flag: true, x: 7 });
   // The failing control: the app's own statement keeps its database's settings.
   assert.deepEqual(db.prepare("select n from t where id = 1").get(), [BigInt("5")]);
-  assert.throws(() => execute(db, q, { id: 2 }), (e: Error) => e instanceof DecodeError && e instanceof TypeError && e.message.startsWith('Column "n" holds 9007199254740993'));
+  assert.throws(() => execute(db, q, { id: 2 }), (error: Error) => error instanceof DecodeError && error instanceof TypeError && error.message.startsWith('Column "n" holds 9007199254740993'));
   // A boolean column holding 2, which SQLite lets in: refused, naming it.
   assert.throws(() => execute(db, q, { id: 3 }), /^TypeError: Column "flag" is a boolean, stored as 0 or 1, and holds 2/u);
   // A query defined by hand: integers exact, nothing else known.
@@ -379,7 +379,7 @@ test("SQLite: a value its column's type does not allow, which a table that is no
     [9, /^TypeError: Column "big" is typed bigint and holds the text "x"/u],
     [10, /^TypeError: Column "z" is typed number \| string and holds a BLOB of 1 byte:/u],
   ];
-  Iterator.from(refusals).forEach(([id, refused]) => {assert.throws(() => execute(db, q, { id }), (e: Error) => e instanceof DecodeError && refused.test(String(e)), `row ${id}`);});
+  Iterator.from(refusals).forEach(([id, refused]) => {assert.throws(() => execute(db, q, { id }), (error: Error) => error instanceof DecodeError && refused.test(String(error)), `row ${id}`);});
   // The drivers that read integers as numbers or strings: libSQL's digits are its INTEGER, any other text in a number's column is refused, and so is D1's BLOB in a string's.
   const libsql = (rows: unknown[]) => ({ execute: promiseDriverStub(() => ({ rows })), executeMultiple: async () => {} });
   const ints: QueryModule<"sqlite"> = { dialect: "sqlite", sql: "select n, big, b from loose", params: [], columns: [["n", "int"], ["big", "int8"], ["b", "bytes"]] };
@@ -527,7 +527,7 @@ test("MySQL: a VECTOR is an array of its floats on every driver that reads one, 
   // The server sends a VECTOR as its floats' bytes, 32-bit and little-endian (MySQL 9.7.2).
   const floats = [1, 2.5, -3, 0.10000000149011612];
   const bytes = Buffer.alloc(16);
-  floats.forEach((f, i) => bytes.writeFloatLE(f, i * 4));
+  floats.forEach((f, index) => bytes.writeFloatLE(f, index * 4));
   const columns: Columns = [["v", "float[]"], ["vn", "float[]"]];
   const q: QueryModule<"mysql"> = { dialect: "mysql", sql: "select 1", params: [], columns };
   const expected = [{ v: floats, vn: null }];
@@ -544,7 +544,7 @@ test("MySQL: a VECTOR is an array of its floats on every driver that reads one, 
   assert.deepEqual(await execute(planetscale as never, q), expected);
   // A slice of a larger buffer, as a driver's row may be, reads from its own offset.
   assert.deepEqual(coerce("float[]", Buffer.concat([Buffer.of(9, 9, 9), bytes]).subarray(3), "v"), floats);
-  assert.throws(() => coerce("float[]", bytes.subarray(0, 5), "v"), (e: Error) => e instanceof DecodeError && /Column "v" is a VECTOR, whose value is 4 bytes per 32-bit float, and holds 5 bytes/u.test(e.message));
+  assert.throws(() => coerce("float[]", bytes.subarray(0, 5), "v"), (error: Error) => error instanceof DecodeError && /Column "v" is a VECTOR, whose value is 4 bytes per 32-bit float, and holds 5 bytes/u.test(error.message));
   // A Postgres float4[] from Bun.sql is a Float32Array, which is not read as bytes.
   assert.deepEqual(coerce("float[]", new Float32Array([1, 2.5]), "v"), [1, 2.5]);
 

@@ -95,7 +95,7 @@ test("go-to-definition on a query, its import's path, its Row and a column opens
       ["a column", at(`"title"]`, 2)],
     ] as const) {
       const links: { targetUri: string; targetSelectionRange: Range }[] = await lsp.request("textDocument/definition", { textDocument: { uri }, position });
-      assert.deepEqual(links.map((l) => [path(l.targetUri), l.targetSelectionRange]), [[sql, statement]], what);
+      assert.deepEqual(links.map((link) => [path(link.targetUri), link.targetSelectionRange]), [[sql, statement]], what);
     }
   } finally {
     await lsp.close();

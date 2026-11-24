@@ -55,7 +55,7 @@ test("REYLO_ENGINE_PATH takes precedence and a missing override is actionable", 
     assert.equal(nativeBinary(), path);
     await rm(path);
     assert.throws(() => nativeBinary(), { message: `REYLO_ENGINE_PATH names ${path}, which does not exist: point it at a reylo executable, or unset it to use the one reylo installs` });
-    await assert.rejects(engine("sqlite"), (e: Error) => e instanceof MissingEngine && e.message.startsWith("REYLO_ENGINE_PATH names"));
+    await assert.rejects(engine("sqlite"), (error: Error) => error instanceof MissingEngine && error.message.startsWith("REYLO_ENGINE_PATH names"));
     const reader = await anyEngine();
     assert.ok(reader instanceof MissingEngine);
     const root = join(path, "..");
@@ -78,9 +78,9 @@ test("unsupported dialects never start the native executable", async () => {
 test("a mismatched native version is refused and a failed load can be retried", { skip: noShell }, async () => {
   await withEngine(ping("9.9.9"), async (path) => {
     for (let attempt = 0; attempt < 2; attempt++) {
-      await assert.rejects(engine("sqlite"), (e: Error) => {
-        assert.ok(e instanceof MissingEngine);
-        assert.equal(e.message, `reylo ${VERSION} runs with its engine at ${ENGINE_VERSION}, and ${path} is 9.9.9: install reylo again with optional dependencies enabled, or point REYLO_ENGINE_PATH at the engine of reylo ${ENGINE_VERSION}`);
+      await assert.rejects(engine("sqlite"), (error: Error) => {
+        assert.ok(error instanceof MissingEngine);
+        assert.equal(error.message, `reylo ${VERSION} runs with its engine at ${ENGINE_VERSION}, and ${path} is 9.9.9: install reylo again with optional dependencies enabled, or point REYLO_ENGINE_PATH at the engine of reylo ${ENGINE_VERSION}`);
         return true;
       });
     }

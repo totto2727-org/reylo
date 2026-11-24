@@ -136,11 +136,11 @@ const object = function (fields: Readonly<{ name: string }[]>, field: (f: number
   const properties: Record<string, unknown> = {};
   const required: string[] = [];
   // A later field of a name replaces an earlier one, as a row object and `JSON.parse` keep the last.
-  fields.forEach((currentField, i) => {
-    properties[currentField.name] = field(i);
+  fields.forEach((currentField, index) => {
+    properties[currentField.name] = field(index);
     const at = required.indexOf(currentField.name);
     if (at !== -1) {required.splice(at, 1);}
-    if (!optional(i)) {required.push(currentField.name);}
+    if (!optional(index)) {required.push(currentField.name);}
   });
   return { type: "object", properties, required, ...(closed ? { additionalProperties: false } : {}) };
 };

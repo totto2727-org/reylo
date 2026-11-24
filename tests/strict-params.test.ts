@@ -58,11 +58,11 @@ test("SQLite: a parameter nothing types is an error by default, and strict_param
   ]);
   // A project file without the key takes the default too, and so does `strict_params: true`.
   for (const file of ["env: [.env]\n", "strict_params: true\n"]) {
-    assert.deepEqual((await transform(project(url, file), sql))["bare.sql"]!.diagnostics.map((d) => d.code), [12, 12], file);
+    assert.deepEqual((await transform(project(url, file), sql))["bare.sql"]!.diagnostics.map((diagnostic) => diagnostic.code), [12, 12], file);
   }
   // A project whose file is `.reylo.yml` is told to set the key there, not in a `.reylo.yaml` it lacks.
   const yml = await transform(project(url, "strict_params: true\n", undefined, ".reylo.yml"), sql);
-  assert.deepEqual(yml["bare.sql"]!.diagnostics.map((d) => d.messageText), [message(":x", ".reylo.yml"), message(":y", ".reylo.yml")]);
+  assert.deepEqual(yml["bare.sql"]!.diagnostics.map((diagnostic) => diagnostic.messageText), [message(":x", ".reylo.yml"), message(":y", ".reylo.yml")]);
   // `strict_params: false` keeps such a parameter `unknown`, with no error.
   const loose = await transform(project(url, "strict_params: false\n"), sql);
   assert.deepEqual(loose["bare.sql"]!.diagnostics, []);
@@ -70,7 +70,7 @@ test("SQLite: a parameter nothing types is an error by default, and strict_param
   // A statement the engine refused keeps its own error alone: a parameter written twice is untyped
   // Because the analysis stopped there.
   const repeated = await transform(project(url, undefined), { "repeated.sql": "select :q as a, :q as b\n" });
-  assert.deepEqual(repeated["repeated.sql"]!.diagnostics.map((d) => d.code), [3]);
+  assert.deepEqual(repeated["repeated.sql"]!.diagnostics.map((diagnostic) => diagnostic.code), [3]);
   // The cast the message suggests types it.
   assert.deepEqual((await transform(project(url, undefined), { "cast.sql": "select :x::text as x\n" }))["cast.sql"]!.diagnostics, []);
   await jsonCast(url, "select json_extract(:doc::json, '$.a') as a\n");
@@ -92,7 +92,7 @@ test("SQLite: a parameter as a whole sort or group key is error reylo17 at the p
   assert.match(out["sorted.sql"]!.text, /export type Params = \{ sort: string \}/u);
   assert.match(out["sorted.sql"]!.text, /export type Row = \{ id: number; name: string \}/u);
   // A parameter nothing else types stays unknown with no second error: the key is the one to fix.
-  assert.deepEqual(out["grouped.sql"]!.diagnostics.map((d) => [d.code, d.start, d.messageText]), [[17, grouped.indexOf(":g"), `group by :g puts every row in one group, ${why} case :g when 'name' then name end`]]);
+  assert.deepEqual(out["grouped.sql"]!.diagnostics.map((diagnostic) => [diagnostic.code, diagnostic.start, diagnostic.messageText]), [[17, grouped.indexOf(":g"), `group by :g puts every row in one group, ${why} case :g when 'name' then name end`]]);
   assert.match(out["grouped.sql"]!.text, /export type Row = \{ n: number \}/u);
   // The case the message suggests chooses the column with the parameter.
   assert.deepEqual(out["chosen.sql"]!.diagnostics, []);

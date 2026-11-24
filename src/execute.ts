@@ -266,7 +266,7 @@ function executeSyncSqlite(c: AnyClient, query: QueryModule, params: ParamsInput
 
 // A Durable Object's exec() refuses a BigInt ("Cannot convert a BigInt value to a number").
 function durableObjectValues(query: QueryModule, names: Readonly<string[]>, values: unknown[]): unknown[] {
-  return values.map((currentValue, i) => numberOrDigits(currentValue, query.inputs?.[names[i]!]?.type, "durable-object"));
+  return values.map((currentValue, index) => numberOrDigits(currentValue, query.inputs?.[names[index]!]?.type, "durable-object"));
 }
 
 // A SQLite client with prepare() whose statements answer at once. D1 (batch()), sqlite3 and
@@ -347,8 +347,8 @@ async function executeAsync(c: AnyClient | null | undefined, query: QueryModule,
       // Array by its first element ("cannot cast type boolean to boolean[]" for `$1::bool[]`),
       // And the copy of pg inside Neon's Pool and Client threw on a Uint8Array element and
       // Left the connection out of step. Each element of a `jsonb[]` is a JSON value.
-      const bound = values.map((currentValue, i) => {
-        const t = type(i);
+      const bound = values.map((currentValue, index) => {
+        const t = type(index);
         return Array.isArray(currentValue) && t?.kind === "array" ? arrayLiteral(isJson(t.of.kind) ? currentValue.map((e) => (matchesNullish(e) ? e : JSON.stringify(e))) : currentValue, t.delimiter) : currentValue;
       });
       // A JSON parameter goes to pg's family, PGlite and Neon as its JSON text, and to postgres.js
@@ -357,7 +357,7 @@ async function executeAsync(c: AnyClient | null | undefined, query: QueryModule,
       // A number or an array of either by its JavaScript type ("cannot cast type boolean to
       // Jsonb"): it gets an object whose toJSON() returns the value, which it binds as JSON and
       // Serializes to exactly its JSON text. So does an unsafe() client without typed().
-      const json = () => bound.map((v, i) => (isJsonParam(v, i) ? jsonText(v) : v));
+      const json = () => bound.map((v, index) => (isJsonParam(v, index) ? jsonText(v) : v));
       // Slonik before every other query(): its query() takes only its sql tag's queries.
       if (isSlonik(c)) {return slonik(c, text, json().map(slonikParam), query.columns);}
       // Query() before unsafe(): Neon's neon() has both, and its unsafe() builds a fragment
@@ -375,7 +375,7 @@ async function executeAsync(c: AnyClient | null | undefined, query: QueryModule,
         // Transaction shows neither. Bun.sql serializes the value itself.
         const bun = hasFunctionType(c.commitDistributed);
         const asText = hasFunctionType(c.typed) && !bun;
-        const mapped = bound.map((v, i) => (isJsonParam(v, i) ? (asText ? c.typed(jsonText(v), 705) : { toJSON: () => jsonValue(v) }) : (asText && matchesString(v) && isTime(type(i)) ? c.typed(v, 705) : v)));
+        const mapped = bound.map((v, index) => (isJsonParam(v, index) ? (asText ? c.typed(jsonText(v), 705) : { toJSON: () => jsonValue(v) }) : (asText && matchesString(v) && isTime(type(index)) ? c.typed(v, 705) : v)));
         return bun ? bunRows(await c.unsafe(text, mapped), query.columns) : postgresJs(c, text, mapped, query.columns);
       }
       if (hasFunctionType(c)) {return neonCallable(c, text, json().map(asByteaHex), query.columns);}
@@ -397,7 +397,7 @@ async function executeAsync(c: AnyClient | null | undefined, query: QueryModule,
     }
     case "duckdb": {
       // @duckdb/node-api's DuckDBConnection: each value given its kind by the result's own types (decode-duckdb.ts).
-      if (isDuckdb(c)) {return runDuckdb(c as unknown as DuckdbClient, text, values, names.map((currentName, i) => type(i)), query.columns);}
+      if (isDuckdb(c)) {return runDuckdb(c as unknown as DuckdbClient, text, values, names.map((currentName, index) => type(index)), query.columns);}
       break;
     }
     case "sqlite": {
@@ -407,9 +407,9 @@ async function executeAsync(c: AnyClient | null | undefined, query: QueryModule,
       if (hasFunctionType(c.execute)) {return normalize((await c.execute({ sql: text, args: values })).rows, columns);}
       if (isTurso(c)) {return runTurso(c, text, values, columns);}
       // The sqlite package wraps sqlite3, and sqlite3 binds a BigInt as NULL.
-      if (hasFunctionType(c.getDatabaseInstance)) {return normalize(await c.all(text, values.map((currentValue, i) => numberOrDigits(currentValue, type(i), "sqlite3"))), columns);}
+      if (hasFunctionType(c.getDatabaseInstance)) {return normalize(await c.all(text, values.map((currentValue, index) => numberOrDigits(currentValue, type(index), "sqlite3"))), columns);}
       if (hasFunctionType(c.all) && hasFunctionType(c.exec)) {
-        const bound = values.map((currentValue, i) => numberOrDigits(currentValue, type(i), "sqlite3"));
+        const bound = values.map((currentValue, index) => numberOrDigits(currentValue, type(index), "sqlite3"));
         return normalize(
           await new Promise<unknown[]>((resolve, reject) => c.all(text, bound, (error: Error | null, rows: unknown[]) => (error ? reject(error) : resolve(rows)))),
           columns,
@@ -443,7 +443,7 @@ function statement(query: QueryModule, params: ParamsInput) {
   // The build step already compiled the statement; only the values need ordering.
   const compiled = compile(query);
   const bound: { text: string; values: unknown[]; names: Readonly<string[]> } = { text: compiled.text, values: compiled.order.map((name) => value(params, name)), names: compiled.order };
-  bound.names.forEach((name, i) => {
+  bound.names.forEach((name, index) => {
     const input = query.inputs?.[name];
     const type = input?.type;
     // A typed JSON parameter (`:p::jsonb('…')`): a value left out takes the schema's default, a
@@ -464,7 +464,7 @@ function statement(query: QueryModule, params: ParamsInput) {
         if (matchesUndefined(v) || validate(schema, null)) {refuseNull(name, v);}
         v = JSON_NULL;
       }
-      bound.values[i] = matchesUndefined(v) ? null : v;
+      bound.values[index] = matchesUndefined(v) ? null : v;
       return;
     }
     // A structured parameter is checked against its column list and written as the JSON the
@@ -473,8 +473,8 @@ function statement(query: QueryModule, params: ParamsInput) {
     if (type?.kind === "rows") {
       const structured = query.structured?.find((s) => s.name === name);
       const { prepareRows, variant } = checksFor(query, name);
-      const prepared = prepareRows(name, type, bound.values[i], query.dialect, !matchesUndefined(structured));
-      bound.values[i] = prepared.value;
+      const prepared = prepareRows(name, type, bound.values[index], query.dialect, !matchesUndefined(structured));
+      bound.values[index] = prepared.value;
       if (structured) {bound.text = variant(bound.text, structured, type.fields, prepared.present);}
       return;
     }
@@ -485,28 +485,28 @@ function statement(query: QueryModule, params: ParamsInput) {
     // Takes JSON's null there instead, unless the schema its type carries refuses null, and is
     // Refused only when left out.
     let jsonNull = false;
-    if (input?.nullable === false && matchesNull(bound.values[i])) {
+    if (input?.nullable === false && matchesNull(bound.values[index])) {
       if (type?.kind === "json" && !matchesUndefined(params[name]) && !refusesNull(query, type)) {jsonNull = true;}
       else if (type?.kind === "json" || refusesNull(query, type)) {refuseNull(name, params[name]);}
     }
     // An array parameter takes no NULL element, as its type says (`:ids::int[]` is `number[]`):
     // A NULL in `= any(:ids)` matches nothing. An array inside a
     // Structured parameter's member keeps its NULL elements (src/rows.ts).
-    if (type?.kind === "array" && Array.isArray(bound.values[i])) {
-      const at = nullElement(bound.values[i] as unknown[]);
+    if (type?.kind === "array" && Array.isArray(bound.values[index])) {
+      const at = nullElement(bound.values[index] as unknown[]);
       if (!matchesUndefined(at)) {throw new ParameterError(`Parameter "${name}" is an array whose elements may not be null, and the element at ${at} is. Leave it out of the array.`);}
     }
     // A `::type` written on MySQL or SQLite, whose cast turns a value it cannot read into 0 or
     // NULL: the value is checked against the type as written.
     const cast = query.inputs?.[name]?.cast;
-    if (!matchesUndefined(cast) && !matchesUndefined(type)) {checksFor(query, name).checkCast(name, cast, type, bound.values[i], query.dialect);}
-    checkTime(type, name, bound.values[i]);
-    checkBinary(type, name, bound.values[i]);
-    bound.values[i] = jsonNull ? JSON_NULL : encode(type, bound.values[i], query.dialect, name);
+    if (!matchesUndefined(cast) && !matchesUndefined(type)) {checksFor(query, name).checkCast(name, cast, type, bound.values[index], query.dialect);}
+    checkTime(type, name, bound.values[index]);
+    checkBinary(type, name, bound.values[index]);
+    bound.values[index] = jsonNull ? JSON_NULL : encode(type, bound.values[index], query.dialect, name);
   });
   // Every MySQL and SQLite driver binds JSON text as text, which the database reads as JSON (a
   // Structured parameter's is written already).
-  if (query.dialect !== "postgres") {bound.values = bound.values.map((currentValue, i) => (isJsonValue(query, bound.names[i]!, currentValue) && query.inputs?.[bound.names[i]!]?.type.kind !== "rows" ? jsonText(currentValue) : currentValue));}
+  if (query.dialect !== "postgres") {bound.values = bound.values.map((currentValue, index) => (isJsonValue(query, bound.names[index]!, currentValue) && query.inputs?.[bound.names[index]!]?.type.kind !== "rows" ? jsonText(currentValue) : currentValue));}
   // The comment naming the file goes on last, after a structured parameter's lists are written.
   bound.text = sentText(query, bound.text);
   return bound;
@@ -527,7 +527,7 @@ export function rawStatement(query: QueryModule, params: unknown): { text: strin
   checkParams(query, params);
   const { text, values, names } = statement(query, params);
   if (query.dialect !== "postgres") {return { text, values };}
-  return { text, values: values.map((currentValue, i) => postgresText(query, names[i]!, currentValue)) };
+  return { text, values: values.map((currentValue, index) => postgresText(query, names[index]!, currentValue)) };
 }
 
 /** A bound value as the text Postgres's input function reads, as `.run()` sends it through pg. */
@@ -700,9 +700,9 @@ const isVector = (type: EngineType): type is EngineType & { kind: "scalar" } => 
 
 /** A vector's floats as the text a VECTOR's `to_vector` and pgvector's input read; JSON's, which would write NaN and ±Infinity as null, so those are refused. */
 function vectorText(v: Readonly<unknown[]>, name: string, what: string): string {
-  v.forEach((e, i) => {
+  v.forEach((e, index) => {
     if (!matchesNumber(e) || !Number.isFinite(e)) {
-      throw new ParameterError(`Parameter "${name}" is ${what}, an array of finite numbers, and the element at [${i}] is ${matchesString(e) ? JSON.stringify(e) : (matchesNumber(e) ? e : typeof e)}.`);
+      throw new ParameterError(`Parameter "${name}" is ${what}, an array of finite numbers, and the element at [${index}] is ${matchesString(e) ? JSON.stringify(e) : (matchesNumber(e) ? e : typeof e)}.`);
     }
   });
   return JSON.stringify(v);

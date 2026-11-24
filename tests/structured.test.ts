@@ -162,7 +162,7 @@ test("a column list that does not read is the type check's error at its place, a
   try {
     for (const [sql, at, message] of cases) {
       const a = await analysis(root, url, sql);
-      const d = a.diagnostics.find((d) => d.code === 20);
+      const d = a.diagnostics.find((diagnostic) => diagnostic.code === 20);
       assert.ok(d, sql);
       assert.match(d.message, message);
       assert.equal(sql.slice(d.start, d.start + d.length), at, sql);
@@ -194,7 +194,7 @@ test("SQLite: the column list is checked against the table its insert writes, an
   try {
     for (const [sql, at, message] of cases) {
       const a = await analysis(root, url, sql);
-      const d = a.diagnostics.filter((d) => d.code === 21);
+      const d = a.diagnostics.filter((diagnostic) => diagnostic.code === 21);
       assert.equal(d.length, 1, `${sql}: ${JSON.stringify(a.diagnostics)}`);
       assert.match(d[0]!.message, message);
       assert.equal(sql.slice(d[0]!.start, d[0]!.start + d[0]!.length), at, sql);
@@ -286,7 +286,7 @@ select value ->> '$.title', value ->> '$.done' from json_each(:todos::json('{
     assert.deepEqual(limited.inputSchema.required, []);
     // What the profile refuses is the type check's error at the schema, and fails the build.
     const bad = `select * from json_each(:p::json('{ "$ref": "#/$defs/x" }'))`;
-    const d = (await analysis(root, url, bad)).diagnostics.find((x) => x.code === 20);
+    const d = (await analysis(root, url, bad)).diagnostics.find((diagnostic) => diagnostic.code === 20);
     assert.ok(d);
     assert.match(d.message, /breaks the schema's locality/u);
     assert.equal(bad.slice(d.start, d.start + d.length), `'{ "$ref": "#/$defs/x" }'`);
@@ -344,7 +344,7 @@ test("an insert takes the table's alias before its rows, and refuses a column li
     const upsert = await built(root, url, "aliased", "insert into t as tt :p::rows(id integer not null, x text not null) on conflict (id) do update set x = excluded.x where tt.x <> excluded.x returning id, x");
     assert.deepEqual(plain(await upsert.run(db, { p: [{ id: 2, x: "B" }, { id: 3, x: "c" }] })), [{ id: 2, x: "B" }, { id: 3, x: "c" }]);
     const own = "insert into t (id, x) :p::rows(id integer not null, x text not null)";
-    const d = (await analysis(root, url, own)).diagnostics.find((x) => x.code === 20);
+    const d = (await analysis(root, url, own)).diagnostics.find((diagnostic) => diagnostic.code === 20);
     assert.ok(d);
     assert.match(d.message, /writes the insert's column list itself/u);
     assert.equal(own.slice(d.start, d.start + d.length), "(id, x)");

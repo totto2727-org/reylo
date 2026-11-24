@@ -22,7 +22,7 @@ const raw = join(work, 'raw.jsonl');
 execFileSync(go, ['run', join(here, 'instrument.go'), upstream, work, join(here, 'oracle.go.txt')], { stdio: 'inherit' });
 execFileSync(go, ['test', '-overlay', join(work, 'overlay.json'), './hclsyntax', '-count=1'], { cwd: upstream, env: { ...process.env, HCL_ORACLE_OUTPUT: raw }, stdio: 'inherit' });
 const fixtures = readFileSync(raw, 'utf8').trimEnd().split('\n').map(line => JSON.parse(line));
-fixtures.sort((a, b) => `${a.name}\0${a.api}\0${a.source}`.localeCompare(`${b.name}\0${b.api}\0${b.source}`, 'en'));
+fixtures.sort((left, right) => `${left.name}\0${left.api}\0${left.source}`.localeCompare(`${right.name}\0${right.api}\0${right.source}`, 'en'));
 const counts = {};
 Iterator.from(fixtures).forEach((fixture) => {
   const name = fixture.name.split('/')[0];

@@ -65,8 +65,8 @@ export function withDefaults(schema: Schema, value: unknown): unknown {
   } else if (Array.isArray(value)) {
     const a = [...value];
     const prefix = Array.isArray(s.prefixItems) ? (s.prefixItems as Schema[]) : [];
-    prefix.forEach((sub, i) => {
-      if (i >= a.length && !matchesNull(sub) && hasObjectType(sub) && "default" in sub && a.length === i) {a.push(cloneJson((sub).default));}
+    prefix.forEach((sub, index) => {
+      if (index >= a.length && !matchesNull(sub) && hasObjectType(sub) && "default" in sub && a.length === index) {a.push(cloneJson((sub).default));}
     });
     for (let i = 0; i < a.length; i++) {a[i] = withDefaults(i < prefix.length ? prefix[i]! : (s.items as Schema) ?? true, a[i]);}
     out = a;
@@ -265,7 +265,7 @@ function equal(a: unknown, b: unknown): boolean {
   if (a === b) {return true;}
   if (matchesNull(a) || matchesNull(b) || !hasObjectType(a) || !hasObjectType(b)) {return false;}
   if (Array.isArray(a) !== Array.isArray(b)) {return false;}
-  if (Array.isArray(a)) {return a.length === (b as unknown[]).length && a.every((x, i) => equal(x, (b as unknown[])[i]));}
+  if (Array.isArray(a)) {return a.length === (b as unknown[]).length && a.every((x, index) => equal(x, (b as unknown[])[index]));}
   const ka = Object.keys(a);
   const kb = Object.keys(b);
   return ka.length === kb.length && ka.every((k) => Object.hasOwn(b, k) && equal((a as Object_)[k], (b as Object_)[k]));
