@@ -312,7 +312,7 @@ test("SQLite: a JSON member of a column list is checked against its schema, its 
 // oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
 test("binary data in a column list travels as hexadecimal text, which each reader decodes", async () => {
   const bytes = new Uint8Array([0, 1, 127, 128, 255]);
-  const same = (got: unknown) => assert.deepEqual([...new Uint8Array(got as ArrayLike<number>)], [...bytes]);
+  const same = (got: unknown): void => assert.deepEqual([...new Uint8Array(got as ArrayLike<number>)], [...bytes]);
   // SQLite decodes it with unhex().
   const root = project();
   const db = new DatabaseSync(join(root, "app.db"));

@@ -248,7 +248,7 @@ async function startD1(entry: string, dir: string, ended: () => void): Promise<D
     Iterator.from(pending.values()).forEach((settle) => {settle(undefined);});
     pending.clear();
   });
-  const stop = () => {
+  const stop = (): void => {
     if (child.connected) {child.send({ kind: "close" });}
     setTimeout(() => child.kill(), 2000).unref();
   };
@@ -329,7 +329,7 @@ const utf8 = new TextEncoder();
  * statement's first word. In UTF-8 bytes, as the analysis's diagnostics are.
  */
 export function placeRefusal(sql: string, message: string): { start: number; length: number } {
-  const escape = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const escape = (s: string): string => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   const fn = /(?:no such function|not authorized to use function): ([\w$]+)/i.exec(message)?.[1] ?? /arguments to function ([\w$]+)\(\)/i.exec(message)?.[1];
   const near = /near "([^"]+)"/.exec(message)?.[1];
   const found = fn ? new RegExp(`\\b${escape(fn)}\\s*\\(`, "i").exec(sql) : near ? new RegExp(escape(near), "i").exec(sql) : null;

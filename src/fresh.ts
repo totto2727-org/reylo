@@ -51,8 +51,8 @@ export function passed(query: object, now = clock.now()): void {
 }
 
 const yes = (v: string) => v === "true" || v === "1";
-const describe = (r: Readonly<string[]>) => `${r[2]}${yes(r[3]!) ? " not null" : ""}${yes(r[4]!) ? " with a default" : ""}`;
-const table = (name: string) => name.replace(/^"|"$/g, "").replace(/"\."/gu, ".");
+const describe = (r: Readonly<string[]>): string => `${r[2]}${yes(r[3]!) ? " not null" : ""}${yes(r[4]!) ? " with a default" : ""}`;
+const table = (name: string): string => name.replace(/^"|"$/g, "").replace(/"\."/gu, ".");
 
 /** The catalog query's columns, as upstream engine/core/src/fresh.rs names them; the sixth on Postgres and SQLite. */
 const COLUMNS = ["fresh_table", "fresh_column", "fresh_type", "fresh_not_null", "fresh_default", "fresh_expr"] as const;
@@ -147,10 +147,10 @@ export function sqliteDefault(text: string): string {
   return out;
 }
 
-const asciiUpper = (s: string) => s.replace(/[a-z]+/gu, (m) => m.toUpperCase());
+const asciiUpper = (s: string): string => s.replace(/[a-z]+/gu, (m) => m.toUpperCase());
 
 /** SQLite folds the case of ASCII letters alone. */
-const asciiLower = (s: string) => s.replace(/[A-Z]+/gu, (m) => m.toLowerCase());
+const asciiLower = (s: string): string => s.replace(/[A-Z]+/gu, (m) => m.toLowerCase());
 
 /** The error a call fails with when the schema changed under its query. */
 export function staleError(source: string | undefined, lines: Readonly<string[]>): Error {

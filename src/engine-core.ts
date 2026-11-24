@@ -166,7 +166,7 @@ export class AnswerCache {
     return answer;
   }
 
-  public clear() {
+  public clear(): void {
     this.#entries.clear();
   }
 }

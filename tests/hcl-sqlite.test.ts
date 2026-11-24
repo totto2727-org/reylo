@@ -4,9 +4,9 @@ import assert from "node:assert/strict";
 import { DatabaseSync } from "node:sqlite";
 import { sqliteSchemaFromHcl } from "../src/hcl-sqlite.ts";
 
-const schema = (body: string) => `schema "main" {}\n${body}\n`;
-const column = (name: string, type = "text", nullable = true, extra = "") => `column ${JSON.stringify(name)} {\n type = ${type}\n null = ${nullable}\n ${extra}\n}\n`;
-const table = (body: string, name = "items") => `table ${JSON.stringify(name)} {\n schema = schema.main\n${body}\n}\n`;
+const schema = (body: string): string => `schema "main" {}\n${body}\n`;
+const column = (name: string, type = "text", nullable = true, extra = ""): string => `column ${JSON.stringify(name)} {\n type = ${type}\n null = ${nullable}\n ${extra}\n}\n`;
+const table = (body: string, name = "items"): string => `table ${JSON.stringify(name)} {\n schema = schema.main\n${body}\n}\n`;
 const open = function (source: string) {
   const db = new DatabaseSync(":memory:");
   try {

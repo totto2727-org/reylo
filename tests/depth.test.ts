@@ -10,7 +10,7 @@ import { Session } from "../src/analyze.ts";
 
 // The embedded SQLite reads an expression 350 deep, where SQLite's own bound is 1,000.
 const nested = function (shape: string, n: number): string {
-  const fold = (start: string, f: (s: string, i: number) => string) => Array.from({ length: n }, (_, i) => i).reduce(f, start);
+  const fold = (start: string, f: (s: string, i: number) => string): string => Array.from({ length: n }, (_, i) => i).reduce(f, start);
   switch (shape) {
     case "sum": { return `select ${Array(n).fill("id").join(" + ")} as x from users`; }
     case "concat": { return `select ${Array(n).fill("name").join(" || ")} as x from users`; }

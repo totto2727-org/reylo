@@ -63,13 +63,13 @@ export async function mysqlStandIn(options: { version: string; accepts?: () => s
     const salt = Buffer.from(randomBytes(20).map((b) => (b % 94) + 33));
     let buffer = Buffer.alloc(0);
     let authed = false;
-    const send = (seq: number, payload: Buffer) => {
+    const send = (seq: number, payload: Buffer): void => {
       const head = Buffer.alloc(4);
       head.writeUIntLE(payload.length, 0, 3);
       head[3] = seq & 0xFF;
       socket.write(Buffer.concat([head, payload]));
     };
-    const resultSet = (name: string, value: string) => {
+    const resultSet = (name: string, value: string): void => {
       const column = Buffer.concat([str("def"), str(""), str(""), str(""), str(name), str(""), Buffer.from([0x0C]), u16(33), Buffer.from([255, 0, 0, 0, 0xFD]), u16(0), Buffer.from([0x1F, 0, 0])]);
       [Buffer.from([1]), column, EOF, str(value), EOF].forEach((payload, i) => send(i + 1, payload));
     };

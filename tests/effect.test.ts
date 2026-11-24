@@ -47,7 +47,7 @@ const lookup = defineQuery<{ id: number; active: boolean }, { id: number; active
   cardinality: "one",
 });
 
-const seed = function (db: DatabaseSync, name: string) {
+const seed = function (db: DatabaseSync, name: string): void {
   db.exec("create table item(id integer primary key, active boolean, big bigint, doc json)");
   db.prepare("insert into item values(?, ?, ?, ?)").run(7, 1, BigInt("9007199254740993"), JSON.stringify({ name }));
 };

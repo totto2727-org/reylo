@@ -82,7 +82,7 @@ test("go-to-definition on a query, its import's path, its Row and a column opens
 
     // A file URI read back as its path: on Windows the server writes the drive in lowercase with its
     // Colon encoded (`file:///c%3A/…`), and the system matches a path's letters without regard to case.
-    const path = (uri: string) => (process.platform === "win32" ? fileURLToPath(uri).toLowerCase() : fileURLToPath(uri));
+    const path = (uri: string): string => (process.platform === "win32" ? fileURLToPath(uri).toLowerCase() : fileURLToPath(uri));
     const sql = path(pathToFileURL(join(root, "queries", "posts.sql")).href);
     // Lines 2 to 5 of the file: the comment above the statement, through `:after`.
     const statement: Range = { start: { line: 1, character: 0 }, end: { line: 4, character: 17 } };

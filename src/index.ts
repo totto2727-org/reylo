@@ -154,7 +154,7 @@ export function defineQuery<Params, Row, C extends Cardinality, D extends Dialec
   def: QueryDefinition & { dialect: D; cardinality?: C },
 ): Query<Params, Row, C, D> {
   const cardinality = (def.cardinality ?? "many") as C;
-  const missingSchema = () => {
+  const missingSchema = (): never => {
     throw new Error(`No JSON Schema is available for this query: a module a build step writes carries it, and a query defined by hand has none.`);
   };
   // Reylo's own errors about the query start with its file.

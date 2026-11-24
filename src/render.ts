@@ -55,9 +55,9 @@ const sqliteJson: Record<string, string> = { integer: "number", int8: "number", 
 export const JSON_TYPE = "Json";
 
 /** A type that may also be null. `Json` already admits null, which a NOT NULL `jsonb` column can hold, so it reads the same either way. */
-export const orNull = (type: string) => (type === JSON_TYPE ? type : `${type} | null`);
+export const orNull = (type: string): string => (type === JSON_TYPE ? type : `${type} | null`);
 
-export const ident = (name: string) => (/^[A-Za-z_$][\w$]*$/u.test(name) ? name : JSON.stringify(name));
+export const ident = (name: string): string => (/^[A-Za-z_$][\w$]*$/u.test(name) ? name : JSON.stringify(name));
 
 export function renderType(t: EngineType, inJson = false, dialect: Dialect = "postgres"): string {
   switch (t.kind) {
@@ -135,7 +135,7 @@ export function schemaType(schema: unknown, input = false): string {
   if (schema === false) {return "never";}
   if (matchesNull(schema) || !hasObjectType(schema) || Array.isArray(schema)) {return JSON_TYPE;}
   const m = schema as Record<string, unknown>;
-  const sub = (s: unknown) => schemaType(s, input);
+  const sub = (s: unknown): string => schemaType(s, input);
   if (Array.isArray(m.anyOf)) {return union(m.anyOf.map(sub));}
   if (Array.isArray(m.enum)) {return union(m.enum.map(literalType));}
   if (!matchesUndefined(m.not)) {return "never";}
@@ -149,7 +149,7 @@ export function schemaType(schema: unknown, input = false): string {
  * keys alone, so that TypeScript still flags a misspelled one in an object literal.
  */
 function kindType(kind: string, m: Record<string, unknown>, input = false): string {
-  const schemaType_ = (s: unknown) => schemaType(s, input);
+  const schemaType_ = (s: unknown): string => schemaType(s, input);
   switch (kind) {
     case "string": { return "string"; }
     case "integer": case "number": { return "number"; }

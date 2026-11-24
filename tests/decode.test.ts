@@ -14,7 +14,7 @@ import { nativeDriverDate, promiseDriverStub } from "./helpers.ts";
 // Field's text. The app's own parsers are hostile here: an int8 its text, a timestamptz tagged,
 // An interval an object, an enum upper-cased. Reylo's rows must not see any of them.
 type Parser = (text: string) => unknown;
-const noParse = function (x: string) {
+const noParse = function (x: string): string {
   return String(x);
 };
 const appTable: Record<number, Parser> = {
@@ -128,7 +128,7 @@ type Db = ReturnType<typeof database>;
 
 /** Rows compared by value, binary data by its bytes (a Buffer is a Uint8Array, with its own prototype). */
 const bytes = (v: unknown): unknown => (v instanceof Uint8Array ? { bytes: [...v] } : Array.isArray(v) ? v.map(bytes) : v !== null && typeof v === "object" && !(v instanceof Date) ? Object.fromEntries(Object.entries(v).map(([k, x]) => [k, bytes(x)])) : v);
-const same = (actual: unknown, expected: unknown) => assert.deepEqual(bytes(actual), bytes(expected));
+const same = (actual: unknown, expected: unknown): void => assert.deepEqual(bytes(actual), bytes(expected));
 
 type Config = { text: string; values?: unknown[]; types?: { getTypeParser(oid: number, format?: string): Parser }; rowMode?: string };
 
@@ -294,7 +294,7 @@ test("pg-promise: result({ text, values, types }) on the database, a task and a 
   same(row, declared);
   assert.deepEqual(Object.keys(calls.at(-1) as object), ["text", "values", "types"]);
   // On the database the receive event can be read: refused before anything runs.
-  const camel = (e: { data: Record<string, unknown>[] }) => e.data.forEach((r) => Object.keys(r).forEach((k) => ((r[k.toUpperCase()] = r[k]), delete r[k])));
+  const camel = (e: { data: Record<string, unknown>[] }): void => e.data.forEach((r) => Object.keys(r).forEach((k) => ((r[k.toUpperCase()] = r[k]), delete r[k])));
   const withReceive = Object.assign(make(camel), { $config: { options: { receive: camel } } });
   const before = calls.length;
   await assert.rejects(execute(withReceive as never, built, { id: 1 }) as Promise<unknown>, /receive event rewrites every result/u);

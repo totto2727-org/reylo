@@ -120,7 +120,7 @@ test("sqlite: Standard Query applies every result cardinality", () => {
 });
 
 // Checked by the normal TypeScript task, never executed.
-const inferredInputTypes = function () {
+const inferredInputTypes = function (): void {
   encode(insert, { id: 1, name: "Ada" });
   // @ts-expect-error Required input objects cannot be left out.
   encode(insert);

@@ -252,7 +252,7 @@ const civilFromDays = function (days: number): [number, number, number] {
   return [era * 400 + yoe + (m <= 2 ? 1 : 0), m, d];
 };
 
-const pad = (n: number, width = 2) => String(n).padStart(width, "0");
+const pad = (n: number, width = 2): string => String(n).padStart(width, "0");
 
 /**
  * An ISO 8601 year: four digits from 0000 (1 BC) to 9999, and the extended form, a sign and six
@@ -262,7 +262,7 @@ const pad = (n: number, width = 2) => String(n).padStart(width, "0");
  * them, Temporal holds no such date in any form, and a sign keeps the rule that every year outside
  * 0000–9999 has one, which `postgresYear` reads back.
  */
-const isoYear = (y: number) => (y >= 0 && y <= 9999 ? pad(y, 4) : `${y < 0 ? "-" : "+"}${pad(Math.abs(y), 6)}`);
+const isoYear = (y: number): string => (y >= 0 && y <= 9999 ? pad(y, 4) : `${y < 0 ? "-" : "+"}${pad(Math.abs(y), 6)}`);
 
 /**
  * A date or time parameter's text as Postgres reads it, the inverse of `isoYear` for what `run`
@@ -336,7 +336,7 @@ export function duration(x: string): string {
   if (+(regexMatch[7] ?? 0) !== 0 || fraction !== "") {parts.push(["S", `${+(regexMatch[7] ?? 0)}${fraction && `.${fraction}`}`, time]);}
   if (parts.length === 0) {return "PT0S";}
   const negative = parts.every(([, , sign]) => sign < 0);
-  const write = ([designator, magnitude, sign]: [string, string, number]) => `${sign < 0 && !negative ? "-" : ""}${magnitude}${designator}`;
+  const write = ([designator, magnitude, sign]: [string, string, number]): string => `${sign < 0 && !negative ? "-" : ""}${magnitude}${designator}`;
   const clock = parts.slice(date).map(write).join("");
   return `${negative ? "-" : ""}P${parts.slice(0, date).map(write).join("")}${clock && `T${clock}`}`;
 }
@@ -428,7 +428,7 @@ export function hstoreText(v: object, fail: (message: string) => never): string 
     const name = Array.isArray(v) || v instanceof Date || ArrayBuffer.isView(v) ? undefined : (v.constructor as { name?: unknown } | undefined)?.name;
     return fail(`is an hstore, an object of its keys whose values are strings or null; got ${matchesString(name) && name ? `a ${name}` : describe(v)}.`);
   }
-  const quote = (s: string) => `"${s.replace(/[\\"]/g, "\\$&")}"`;
+  const quote = (s: string): string => `"${s.replace(/[\\"]/g, "\\$&")}"`;
   const pairs: string[] = [];
   Iterator.from(Object.entries(v)).forEach(([key, value]) => {
     if (matchesUndefined(value)) {return;}

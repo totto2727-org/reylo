@@ -92,7 +92,7 @@ type Load = (sql: string) => Promise<(string | null)[][]>;
 // Every type among `oids`, and every array type's element, with its base type through any number
 // Of domains and that base type's name (an array of row values, or of a type whose own output is
 // An array, stays text). An oid goes out as int8, since one above 2^31 would wrap as int4.
-const catalogSql = (oids: number[]) => {
+const catalogSql = (oids: number[]): string => {
   const list = `'{${oids.map((o) => Math.trunc(o)).join(",")}}'::pg_catalog.oid[]`;
   return `with recursive d(oid, base) as (
   select oid, typbasetype from pg_catalog.pg_type where typtype = 'd'
@@ -281,13 +281,13 @@ export function neonCallable(c: AnyClient & ((...args: unknown[]) => Promise<any
 // ---------------------------------------------------------------------------------------------
 // PGlite
 
-const isPglite = (c: AnyClient) => hasFunctionType(c.query) && hasFunctionType(c.exec) && (hasFunctionType(c.refreshArrayTypes) || (hasFunctionType(c.rollback) && "closed" in c));
+const isPglite = (c: AnyClient): boolean => hasFunctionType(c.query) && hasFunctionType(c.exec) && (hasFunctionType(c.refreshArrayTypes) || (hasFunctionType(c.rollback) && "closed" in c));
 
 /** The oids each statement's result had on its earlier runs, by the statement's text: PGlite's per-query table names only those. */
 const pgliteOids = new Map<string, Set<number>>();
 const PGLITE_STATEMENTS = 2000;
 const builtinOids = [...Object.keys(SCALAR_OIDS).map(Number), ...ARRAY_OIDS.keys()];
-const keepText = (x: string) => x;
+const keepText = (x: string): string => x;
 
 async function pglite(db: AnyClient, text: string, values: unknown[], columns: Columns | undefined): Promise<unknown[]> {
   // A statement met for the first time names every built-in type Reylo decodes, and every oid the

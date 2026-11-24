@@ -66,7 +66,7 @@ test("the rows an insert writes carry the same keys, and its lists name only tho
   assert.doesNotThrow(() => prepareRows("events", { ...events, fields: events.fields.filter((field) => field.name !== "status") }, [a, { ...a, amount: 1 }], "postgres", false));
   const { present } = prepareRows("events", events, [a, a], "postgres", true);
   const text = `insert into events ("id", "ts", "status", "amount", "tags", "meta") SELECT e."id", e."ts", e."status", e."amount", e."tags", e."meta" FROM x`;
-  const entries = (prefix: string) => ["id", "ts", "status", "amount", "tags", "meta"].map((n) => `${prefix}"${n}"`);
+  const entries = (prefix: string): string[] => ["id", "ts", "status", "amount", "tags", "meta"].map((n) => `${prefix}"${n}"`);
   const list = (entries: string[]) => {
     const start = text.indexOf(entries.join(", "));
     return { start, end: start + entries.join(", ").length, entries };

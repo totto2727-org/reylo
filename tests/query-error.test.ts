@@ -240,7 +240,7 @@ test("trySync returns the value or the database's error on a synchronous SQLite 
 
 
 // The types alone: never run, checked by the type check.
-export async function types(pg: Query<{}, { id: number }, "one", "postgres">, my: Query<{}, never, "none", "mysql">, lite: Query<{}, never, "none", "sqlite">, pgDb: PostgresClient, myDb: MysqlClient, liteDb: DatabaseSync) {
+export async function types(pg: Query<{}, { id: number }, "one", "postgres">, my: Query<{}, never, "none", "mysql">, lite: Query<{}, never, "none", "sqlite">, pgDb: PostgresClient, myDb: MysqlClient, liteDb: DatabaseSync): Promise<void> {
   const a = await pg.try(pgDb);
   if (a.error) {
     a.value satisfies undefined;

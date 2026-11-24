@@ -102,7 +102,7 @@ export function standardQuery<D extends Dialect, Output>(module: QueryModule<D>,
   let decoders: ((v: unknown) => unknown)[] | undefined;
   // A closure, not `this`: a driver may take `encode` off the object.
   // The statement as Reylo sends it, the comment naming its file included, as `.run()` sends it.
-  const statementText = () => (text ??= sentText(module, compile(module).text));
+  const statementText = (): string => (text ??= sentText(module, compile(module).text));
   return {
     dialect: module.dialect,
     get text() {

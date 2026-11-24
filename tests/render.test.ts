@@ -51,7 +51,7 @@ test("inside a JSON document a composite is an object of its JSON-encoded fields
 
 // oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
 test("one type per SQL type, on every driver: what the run time returns (src/values.ts)", () => {
-  const wire = (name: string, dialect: "postgres" | "mysql" = "postgres") => renderType(scalar(name), false, dialect);
+  const wire = (name: string, dialect: "postgres" | "mysql" = "postgres"): string => renderType(scalar(name), false, dialect);
   assert.deepEqual(["bool", "int2", "int4", "oid", "float4", "float8"].map((n) => wire(n)), ["boolean", "number", "number", "number", "number", "number"]);
   assert.equal(wire("int8"), "bigint");
   assert.deepEqual(["numeric", "money", "date", "timestamp", "timestamptz", "time", "timetz", "interval", "uuid", "text"].map((n) => wire(n)), Array(10).fill("string"));
@@ -188,7 +188,7 @@ const ROUND_TRIPS: Record<"postgres" | "mysql" | "sqlite", [column: EngineType, 
 };
 
 /** An array type's element type, `(a | b)[]` as `a | b`; undefined for any other type. */
-const element = (ts: string) => (ts.endsWith("[]") ? ts.slice(0, -2).replace(/^\((.*)\)$/, "$1") : undefined);
+const element = (ts: string): string | undefined => (ts.endsWith("[]") ? ts.slice(0, -2).replace(/^\((.*)\)$/, "$1") : undefined);
 
 /**
  * Whether every value of the column's type is one the parameter's type takes, member by member of
@@ -199,7 +199,7 @@ const element = (ts: string) => (ts.endsWith("[]") ? ts.slice(0, -2).replace(/^\
 const admits = function (column: EngineType, param: EngineType, dialect: "postgres" | "mysql" | "sqlite"): boolean {
   const returned = renderType(column, false, dialect);
   const taken = renderParamType(param, dialect);
-  const members = (ts: string) => ts.split(" | ");
+  const members = (ts: string): string[] => ts.split(" | ");
   const [returnedElement, takenElement] = [element(returned), element(taken)];
   if (returnedElement !== undefined && takenElement !== undefined) {return members(returnedElement).filter((m) => m !== "null").every((m) => members(takenElement).includes(m) || members(takenElement).includes("unknown"));}
   return members(taken).includes("unknown") || members(returned).every((member) => members(taken).includes(member));

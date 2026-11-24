@@ -77,7 +77,7 @@ const typedValues = { ids: [1, 3], name: "ada", data: [1, { a: "b" }] };
 // oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
 test("postgres: every client gets an array for a SQL array parameter as its literal text; Bun.sql gets a JSON parameter as an object it serializes to its JSON text, postgres.js as its JSON text declared unknown", async () => {
   const seen: unknown[][] = [];
-  const unsafe = async (_: string, values?: unknown[]) => (seen.push(values!), []);
+  const unsafe = async (_: string, values?: unknown[]): Promise<never[]> => (seen.push(values!), []);
   const bun = { unsafe, commitDistributed: async () => {} };
   await execute(bun, typed, typedValues);
   await execute({ unsafe }, typed, typedValues);
@@ -112,7 +112,7 @@ test("postgres: a JSON parameter's value is a JavaScript value, which every driv
   const pgp = { manyOrNone: promiseDriverStub(() => []), query: async (q: any): Promise<any> => (seen.push(q.values), []) };
   await execute(pgp, jsonQuery, jsonValues);
   await execute((_: string, values?: unknown[]) => (seen.push(values!), Promise.resolve([])), jsonQuery, jsonValues);
-  const unsafe = async (_: string, values?: unknown[]) => (seen.push(values!.map((currentValue) => (currentValue !== null && typeof currentValue === "object" ? JSON.stringify(currentValue) : currentValue))), []);
+  const unsafe = async (_: string, values?: unknown[]): Promise<never[]> => (seen.push(values!.map((currentValue) => (currentValue !== null && typeof currentValue === "object" ? JSON.stringify(currentValue) : currentValue))), []);
   const bun = { unsafe, commitDistributed: async () => {} };
   await execute({ unsafe }, jsonQuery, jsonValues);
   await execute(bun, jsonQuery, jsonValues);
@@ -212,7 +212,7 @@ test("a parameter the statement takes no null for refuses null and refuses to be
 test("a query without inputs, defined by hand or built before them, binds every array as it is", async () => {
   const { inputs: _, ...bare } = typed;
   const seen: unknown[][] = [];
-  const unsafe = async (_: string, values?: unknown[]) => (seen.push(values!), []);
+  const unsafe = async (_: string, values?: unknown[]): Promise<never[]> => (seen.push(values!), []);
   const bun = { unsafe, commitDistributed: async () => {} };
   await execute(bun, bare, typedValues);
   await execute({ unsafe }, bare, typedValues);
@@ -239,7 +239,7 @@ test("a Date for any date or time parameter, and a string without its zone for a
   const ok = { at: "2026-10-12 19:06:48.282", day: "2026-10-12", tz: "1970-01-01T00:00:00Z", tzs: ["2026-10-12T19:06:48.282Z", "2026-10-12 19:06:48+09", "2026-10-12 19:06:48.5-07:30", "2026-10-12 19:06 America/Los_Angeles", "2026-10-12 19:06:48 UTC", "infinity", "-infinity", "0001-01-01 00:00:00+00 BC", "+010000-01-01T00:00:00Z"], days: [["2026-10-12"]] };
   await execute(client, q, ok);
   assert.equal(seen.length, 1);
-  const refused = async (values: Record<string, unknown>, message: RegExp) => assert.rejects(Promise.resolve().then(() => execute(client, q, { ...ok, ...values })), (e: Error) => e instanceof TypeError && message.test(e.message));
+  const refused = async (values: Record<string, unknown>, message: RegExp): Promise<void> => assert.rejects(Promise.resolve().then(() => execute(client, q, { ...ok, ...values })), (e: Error) => e instanceof TypeError && message.test(e.message));
   await refused({ at: nativeDriverDate() }, /^Parameter "at" is a timestamp without a time zone, so it takes the wall-clock text/u);
   await refused({ day: nativeDriverDate() }, /^Parameter "day" is a date without a time zone/u);
   await refused({ days: [[nativeDriverDate()]] }, /^Parameter "days" is a date/u);
@@ -263,7 +263,7 @@ test("postgres: postgres.js, which binds a date or time string through new Date(
   const q: QueryModule<"postgres"> = { dialect: "postgres", sql: "select :at::timestamp, :day::date, :tz::timestamptz, :d::timestamptz, :name::text", params: ["at", "day", "tz", "d", "name"], inputs: { at: time("timestamp"), day: time("date"), tz: time("timestamptz"), d: time("timestamptz"), name: time("text") } };
   const values = { at: "2026-01-02 03:04:05.006", day: "infinity", tz: "2026-01-02 03:04:05 America/New_York", d: "1970-01-01T00:00:00Z", name: "ada" };
   const seen: unknown[][] = [];
-  const unsafe = async (_: string, v?: unknown[]) => (seen.push(v!), []);
+  const unsafe = async (_: string, v?: unknown[]): Promise<never[]> => (seen.push(v!), []);
   const typed = (value: unknown, type: number) => ({ value, type });
   const postgresJs = { unsafe, typed };
   await execute(postgresJs, q, values);
@@ -486,7 +486,7 @@ test("mysql: mariadb, which writes a value that is not a Buffer as JSON, gets a 
 test("postgres: Neon's neon() before 0.10, which sends a Buffer as JSON, gets a binary value in Postgres's hex form", async () => {
   const { plain, view } = binary();
   const seen: unknown[][] = [];
-  const sql = (_: string, values?: unknown[]) => (seen.push(values!), Promise.resolve([]));
+  const sql = (_: string, values?: unknown[]): Promise<never[]> => (seen.push(values!), Promise.resolve([]));
   const q: QueryModule<"postgres"> = { dialect: "postgres", sql: "select :plain::bytea, :view::bytea, :buf::bytea, :empty::bytea, :n", params: ["plain", "view", "buf", "empty", "n"] };
   await execute(sql, q, { plain, view, buf: Buffer.from([0, 16, 171]), empty: new Uint8Array(0), n: 1 });
   assert.deepEqual(seen[0], ["\\x0102ff", "\\x0102ff", "\\x0010ab", "\\x", 1]);
@@ -518,7 +518,7 @@ test("a binary parameter takes binary data alone, so base64 text is refused befo
   await execute(client, q, { b: Buffer.from([1]), bs: [plain] });
   await execute(client, q, { b: null, bs: null });
   assert.equal(seen.length, 2);
-  const refused = async (run: () => unknown, message: RegExp) => assert.rejects(Promise.resolve().then(run), (e: Error) => e instanceof TypeError && message.test(e.message));
+  const refused = async (run: () => unknown, message: RegExp): Promise<void> => assert.rejects(Promise.resolve().then(run), (e: Error) => e instanceof TypeError && message.test(e.message));
   await refused(() => execute(client, q, { b: "AQL/", bs: [] }), /^Parameter "b" is binary data, so it takes a Uint8Array \(a Buffer is one\), as `\.run\(\)` returns one; got "AQL\/"\. Decode base64 or hex text into one first\.$/u);
   await refused(() => execute(client, q, { b: plain, bs: [plain, "\\x01"] }), /^Parameter "bs" is binary data, .*got "\\\\x01"/);
   await refused(() => execute(client, q, { b: plain.buffer, bs: [] }), /^Parameter "b" is binary data, .*got an object\. Wrap an ArrayBuffer in one: new Uint8Array\(buffer\)\.$/);
@@ -718,7 +718,7 @@ test("an unsupported client rejects, naming what it has and what reylo takes", a
   // An object with Drizzle's select() but no session over a client is no Drizzle database.
   await assert.rejects(() => execute({ $client: {}, select() {} } as never, pg) as Promise<unknown>, /object with select\. .*or a Drizzle database over one of them\./);
   // Kysely and Prisma decode their values themselves, so each is told to pass the driver's client.
-  class Kysely { public selectFrom() {} public executeQuery() {} public transaction() {} }
+  class Kysely { public selectFrom(): void {} public executeQuery(): void {} public transaction(): void {} }
   await assert.rejects(() => execute(new Kysely() as never, pg) as Promise<unknown>, /object with selectFrom, executeQuery, transaction\. .* Kysely decodes the values of its queries itself: pass the pool or database its dialect was made with\.$/);
   await assert.rejects(() => execute({ $queryRawUnsafe() {}, $transaction() {} } as never, my) as Promise<unknown>, / Prisma decodes the values of its queries itself: pass a client of your database's driver, such as the pool its driver adapter was made with\.$/u);
   // Inside their transactions, neither hands out the connection.
@@ -845,7 +845,7 @@ test("runSync: on a synchronous client the value comes back at once and an error
   const insert = defineQuery<{ email: string }, { id: number }, "one", "sqlite">({ dialect: "sqlite", sql: "insert into users (email) values (:email) returning id", params: ["email"], cardinality: "one" });
   const count = defineQuery<{}, { n: number }, "one", "sqlite">({ dialect: "sqlite", sql: "select count(*) as n from users", params: [], cardinality: "one" });
   // Better-sqlite3's and bun:sqlite's transaction(fn): BEGIN, the function, then COMMIT, or ROLLBACK if it throws.
-  const transaction = (fn: () => void) => {
+  const transaction = (fn: () => void): void => {
     db.exec("begin");
     try {
       fn();

@@ -32,11 +32,11 @@ export function lexPlaceholders(sql: string, dialect: "postgres" | "mysql" | "sq
   const params: string[] = [];
   let largest = 0;
   let i = 0;
-  const push = (name: string, start: number, end: number) => {
+  const push = (name: string, start: number, end: number): void => {
     placeholders.push({ name, start, end });
     if (!params.includes(name)) {params.push(name);}
   };
-  const position = (digits: string) => {
+  const position = (digits: string): string => {
     const n = digits.replace(/^0+(?=\d)/u, "");
     largest = Math.max(largest, Number(n));
     return n;

@@ -82,7 +82,7 @@ export function placer(sql: string) {
     }
     return { line: lo + 1, column: i - lineStarts[lo]! + 1 };
   };
-  const clamp = (byte: number) => index[Math.max(0, Math.min(byte, bytes.length))]!;
+  const clamp = (byte: number): number => index[Math.max(0, Math.min(byte, bytes.length))]!;
   return (start: number, length: number) => {
     const a = at(clamp(start));
     const b = at(clamp(start + length));

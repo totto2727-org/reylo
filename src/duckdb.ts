@@ -149,7 +149,7 @@ let cleanup = false;
  */
 const copyOf = function (path: string, fresh = false): string {
   const wal = `${path}.wal`;
-  const stamp = (p: string) => (existsSync(p) ? `${statSync(p).size}:${statSync(p).mtimeMs}` : "-");
+  const stamp = (p: string): string => (existsSync(p) ? `${statSync(p).size}:${statSync(p).mtimeMs}` : "-");
   const key = `${stamp(path)}/${stamp(wal)}`;
   const held = copies.get(path);
   if (held && held.key === key && !fresh) {return held.file;}

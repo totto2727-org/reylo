@@ -33,15 +33,15 @@ const INCLUDE = ["**/*.sql", "**/.server/**/*.sql"];
 const EXCLUDE = ["**/node_modules/**", "**/{dist,build,out,target,coverage}/**"];
 
 // A path from the working directory, written with `/` on every system, as tsc writes it.
-const shown = (path: string) => relative(process.cwd(), path).split(sep).join("/") || ".";
-const paint = (format: Parameters<typeof styleText>[0], text: string) => styleText(format, text);
+const shown = (path: string): string => relative(process.cwd(), path).split(sep).join("/") || ".";
+const paint = (format: Parameters<typeof styleText>[0], text: string): string => styleText(format, text);
 
 // Node's own glob, which does not descend into a symlinked directory, and on macOS and Windows
 // Matches without regard to case, hence the check of the extension. It also yields directories (a
 // Directory named `x.sql` among them), which are dropped. The patterns read as they always have: one
 // That names a directory takes every file under it, and an include that starts with `!` excludes.
 const sqlFiles = async function (dir: string, include = INCLUDE, exclude: string[] = []): Promise<string[]> {
-  const negated = (p: string) => p.startsWith("!") && !p.startsWith("!(");
+  const negated = (p: string): boolean => p.startsWith("!") && !p.startsWith("!(");
   const patterns = include.filter((p) => !negated(p)).flatMap((p) => {
     const q = p.replace(/\/$/u, "");
     return q.endsWith("*") ? [q] : [q, `${q}/**`];
@@ -151,7 +151,7 @@ const generate = async function (args: string[]): Promise<number> {
     if (unusable) {errors.push([paint("red", unusable)]);}
     const rows: { file: string; ok: boolean }[] = [];
     for (const file of list) {
-      const fail = (...lines: string[]) => {
+      const fail = (...lines: string[]): void => {
         rows.push({ file, ok: false });
         errors.push(lines);
       };

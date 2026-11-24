@@ -16,7 +16,7 @@ import { DRIVERS } from "./helpers.ts";
 const missing = ["better-sqlite3", "@libsql/client", "sqlite3"].find((d) => !existsSync(join(DRIVERS, d)));
 const skip = missing ? `lab/drivers is not installed (no ${missing})` : false;
 
-function link(root: string, driver: string) {
+function link(root: string, driver: string): void {
   const to = join(root, "node_modules", driver);
   mkdirSync(dirname(to), { recursive: true });
   symlinkSync(join(DRIVERS, driver), to);
@@ -104,7 +104,7 @@ test("a session whose connection was released checks a statement it reads from .
 // oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
 test("a refusal is placed at the call or the text it names, in UTF-8 bytes", () => {
   const sql = "-- café\nselect n.id from notes n right join notes m on m.id = n.id";
-  const bytes = (s: string) => new TextEncoder().encode(s).length;
+  const bytes = (s: string): number => new TextEncoder().encode(s).length;
   assert.deepEqual(placeRefusal(sql, 'near "right": syntax error'), { start: bytes(sql.slice(0, sql.indexOf("right"))), length: 5 });
   assert.deepEqual(placeRefusal("select JSON_PRETTY (x) from t", "no such function: json_pretty"), { length: 11, start: 7 });
   // A message that names nothing in the statement points at its first word.
@@ -116,7 +116,7 @@ test("a refusal is placed at the call or the text it names, in UTF-8 bytes", () 
 // Only when a statement compiles.
 const d1 = skip || (!existsSync(join(DRIVERS, "wrangler")) && "lab/drivers has no wrangler installed");
 
-const worker = function (root: string, d1Binding: boolean) {
+const worker = function (root: string, d1Binding: boolean): void {
   const config = { name: "reylo-test", main: "worker.js", compatibility_date: "2026-10-01", ...(d1Binding && { d1_databases: [{ binding: "DB", database_name: "reylo-test", database_id: "00000000-0000-0000-0000-000000000000" }] }) };
   writeFileSync(join(root, "wrangler.jsonc"), JSON.stringify(config));
   writeFileSync(join(root, "worker.js"), "export default { fetch() { return new Response(''); } };\n");

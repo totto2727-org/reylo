@@ -29,7 +29,7 @@ export function serve(handlers: Record<string, Handler>): void {
     }
   });
 
-  async function dispatch(message: { id?: number | string; method: string; params?: unknown }) {
+  async function dispatch(message: { id?: number | string; method: string; params?: unknown }): Promise<void> {
     const handler = handlers[message.method];
     let response: Record<string, unknown>;
     try {

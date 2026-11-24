@@ -179,7 +179,7 @@ export function languageServer(root: string) {
   const child = spawn(process.execPath, [join(ROOT, "node_modules", "typescript", "bin", "tsc"), "--lsp", "--stdio"], { cwd: root, stdio: ["pipe", "pipe", "ignore"] });
   const pending = new Map<number, (result: any) => void>();
   let buffer = Buffer.alloc(0);
-  const write = (message: object) => {
+  const write = (message: object): void => {
     const body = Buffer.from(JSON.stringify({ jsonrpc: "2.0", ...message }), "utf8");
     child.stdin.write(`Content-Length: ${body.length}\r\n\r\n`);
     child.stdin.write(body);
@@ -204,8 +204,8 @@ export function languageServer(root: string) {
       pending.set(++id, resolve);
       write({ id, method, params });
     });
-  const notify = (method: string, params: unknown) => write({ method, params });
-  const close = async () => {
+  const notify = (method: string, params: unknown): void => write({ method, params });
+  const close = async (): Promise<void> => {
     await request("shutdown", undefined);
     notify("exit", undefined);
     await new Promise((resolve) => child.once("exit", resolve));

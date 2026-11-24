@@ -34,7 +34,7 @@ function equalBytes(a: Uint8Array, b: Uint8Array): boolean {
 }
 // Bytes.TrimSpace uses Unicode White_Space, which deliberately excludes BOM.
 function trimSpace(data: Uint8Array): Uint8Array {
-  const ws = (n: number) => (n >= 9 && n <= 13) || n === 32 || n === 0x85 || n === 0xA0 || n === 0x16_80 || (n >= 0x20_00 && n <= 0x20_0A) || n === 0x20_28 || n === 0x20_29 || n === 0x20_2F || n === 0x20_5F || n === 0x30_00;
+  const ws = (n: number): boolean => (n >= 9 && n <= 13) || n === 32 || n === 0x85 || n === 0xA0 || n === 0x16_80 || (n >= 0x20_00 && n <= 0x20_0A) || n === 0x20_28 || n === 0x20_29 || n === 0x20_2F || n === 0x20_5F || n === 0x30_00;
   // The heredoc candidate is already UTF-8 tokenized. Trimming via code points is
   // Safe here and preserves the original bytes by calculating UTF-8 widths.
   let from = 0;
@@ -62,7 +62,7 @@ const scanTokens = function (input: Uint8Array, filename: string, start: Pos, mo
   const startByte = start.byte + bom;
   let pos = { ...start, byte: startByte };
   const tokens: Token[] = [];
-  const emit = (type: string, from: number, to: number) => {
+  const emit = (type: string, from: number, to: number): void => {
     const begin: Pos = { ...pos, column: pos.column + from + startByte - pos.byte, byte: from + startByte };
     const end: Pos = { ...begin, byte: to + startByte };
     const bytes = data.subarray(from, to);
@@ -80,34 +80,34 @@ const scanTokens = function (input: Uint8Array, filename: string, start: Pos, mo
   const retBraces: number[] = [];
   const heredocs: { marker: Uint8Array; startOfLine: boolean }[] = [];
   let braces = 0;
-  const token = (type: string) => emit(type, s.ts, s.te);
-  const selfToken = () => {
+  const token = (type: string): void => emit(type, s.ts, s.te);
+  const selfToken = (): void => {
     if (s.te - s.ts !== 1) {throw new Error('selfToken only works for single-character tokens');}
     const type = selfTokens[data[s.ts]!];
     if (!type) {throw new Error('Unrecognized scanner self token');}
     token(type);
   };
-  const call = (cs: number) => { stack.push(s.cs); s.cs = cs; return true; };
-  const ret = () => {
+  const call = (cs: number): boolean => { stack.push(s.cs); s.cs = cs; return true; };
+  const ret = (): boolean => {
     const cs = stack.pop();
     if (cs === undefined) {throw new Error('HCL scanner return stack underflow');}
     s.cs = cs;
     return true;
   };
-  const end = (kind: 'next' | 'hold' | 'rewind') => {
+  const end = (kind: 'next' | 'hold' | 'rewind'): void => {
     if (kind === 'next') {s.te = s.p + 1;}
     else if (kind === 'hold') { s.te = s.p; s.p--; }
     else {s.p = s.te - 1;}
   };
-  const lit = (type: string, kind: 'next' | 'hold' | 'rewind') => { end(kind); token(type); };
-  const interp = (type: string, kind: 'next' | 'hold') => {
+  const lit = (type: string, kind: 'next' | 'hold' | 'rewind'): void => { end(kind); token(type); };
+  const interp = (type: string, kind: 'next' | 'hold'): boolean => {
     lit(type, kind);
     braces++;
     retBraces.push(braces);
     if (heredocs.length) {heredocs[heredocs.length - 1]!.startOfLine = false;}
     return call(tables.en_main);
   };
-  const midline = (kind: 'hold' | 'rewind') => {
+  const midline = (kind: 'hold' | 'rewind'): void => {
     end(kind);
     heredocs[heredocs.length - 1]!.startOfLine = false;
     token('TokenStringLit');
@@ -305,7 +305,7 @@ export function checkInvalidTokens(tokens: Token[]): Diagnostic[] {
     tabs: false,
   };
   for (const tok of tokens) {
-    const add = (summary: string, detail: string) => diagnostics.push({ severity: 'error', summary, detail, subject: { ...tok.range, start: { ...tok.range.start }, end: { ...tok.range.end } } });
+    const add = (summary: string, detail: string): number => diagnostics.push({ severity: 'error', summary, detail, subject: { ...tok.range, start: { ...tok.range.start }, end: { ...tok.range.end } } });
     switch (tok.type) {
       case 'TokenBitwiseAnd': case 'TokenBitwiseOr': case 'TokenBitwiseXor': case 'TokenBitwiseNot': {
         if (reported.bitwise < bitwiseReportLimit) {

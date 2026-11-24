@@ -142,7 +142,7 @@ function check(schema: Schema, value: unknown, path: string, out: Failure[]): Ev
     if (matchesNumber(s.maxProperties) && keys.length > s.maxProperties) {return fail(out, path, `must have at most ${s.maxProperties} keys`);}
     if (matchesNumber(s.minProperties) && keys.length < s.minProperties) {return fail(out, path, `must have at least ${s.minProperties} keys`);}
     // A key is the object's own: `toString` and `__proto__` are keys only where the value has them.
-    const has = (key: string) => Object.prototype.hasOwnProperty.call(o, key);
+    const has = (key: string): boolean => Object.prototype.hasOwnProperty.call(o, key);
     if (Array.isArray(s.required)) {for (const key of s.required as string[]) {if (!has(key)) {return fail(out, path, `must have the key "${key}"`);}}}
     if (s.dependentRequired && hasObjectType(s.dependentRequired)) {
       for (const [key, needs] of Object.entries(s.dependentRequired as Record<string, string[]>)) {
@@ -460,7 +460,7 @@ const JOINING = /[\p{Script=Arabic}\p{Script=Syriac}\p{Script=Nko}\p{Script=Mong
 function uLabel(label: string): boolean {
   const cps = [...label];
   if (cps.length === 0 || /^\p{M}/u.test(label) || label.slice(2, 4) === "--") {return false;}
-  const at = (i: number) => cps[i] ?? "";
+  const at = (i: number): string => cps[i] ?? "";
   for (let i = 0; i < cps.length; i++) {
     const c = cps[i]!.codePointAt(0)!;
     if (DISALLOWED.has(c)) {return false;}
@@ -493,7 +493,7 @@ function punycode(input: string): string | undefined {
   const output = delimiter > 0 ? [...input.slice(0, delimiter)].map((c) => c.codePointAt(0)!) : [];
   if (output.some((c) => c >= 0x80)) {return undefined;}
   let n = 128; let i = 0; let bias = 72;
-  const adapt = (delta: number, points: number, first: boolean) => {
+  const adapt = (delta: number, points: number, first: boolean): number => {
     delta = first ? Math.floor(delta / damp) : delta >> 1;
     delta += Math.floor(delta / points);
     let k = 0;
@@ -503,7 +503,7 @@ function punycode(input: string): string | undefined {
     }
     return k + Math.floor(((base - tMin + 1) * delta) / (delta + skew));
   };
-  const digit = (c: string) => (/[a-z]/u.test(c) ? c.charCodeAt(0) - 97 : /[0-9]/u.test(c) ? c.charCodeAt(0) - 22 : -1);
+  const digit = (c: string): number => (/[a-z]/u.test(c) ? c.charCodeAt(0) - 97 : /[0-9]/u.test(c) ? c.charCodeAt(0) - 22 : -1);
   let pos = delimiter > 0 ? delimiter + 1 : 0;
   if (pos >= input.length && delimiter <= 0) {return undefined;}
   while (pos < input.length) {
@@ -532,7 +532,7 @@ function ipv6(v: string): boolean {
   if (!/^[0-9a-f:.]+$/i.test(v) || v.includes(":::")) {return false;}
   const halves = v.split("::");
   if (halves.length > 2) {return false;}
-  const groups = (h: string) => (h === "" ? [] : h.split(":"));
+  const groups = (h: string): string[] => (h === "" ? [] : h.split(":"));
   const parts = halves.flatMap(groups);
   const last = parts[parts.length - 1] ?? "";
   const v4 = last.includes(".");

@@ -39,7 +39,7 @@ const traced = async function (fn: () => unknown): Promise<Event[]> {
   return events;
 };
 
-const names = (events: Event[]) => events.map((currentEvent) => currentEvent.name);
+const names = (events: Event[]): string[] => events.map((currentEvent) => currentEvent.name);
 
 // oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
 test(".run() publishes one call, which ends when its promise settles", async () => {
@@ -146,7 +146,7 @@ test("a store bound to start is the current one while the driver runs, so its sp
 test("a query builds no context while nothing subscribes, and is published once anything subscribes to any event", () => {
   assert.equal(listening(), undefined);
   Iterator.from(["start", "end", "asyncStart", "asyncEnd", "error"] as const).forEach((event) => {
-    const listener = () => {};
+    const listener = (): void => {};
     channel[event].subscribe(listener);
     assert.ok(listening(), event);
     channel[event].unsubscribe(listener);

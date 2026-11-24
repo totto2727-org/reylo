@@ -199,7 +199,7 @@ const plan = function (name: string, kind: Kind, exact: boolean): Plan {
   // Refused. In a column with no type, or one built from what may be TEXT, the digits may be a
   // TEXT's, and stay as the driver gave them (wiki/driver-decoding.md). Any other text in a column of
   // Numbers or BLOBs alone is a TEXT the column's type does not allow.
-  const digits = (v: string) => (DIGITS.test(v) ? exactInteger(BigInt(v), name) : texts ? v : refuse(v));
+  const digits = (v: string): string | number => (DIGITS.test(v) ? exactInteger(BigInt(v), name) : texts ? v : refuse(v));
   const str = numericOnly(kinds) || (numbers && !texts) ? digits : texts ? undefined : refuse;
   // A NUMERIC's either: read as numbers, one past 2^53 may be a rounded INTEGER, which is refused.
   if (!exact && kinds.includes("int")) {return { name, big: (v) => exactInteger(v, name), num: (v) => (Number.isInteger(v) ? exactInteger(v, name) : v), str, blob };}

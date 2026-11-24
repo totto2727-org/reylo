@@ -7,15 +7,15 @@ import { matchesBoolean, matchesNull, matchesNumber, matchesString, matchesUndef
 
 const sqliteTypes = new Set(["integer", "int", "int2", "int8", "tinyint", "smallint", "mediumint", "bigint", "unsigned big int", "text", "clob", "blob", "real", "double", "double precision", "float", "numeric", "decimal", "boolean", "bool", "date", "datetime", "json", "varchar", "character", "char", "nchar", "nvarchar", "native character", "varying character"]);
 const actions = new Map([["NO_ACTION", "NO ACTION"], ["RESTRICT", "RESTRICT"], ["SET_NULL", "SET NULL"], ["SET_DEFAULT", "SET DEFAULT"], ["CASCADE", "CASCADE"]]);
-const identifier = (value: string) => `"${value.replaceAll('"', '""')}"`;
-const quoted = (value: string) => `'${value.replaceAll("'", "''")}'`;
+const identifier = (value: string): string => `"${value.replaceAll('"', '""')}"`;
+const quoted = (value: string): string => `'${value.replaceAll("'", "''")}'`;
 
 const fail: (node: { range: { filename: string; start: { line: number; column: number } } }, message: string) => never = (node, message) => {
   const { filename, start } = node.range;
   throw new Error(`${filename}:${start.line}:${start.column}: ${message}`);
 };
 
-const shape = function (body: Body, attributes: Readonly<string[]>, blocks: Readonly<string[]>) {
+const shape = function (body: Body, attributes: Readonly<string[]>, blocks: Readonly<string[]>): void {
   Object.values(body.attributes).forEach((attribute) => {if (!attributes.includes(attribute.name)) {fail(attribute, `Unsupported Atlas SQLite attribute ${attribute.name}.`);}});
   Iterator.from(body.blocks).forEach((block) => {if (!blocks.includes(block.type)) {fail(block, `Unsupported Atlas SQLite block ${block.type}.`);}});
 };

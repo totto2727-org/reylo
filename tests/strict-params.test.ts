@@ -24,7 +24,7 @@ const project = function (url: string, reylo: string | undefined, driver?: strin
   return root;
 };
 
-const message = (written: string, file = ".reylo.yaml") => `Nothing in the statement gives the parameter ${written} a type; cast it, as in ${written}::text, or set strict_params: false in ${file}.`;
+const message = (written: string, file = ".reylo.yaml"): string => `Nothing in the statement gives the parameter ${written} a type; cast it, as in ${written}::text, or set strict_params: false in ${file}.`;
 
 /** On MySQL every `::` cast types its parameter, through the server's describe of the cast. */
 const CASTS = {
@@ -34,7 +34,7 @@ const CASTS = {
 const CAST_TYPES = /export type Params = \{ a: number; b: number; c: string; d: number; e: string; f: string; g: string; h: Uint8Array; i: string; j: string; n: number \}/u;
 
 /** A JSON cast without a schema types its parameter as JSON, which is no `unknown`, so it is never flagged; the TypeScript type of any JSON value is `unknown` all the same. */
-const jsonCast = async function (url: string, json: string, driver?: string) {
+const jsonCast = async function (url: string, json: string, driver?: string): Promise<void> {
   const out = await transform(project(url, undefined, driver), { "json.sql": json, "cast.sql": "select :x::text as x\n" });
   assert.deepEqual(out["json.sql"]!.diagnostics, []);
   assert.deepEqual(out["cast.sql"]!.diagnostics, []);

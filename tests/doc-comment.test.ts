@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import { docComment, leadingComment, statementAfter } from "../src/doc-comment.ts";
 import type { Dialect } from "../src/engine.ts";
 
-const read = (sql: string, dialect?: Dialect) => {
+const read = (sql: string, dialect?: Dialect): string[] => {
   const leading = leadingComment(sql, dialect);
   return [leading.prose, statementAfter(sql, leading)];
 };

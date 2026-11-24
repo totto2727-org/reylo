@@ -289,10 +289,10 @@ export function duckdbInterval(text: string): string {
 
 // --- Decoding --------------------------------------------------------------------------------
 
-const pad = (n: number | bigint, width = 2) => String(n).padStart(width, "0");
+const pad = (n: number | bigint, width = 2): string => String(n).padStart(width, "0");
 
 /** An ISO 8601 year: four digits from 0000 to 9999, and a sign and six digits outside them. */
-const isoYear = (y: number) => (y >= 0 && y <= 9999 ? pad(y, 4) : `${y < 0 ? "-" : "+"}${pad(Math.abs(y), 6)}`);
+const isoYear = (y: number): string => (y >= 0 && y <= 9999 ? pad(y, 4) : `${y < 0 ? "-" : "+"}${pad(Math.abs(y), 6)}`);
 
 /** The date `days` after 1970-01-01 in the proleptic Gregorian calendar, year 0 being 1 BC. */
 const civil = function (days: number): string {

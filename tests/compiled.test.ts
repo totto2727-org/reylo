@@ -122,7 +122,7 @@ test("SQLite: a statement that fires no trigger declares its QueryError narrowed
   const audited = "insert into audited (id) values (:id)\n";
   try {
     const declared = await declarations(root, { "insert_user.sql": insert, "insert_audited.sql": audited });
-    const queryError = (file: string) => /^export type QueryError = ([\s\S]*?>);$/m.exec(declared[file]!)![1];
+    const queryError = (file: string): string | undefined => /^export type QueryError = ([\s\S]*?>);$/m.exec(declared[file]!)![1];
     assert.equal(queryError("insert_user.sql"), [
       `import("@totto2727/reylo").SqliteQueryError<{`,
       `  "SQLITE_CONSTRAINT": { columns: readonly ["email"] | readonly ["id"] | readonly ["rowid"]; table: "users" };`,

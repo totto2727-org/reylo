@@ -39,7 +39,7 @@ test("reylo play analyzes each statement against the project's database, without
   const play = await startPlay({ cwd: root, port: 0, env: {} });
   try {
     assert.match(play.label, /^SQLite at .*app\.db \("direct_url" in \.reylo\.yaml\)$/);
-    const q = (sql: string) => `${play.url}api/analyze?q=${encodeURIComponent(sql)}`;
+    const q = (sql: string): string => `${play.url}api/analyze?q=${encodeURIComponent(sql)}`;
 
     const user = await get(q("select id, name, email from users where id = :id"));
     assert.equal(user.status, 200);

@@ -539,7 +539,7 @@ export async function releaseConnections(): Promise<void> {
   await Promise.all([...sessions.values()].map((session) => session.release()));
 }
 
-const sha256 = (text: string) => createHash("sha256").update(text).digest("hex");
+const sha256 = (text: string): string => createHash("sha256").update(text).digest("hex");
 
 /**
  * One query per dialect whose rows change when anything an analysis reads changes: relations and
@@ -562,15 +562,15 @@ const sha256 = (text: string) => createHash("sha256").update(text).digest("hex")
 // Through a query of bare operators, which a user's `=` of oids answers too: a view's or a rule's
 // Row is then NULL, and left out.
 const NS = `not (n.nspname operator(pg_catalog.=) any ('{pg_catalog,information_schema}'::pg_catalog.name[])) and n.nspname operator(pg_catalog.!~) '^pg_(toast|temp)'::pg_catalog.text`;
-const cat = (...parts: string[]) => parts.join(" operator(pg_catalog.||) ");
-const lit = (s: string) => `'${s}'::pg_catalog.text`;
-const line = (tag: string, ...fields: string[]) => cat(lit(`${tag} `), ...fields.flatMap((field, i) => (i ? [lit(" "), field] : [field])));
-const out = (type: string, value: string) => `pg_catalog.textin(pg_catalog.${type}out(${value}))`;
-const txt = (value: string) => `${value}::pg_catalog.text`;
-const md5 = (value: string) => `pg_catalog.md5(${value})`;
-const or = (value: string) => `coalesce(${value}, ''::pg_catalog.text)`;
-const eq = (a: string, b: string) => `${a} operator(pg_catalog.=) ${b}`;
-const rel = (alias: string, column: string) => `join pg_catalog.pg_class c on ${eq("c.oid", `${alias}.${column}`)} join pg_catalog.pg_namespace n on ${eq("n.oid", "c.relnamespace")}`;
+const cat = (...parts: string[]): string => parts.join(" operator(pg_catalog.||) ");
+const lit = (s: string): string => `'${s}'::pg_catalog.text`;
+const line = (tag: string, ...fields: string[]): string => cat(lit(`${tag} `), ...fields.flatMap((field, i) => (i ? [lit(" "), field] : [field])));
+const out = (type: string, value: string): string => `pg_catalog.textin(pg_catalog.${type}out(${value}))`;
+const txt = (value: string): string => `${value}::pg_catalog.text`;
+const md5 = (value: string): string => `pg_catalog.md5(${value})`;
+const or = (value: string): string => `coalesce(${value}, ''::pg_catalog.text)`;
+const eq = (a: string, b: string): string => `${a} operator(pg_catalog.=) ${b}`;
+const rel = (alias: string, column: string): string => `join pg_catalog.pg_class c on ${eq("c.oid", `${alias}.${column}`)} join pg_catalog.pg_namespace n on ${eq("n.oid", "c.relnamespace")}`;
 const PG_CLASS = "'pg_catalog.pg_class'::pg_catalog.regclass::pg_catalog.oid";
 const USER = "'16384'::pg_catalog.oid";
 const POSTGRES_FINGERPRINT = `select pg_catalog.md5(coalesce(pg_catalog.string_agg(t.x, E'\\n'::pg_catalog.text order by t.x), ''::pg_catalog.text)) from (

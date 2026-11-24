@@ -339,7 +339,7 @@ async function executeAsync(c: AnyClient | null | undefined, query: QueryModule,
   }
   const { text, values, names } = statement(query, params);
   const type = (i: number) => query.inputs?.[names[i]!]?.type;
-  const isJsonParam = (v: unknown, i: number) => isJsonValue(query, names[i]!, v);
+  const isJsonParam = (v: unknown, i: number): boolean => isJsonValue(query, names[i]!, v);
   switch (query.dialect) {
     case "postgres": {
       // An array for a SQL array parameter goes as its literal text, which the server reads as
@@ -619,7 +619,7 @@ const JSON_NULL: unique symbol = Symbol("JSON null");
 const jsonValue = (v: unknown) => (v === JSON_NULL ? null : v);
 
 /** A JSON parameter's value as the JSON text a driver binds. */
-const jsonText = (v: unknown) => JSON.stringify(jsonValue(v));
+const jsonText = (v: unknown): string => JSON.stringify(jsonValue(v));
 
 // A date or time value's type says whether it has a zone (src/render.ts),
 // And a value that would be read in a zone nobody chose is refused before the
@@ -631,7 +631,7 @@ const jsonText = (v: unknown) => JSON.stringify(jsonValue(v));
 // Server sets, and a Date is refused too, as every other type's value is but a string,
 // With the call that writes it as one.
 
-const isTime = (type: EngineType | undefined) => type?.kind === "scalar" && type.name.split("|").every((part) => part === "timestamp" || part === "timestamptz" || part === "date");
+const isTime = (type: EngineType | undefined): boolean => type?.kind === "scalar" && type.name.split("|").every((part) => part === "timestamp" || part === "timestamptz" || part === "date");
 
 function checkTime(type: EngineType | undefined, name: string, v: unknown): void {
   if (matchesUndefined(type) || matchesNullish(v)) {return;}
@@ -746,14 +746,14 @@ export function arrayLiteral(array: Readonly<unknown[]>, delim = ","): string {
 
 /** Pg's `dateToString`: the local date and time to the millisecond, then the offset; BC for a year before 1. */
 function dateText(d: Date): string {
-  const pad = (n: number, width = 2) => String(n).padStart(width, "0");
+  const pad = (n: number, width = 2): string => String(n).padStart(width, "0");
   const year = d.getFullYear();
   const offset = -d.getTimezoneOffset();
   const abs = Math.abs(offset);
   return `${pad(year < 1 ? 1 - year : year, 4)}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}.${pad(d.getMilliseconds(), 3)}${offset < 0 ? "-" : "+"}${pad(Math.floor(abs / 60))}:${pad(abs % 60)}${year < 1 ? " BC" : ""}`;
 }
 
-function indexOf(query: QueryModule, p: { name: string; start: number; end: number }) {
+function indexOf(query: QueryModule, p: { name: string; start: number; end: number }): number {
   const index = query.params.indexOf(p.name);
   // A hand-built query whose `params` misses a placeholder would bind `$0`.
   if (index === -1) {throw new Error(`The statement's placeholder ${query.sql.slice(p.start, p.end)} is parameter "${p.name}", which the query's params (${JSON.stringify(query.params)}) do not list.`);}

@@ -332,7 +332,7 @@ from users u where u.id = :id::int`,
     { o: { big: 9_007_199_254_740_992, score: 1.5, flag: 1, more: 0, pair: ["ann", 1.5], doc: "[1]" }, doc: "[1]", glued: '{"n":"ann"}' },
     { o: { big: null, score: null, flag: 0, more: 1, pair: ["bob", null], doc: null }, doc: null, glued: '{"n":"bob"}' },
   ];
-  const check = async (label: string, run: (q: any, params?: object) => unknown) => {
+  const check = async (label: string, run: (q: any, params?: object) => unknown): Promise<void> => {
     assert.deepEqual(plain(await run(profile, { id: 1 })), ann, `${label}: the profile`);
     assert.deepEqual(plain(await run(profile, { id: 2 })), bob, `${label}: a user with no posts`);
     assert.deepEqual(plain(await run(values)), rows, `${label}: the values`);

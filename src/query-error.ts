@@ -205,7 +205,7 @@ class DatabaseError extends Error {
 Object.defineProperty(DatabaseError.prototype, "name", { value: "QueryError", writable: true, configurable: true });
 
 const SQLSTATE = /^[0-9A-Z]{5}$/u;
-const text = (v: unknown) => (matchesString(v) && v !== "" ? v : undefined);
+const text = (v: unknown): string | undefined => (matchesString(v) && v !== "" ? v : undefined);
 const record = (e: unknown): Record<string, unknown> | undefined => (hasObjectType(e) && !matchesNull(e) ? (e as Record<string, unknown>) : undefined);
 
 function postgresError(error: unknown) {
@@ -358,7 +358,7 @@ function sqliteError(error: unknown) {
   let message = e.message;
   const codes: number[] = [];
   let named = false;
-  const name = (v: unknown) => {
+  const name = (v: unknown): void => {
     if (!matchesString(v) || !SQLITE_NAME.test(v)) {return;}
     named = true;
     const code = (SQLITE_CODES as Record<string, number>)[v];

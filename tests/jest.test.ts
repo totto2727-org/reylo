@@ -84,7 +84,7 @@ const cachedProject = async function () {
   await writeFile(`${dir}/vitest.config.mjs`, `import reylo from "@totto2727/reylo/vite";\nexport default { plugins: [reylo()], test: { globals: true, fsModuleCache: true } };\n`);
   await writeFile(`${dir}/by-email.sql`, "select id, name from users where email = :email\n");
   await writeFile(`${dir}/by-email.test.mjs`, `import { appendFileSync } from "node:fs";\nimport query from "./by-email.sql";\ntest("by-email", () => appendFileSync(new URL("./seen.txt", import.meta.url), query.cardinality + "\\n"));\n`);
-  const exec = (sql: string) => {
+  const exec = (sql: string): void => {
     const db = new DatabaseSync(`${dir}/app.db`);
     db.exec(sql);
     db.close();
@@ -100,7 +100,7 @@ const cachedProject = async function () {
 // oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
 test("Vitest's module cache makes a .sql module again after a migration", { skip }, async () => {
   const { dir, exec, seen } = await cachedProject();
-  const vitest = async () => {
+  const vitest = async (): Promise<void> => {
     const r = await run("vitest/vitest.mjs", ["run"], "", dir);
     assert.equal(r.status, 0, r.output);
   };
@@ -116,7 +116,7 @@ test("Vitest's watch mode makes a .sql module again when the type check analyzes
   const { dir, exec, seen } = await cachedProject();
   // The type check (here `reylo generate`) writes the statement's entry to `.reylo/`, which the
   // Module is built from; it is there before Vitest starts, so that its first run writes none.
-  const generate = async () => {
+  const generate = async (): Promise<void> => {
     const r = await runChild(process.execPath, [`${root}/src/cli.ts`, "generate"], { cwd: dir, env: env() });
     assert.equal(r.status, 0, r.stdout + r.stderr);
   };
@@ -125,7 +125,7 @@ test("Vitest's watch mode makes a .sql module again when the type check analyzes
   let output = "";
   watch.stdout.on("data", (chunk) => (output += chunk));
   watch.stderr.on("data", (chunk) => (output += chunk));
-  const until = async (lines: number) => {
+  const until = async (lines: number): Promise<void> => {
     for (const deadline = Date.now() + 30_000; (await seen()).length < lines; await sleep(100)) {if (Date.now() > deadline) {assert.fail(`no run ${lines} of the test:\n${output}`);}}
   };
   try {

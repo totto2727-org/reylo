@@ -16,8 +16,8 @@ export function parseType(text: string): Node {
   // A doc comment is one token, the field's that follows it.
   const tokens = text.match(/\/\*\*[\s\S]*?\*\/|"(?:[^"\\]|\\.)*"|[A-Za-z_$][\w$]*(?:<[^<>]*>)?|\[\]|[{}()[\]|;:?,]/g) ?? [];
   let at = 0;
-  const peek = () => tokens[at];
-  const take = (expected?: string) => {
+  const peek = (): string | undefined => tokens[at];
+  const take = (expected?: string): string => {
     const token = tokens[at++];
     if (matchesUndefined(token) || (!matchesUndefined(expected) && token !== expected)) {throw new Error(`type-format: expected ${expected ?? "a token"} at ${at - 1} in ${text}`);}
     return token;
@@ -79,7 +79,7 @@ export function parseType(text: string): Node {
 }
 
 /** A doc comment on one line: `/** line one line two *\/`. */
-const oneLineDoc = (doc: string) => doc.replace(/\n\s*\*\/$/u, " */").replace(/(?:\n[ \t]*\*[ \t]*)+/g, " ").replace(/^\/\*\*\s*/u, "/** ");
+const oneLineDoc = (doc: string): string => doc.replace(/\n\s*\*\/$/u, " */").replace(/(?:\n[ \t]*\*[ \t]*)+/g, " ").replace(/^\/\*\*\s*/u, "/** ");
 
 /** Whether an object in the type has a field with a doc comment. */
 const hasDoc = (node: Node): boolean =>
@@ -117,7 +117,7 @@ const print = function (node: Node, indent: number, lead: number, width: number,
     }
     case "object": {
       const inner = " ".repeat(indent + 2);
-      const doc = (text: string | undefined) => (text ? `${text.split("\n").map((line) => inner + line).join("\n")}\n` : "");
+      const doc = (text: string | undefined): string => (text ? `${text.split("\n").map((line) => inner + line).join("\n")}\n` : "");
       return `{\n${node.members.map((m) => `${doc(m.doc)}${inner}${m.key}: ${print(m.type, indent + 2, indent + 2 + m.key.length + 2, width, 1)};`).join("\n")}\n${" ".repeat(indent)}}`;
     }
     case "union": {

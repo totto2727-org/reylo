@@ -49,7 +49,7 @@ function parseArgs(args: string[]): { port?: number; open: boolean; help: boolea
   for (let i = 0; i < args.length; i++) {
     const a = args[i]!;
     const [flag, inline] = a.startsWith("--") && a.includes("=") ? [a.slice(0, a.indexOf("=")), a.slice(a.indexOf("=") + 1)] : [a, undefined];
-    const value = () => inline ?? args[++i];
+    const value = (): string | undefined => inline ?? args[++i];
     if (flag === "--help" || flag === "-h") {out.help = true;}
     else if (flag === "--no-open") {out.open = false;}
     else if (flag === "--port") {
@@ -121,7 +121,7 @@ function listen(server: ReturnType<typeof createServer>, port: number | undefine
   // A port the caller names is that port or nothing; the default moves up past ports in use.
   const tries = matchesUndefined(port) ? Array.from({ length: 20 }, (_, i) => DEFAULT_PORT + i) : [port];
   return new Promise((done) => {
-    const attempt = (i: number) => {
+    const attempt = (i: number): void => {
       if (i >= tries.length) {return done(undefined);}
       server.once("error", (e: NodeJS.ErrnoException) => (e.code === "EADDRINUSE" ? attempt(i + 1) : done(undefined)));
       server.listen(tries[i], "127.0.0.1", () => {
@@ -269,7 +269,7 @@ select ddl from (
 
 /** The schema as the page shows it where the database refuses to give it: each table's columns, as a CREATE TABLE writes them. */
 function schemaText(dialect: Dialect, cat: Catalog): string {
-  const q = (name: string) => (/^[a-z_][a-z0-9_]*$/u.test(name) ? name : dialect === "mysql" ? `\`${name}\`` : `"${name.replace(/"/gu, '""')}"`);
+  const q = (name: string): string => (/^[a-z_][a-z0-9_]*$/u.test(name) ? name : dialect === "mysql" ? `\`${name}\`` : `"${name.replace(/"/gu, '""')}"`);
   return cat.tables
     .map((t) => {
       const width = Math.max(...t.columns.map((column) => q(column.name).length));
@@ -286,7 +286,7 @@ async function handle(req: IncomingMessage, res: ServerResponse, backend: Backen
   // Only this machine's own pages and tools: a page on another site that sends a request here, or
   // A DNS name rebound to 127.0.0.1, names another host or origin, and is refused, so no web page
   // Reads the schema through the playground.
-  const local = (host: string | undefined) => !!host && [`127.0.0.1:${port}`, `localhost:${port}`, `[::1]:${port}`].includes(host);
+  const local = (host: string | undefined): boolean => !!host && [`127.0.0.1:${port}`, `localhost:${port}`, `[::1]:${port}`].includes(host);
   const origin = req.headers.origin;
   if (!local(req.headers.host) || (!matchesUndefined(origin) && !local(origin.replace(/^http:\/\//u, "")))) {return send(res, 403, { error: "the playground answers this machine's own pages and tools only" });}
   const url = new URL(req.url ?? "/", `http://${req.headers.host}`);

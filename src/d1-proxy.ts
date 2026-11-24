@@ -17,7 +17,7 @@ type D1Statement = { bind(...values: unknown[]): D1Statement; all(): Promise<{ r
 type D1 = { prepare(sql: string): D1Statement; batch(statements: D1Statement[]): Promise<unknown> };
 type Message = { kind: "schema"; ddl: string[] } | { kind: "explain"; id: number; sql: string; params: number } | { kind: "close" };
 
-const send = (message: object) => process.send?.(message);
+const send = (message: object): boolean | undefined => process.send?.(message);
 const [wrangler, dir] = process.argv.slice(2);
 process.chdir(dir!);
 const { getPlatformProxy } = (await import(pathToFileURL(wrangler!).href)) as {
@@ -34,7 +34,7 @@ send({ kind: "ready", d1: !matchesUndefined(db) });
  * with it), then each statement runs, one at a time: a table D1 cannot make (a module its build
  * lacks) is left out, and a statement that reads it fails as it would on D1.
  */
-const replay = async function (d1: D1, ddl: string[]) {
+const replay = async function (d1: D1, ddl: string[]): Promise<void> {
   const { results } = await d1
     .prepare("select type, name from sqlite_schema where type in ('view', 'table') and substr(name, 1, 7) <> 'sqlite_' and substr(name, 1, 4) <> '_cf_' order by type = 'table', rowid")
     .all();
@@ -42,7 +42,7 @@ const replay = async function (d1: D1, ddl: string[]) {
   for (const statement of ddl) {await d1.prepare(statement).run().catch(() => {});}
 };
 
-const handle = async function (message: Message) {
+const handle = async function (message: Message): Promise<void> {
   if (message.kind === "close" || !db) {
     await proxy.dispose().catch(() => {});
     process.exit(0);

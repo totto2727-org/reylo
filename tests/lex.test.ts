@@ -6,7 +6,7 @@ import { defineQuery } from "../src/index.ts";
 import { engine as load } from '../src/engine.ts';
 import type { Dialect } from '../src/engine.ts';
 
-const names = (sql: string, dialect: "postgres" | "mysql" | "sqlite" = "postgres") => lexPlaceholders(sql, dialect).params;
+const names = (sql: string, dialect: "postgres" | "mysql" | "sqlite" = "postgres"): string[] => lexPlaceholders(sql, dialect).params;
 
 // oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
 test("the named forms, the dialect's own positional form, and a position is its number", () => {

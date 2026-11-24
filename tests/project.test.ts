@@ -127,7 +127,7 @@ test("a $(command) in direct_url is replaced by what it prints, once per process
   const e = await engine("sqlite");
   // The command counts its runs in a file beside it, and prints a password a URL cannot hold as it is.
   const root = tree({ "package.json": "{}", ".reylo.yaml": "direct_url: postgres://app:$(echo run >> runs.txt; printf 'p@ss/w?rd&x')@db.internal:5432/app\n" });
-  const runs = () => readFileSync(join(root, "runs.txt"), "utf8").split("\n").filter(Boolean).length;
+  const runs = (): number => readFileSync(join(root, "runs.txt"), "utf8").split("\n").filter(Boolean).length;
   const r = resolveProject(e, root, {});
   assert.equal(r.error, undefined);
   assert.equal(r.url, "postgres://app:p%40ss%2Fw%3Frd%26x@db.internal:5432/app");
@@ -213,7 +213,7 @@ test("url is never the type check's connection: alone, it draws a notice and DAT
 
 // oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
 test(".reylo/ names an entry by its statement, then its server: never by url or a password", async () => {
-  const entry = async (yaml: string, env: Record<string, string>) => {
+  const entry = async (yaml: string, env: Record<string, string>): Promise<string[]> => {
     const session = await Session.open(tree({ "package.json": "{}", ".reylo.yaml": yaml }), env);
     await session.close();
     return basename(session.entryFile("select 1")).replace(/\.json$/u, "").split("-");

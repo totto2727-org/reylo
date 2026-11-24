@@ -17,7 +17,7 @@ import { engine } from "../src/engine.ts";
 const tmp = fileURLToPath(new URL("../tmp/", import.meta.url));
 const INDEX = new URL("../src/index.ts", import.meta.url).href;
 const SELECT = "select id, name from users where id = :id";
-const schema = (nullable = false) => `schema "main" {}
+const schema = (nullable = false): string => `schema "main" {}
 table "users" {
   schema = schema.main
   column "id" {
@@ -34,7 +34,7 @@ table "users" {
 }
 `;
 
-const project = function () {
+const project = function (): string {
   mkdirSync(tmp, { recursive: true });
   const root = mkdtempSync(join(tmp, "reylo-hcl-"));
   writeFileSync(join(root, "package.json"), "{}");
