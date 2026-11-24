@@ -41,6 +41,7 @@ const SCALAR_OIDS: Readonly<Record<number, ScalarKind>> = {
 
 // Every built-in array type and its element, as Postgres 18's pg_type lists them (none was ever
 // Renumbered): `_record` is left out, since an array of row values is its text.
+/* oxlint-disable eslint/no-magic-numbers -- Array OID and element OID pairs are fixed PostgreSQL catalog data. */
 const ARRAY_OIDS = new Map<number, number>([
   [143, 142], [199, 114], [271, 5069], [629, 628], [651, 650], [719, 718], [775, 774], [791, 790], [1000, 16], [1001, 17],
   [1002, 18], [1003, 19], [1005, 21], [1006, 22], [1007, 23], [1008, 24], [1009, 25], [1010, 27], [1011, 28], [1012, 29],
@@ -52,6 +53,7 @@ const ARRAY_OIDS = new Map<number, number>([
   [3909, 3908], [3911, 3910], [3913, 3912], [3927, 3926], [4073, 4072], [4090, 4089], [4097, 4096], [4192, 4191],
   [5039, 5038], [6150, 4451], [6151, 4532], [6152, 4533], [6153, 4534], [6155, 4535], [6157, 4536],
 ]);
+/* oxlint-enable eslint/no-magic-numbers */
 const BOX_ARRAY = 1020;
 
 /** A built-in type's kind and its array delimiter; undefined for a type the database created. */
@@ -429,7 +431,10 @@ const SLONIK_TEXT = [
 ];
 
 /** Kinds whose value must reach Reylo as text: anything else is one a driver already converted, and may have rounded. */
-const SLONIK_STRICT = /^(decimal|date|timestamp|timestamptz|interval)(\[\])*$/u;
+const SLONIK_STRICT = /^(?:decimal|date|timestamp|timestamptz|interval)(?:\[\])*$/u;
+const FIRST_PARAMETER_POSITION = 1;
+const KIND_START = 0;
+const ARRAY_KIND_SUFFIX = "[]";
 
 let slonikModule: SlonikModule | undefined;
 const slonikTags = new Map<string, SlonikTag>();
@@ -488,7 +493,7 @@ const slonikTemplate = function (text: string, values: Readonly<unknown[]>): [Te
   strings.push(text.slice(last));
   // A tag takes only what a template literal gives it: frozen strings and their raw form.
   const template = Object.freeze(Object.assign(strings, { raw: Object.freeze([...strings]) })) as unknown as TemplateStringsArray;
-  return [template, placeholders.map((p) => values[Number(p.name) - 1])];
+  return [template, placeholders.map((placeholder) => values[Number(placeholder.name) - FIRST_PARAMETER_POSITION])];
 };
 
 export async function slonik(c: AnyClient, text: string, values: Readonly<unknown[]>, columns: Columns | undefined): Promise<unknown[]> {
@@ -529,7 +534,10 @@ function slonikValue(kind: Kind, v: unknown, name: string, delim?: string): unkn
   if (matchesString(v)) {return textDecoder(kind, delim)(v);}
   // Pg parses an array's text into an array, each element by the element type's parser, which
   // Reylo's tag passes through for the types it names.
-  if (Array.isArray(v) && kind.endsWith("[]")) {return v.map((e) => (Array.isArray(e) ? slonikValue(kind, e, name, delim) : slonikValue(kind.slice(0, -2), e, name, delim)));}
+  if (Array.isArray(v) && kind.endsWith(ARRAY_KIND_SUFFIX)) {
+    const elementKind = kind.slice(KIND_START, -ARRAY_KIND_SUFFIX.length);
+    return v.map((value) => slonikValue(Array.isArray(value) ? kind : elementKind, value, name, delim));
+  }
   if (SLONIK_STRICT.test(kind)) {
     throw new DecodeError(`Column "${name}" reached Reylo already converted by Slonik's driver (${v instanceof Date ? "a Date" : typeof v}), which ignored the query's type parsers, as a custom driverFactory may: Reylo refuses it rather than return a value that may have been rounded.`);
   }
