@@ -105,9 +105,9 @@ test("sqlite: a no-input Standard Query accepts omitted input and preserves sqlc
 // oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
 test("sqlite: Standard Query applies every result cardinality", () => {
   Iterator.from(["many", "one", "maybeOne", "none"] as const).forEach((cardinality) => {
-    const query = defineQuery<{}, { id: number }, typeof cardinality, "sqlite">({
+    const {query} = defineQuery<{}, { id: number }, typeof cardinality, "sqlite">({
       dialect: "sqlite", sql: "select 1 as id", params: [], columns: [["id", "int"]], cardinality, source: "queries/one.sql",
-    })["~standard"].query;
+    })["~standard"];
     if (cardinality === "many") {assert.deepEqual(query.decode([[1], [2]]), [{ id: 1 }, { id: 2 }]);}
     if (cardinality === "none") {assert.equal(query.decode([]), undefined);}
     if (cardinality === "one" || cardinality === "maybeOne") {

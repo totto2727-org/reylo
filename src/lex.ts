@@ -84,7 +84,7 @@ export function lexPlaceholders(sql: string, dialect: "postgres" | "mysql" | "sq
       const m = /^[A-Za-z0-9_]+/u.exec(sql.slice(i))!;
       last = m[0].toLowerCase() === "array" ? "other" : "operand"; i += m[0].length; continue;
     }
-    last = ch === ")" || ch === "]" || (ch === "$" && i > 0 && /[A-Za-z0-9_]/u.test(sql[i - 1]!)) ? "operand" : ch === "[" && last === "operand" ? "subscript" : "other";
+    last = ch === ")" || ch === "]" || (ch === "$" && i > 0 && /[A-Za-z0-9_]/u.test(sql[i - 1]!)) ? "operand" : (ch === "[" && last === "operand" ? "subscript" : "other");
     i += 1;
   }
   // Positional parameters bind by number, whatever order they appear in.

@@ -300,7 +300,7 @@ const typeContract = function () {
   new QueryPreparationError({});
   // @ts-expect-error decoding errors require their original cause
   new QueryDecodeError({});
-  const requiredCauses: ReadonlyArray<Readonly<{ cause: unknown }>> = [
+  const requiredCauses: readonly Readonly<{ cause: unknown }>[] = [
     new QueryPreparationError({ cause: null }),
     new QueryExecutionError({ cause: null }),
     new QueryDecodeError({ cause: null }),

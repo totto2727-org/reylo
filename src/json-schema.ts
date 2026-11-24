@@ -8,8 +8,8 @@ import { hasObjectType, matchesBoolean, matchesNull, matchesNumber, matchesStrin
 // `unevaluatedProperties`, the dynamic keywords), so none of those reach this file. A format is
 // Asserted, as the decision of 2026-10-19 says; a format this file has no rule for checks nothing.
 
-type Schema = boolean | Readonly<{ [key: string]: unknown }>;
-type Object_ = Readonly<{ [key: string]: unknown }>;
+type Schema = boolean | Readonly<Record<string, unknown>>;
+type Object_ = Readonly<Record<string, unknown>>;
 
 /** Why a value fails a schema: the place in the value, as a JSON Pointer, and what it breaks. */
 export type Failure = { path: string; message: string };
@@ -34,18 +34,18 @@ export function cloneJson<T>(value: T): T {
  */
 export function withDefaults(schema: Schema, value: unknown): unknown {
   if (matchesNull(schema) || !hasObjectType(schema) || Array.isArray(schema)) {return value;}
-  const s = schema as Object_;
+  const s = schema;
   let out = value;
   if (!matchesNull(value) && hasObjectType(value) && !Array.isArray(value)) {
     const o: Record<string, unknown> = { ...(value as Object_) };
     const properties = (s.properties ?? {}) as Record<string, Schema>;
     Object.entries(properties).forEach(([key, sub]) => {
-      if (!Object.prototype.hasOwnProperty.call(o, key) && !matchesNull(sub) && hasObjectType(sub) && "default" in sub) {o[key] = cloneJson((sub as Object_).default);}
+      if (! Object.hasOwn(o, key) && !matchesNull(sub) && hasObjectType(sub) && "default" in sub) {o[key] = cloneJson((sub).default);}
     });
     const patterns = Object.entries((s.patternProperties ?? {}) as Record<string, Schema>).map(([p, sub]) => [regex(p), sub] as const);
     Iterator.from(Object.keys(o)).forEach((key) => {
       let named = false;
-      if (Object.prototype.hasOwnProperty.call(properties, key)) {
+      if (Object.hasOwn(properties, key)) {
         named = true;
         o[key] = withDefaults(properties[key]!, o[key]);
       }
@@ -58,14 +58,14 @@ export function withDefaults(schema: Schema, value: unknown): unknown {
       if (!named && !matchesUndefined(s.additionalProperties)) {o[key] = withDefaults(s.additionalProperties as Schema, o[key]);}
     });
     if (s.dependentSchemas && hasObjectType(s.dependentSchemas)) {
-      Object.entries(s.dependentSchemas as Record<string, Schema>).forEach(([key, sub]) => {if (Object.prototype.hasOwnProperty.call(o, key)) {Object.assign(o, withDefaults(sub, o) as object);}});
+      Object.entries(s.dependentSchemas as Record<string, Schema>).forEach(([key, sub]) => {if (Object.hasOwn(o, key)) {Object.assign(o, withDefaults(sub, o) as object);}});
     }
     out = o;
   } else if (Array.isArray(value)) {
     const a = [...value];
     const prefix = Array.isArray(s.prefixItems) ? (s.prefixItems as Schema[]) : [];
     prefix.forEach((sub, i) => {
-      if (i >= a.length && !matchesNull(sub) && hasObjectType(sub) && "default" in sub && a.length === i) {a.push(cloneJson((sub as Object_).default));}
+      if (i >= a.length && !matchesNull(sub) && hasObjectType(sub) && "default" in sub && a.length === i) {a.push(cloneJson((sub).default));}
     });
     for (let i = 0; i < a.length; i++) {a[i] = withDefaults(i < prefix.length ? prefix[i]! : (s.items as Schema) ?? true, a[i]);}
     out = a;
@@ -95,7 +95,7 @@ function check(schema: Schema, value: unknown, path: string, out: Failure[]): Ev
   if (schema === true) {return evaluated;}
   if (schema === false) {return fail(out, path, "no value is allowed here");}
   if (matchesNull(schema) || !hasObjectType(schema) || Array.isArray(schema)) {return evaluated;}
-  const s = schema as Object_;
+  const s = schema;
 
   if (!matchesUndefined(s.type)) {
     const types = Array.isArray(s.type) ? (s.type as string[]) : [s.type as string];
@@ -113,7 +113,7 @@ function check(schema: Schema, value: unknown, path: string, out: Failure[]): Ev
   }
   if (matchesString(value)) {
     // A length counts code points, as JSON Schema says.
-    const length = [...value].length;
+    const {length} = [...value];
     if (matchesNumber(s.maxLength) && length > s.maxLength) {return fail(out, path, `must be at most ${s.maxLength} characters long`);}
     if (matchesNumber(s.minLength) && length < s.minLength) {return fail(out, path, `must be at least ${s.minLength} characters long`);}
     if (matchesString(s.pattern) && !regex(s.pattern).test(value)) {return fail(out, path, `must match the pattern ${s.pattern}`);}
@@ -142,7 +142,7 @@ function check(schema: Schema, value: unknown, path: string, out: Failure[]): Ev
     if (matchesNumber(s.maxProperties) && keys.length > s.maxProperties) {return fail(out, path, `must have at most ${s.maxProperties} keys`);}
     if (matchesNumber(s.minProperties) && keys.length < s.minProperties) {return fail(out, path, `must have at least ${s.minProperties} keys`);}
     // A key is the object's own: `toString` and `__proto__` are keys only where the value has them.
-    const has = (key: string): boolean => Object.prototype.hasOwnProperty.call(o, key);
+    const has = (key: string): boolean => Object.hasOwn(o, key);
     if (Array.isArray(s.required)) {for (const key of s.required as string[]) {if (!has(key)) {return fail(out, path, `must have the key "${key}"`);}}}
     if (s.dependentRequired && hasObjectType(s.dependentRequired)) {
       for (const [key, needs] of Object.entries(s.dependentRequired as Record<string, string[]>)) {
@@ -154,7 +154,7 @@ function check(schema: Schema, value: unknown, path: string, out: Failure[]): Ev
     for (const key of keys) {
       const at = `${path}/${pointer(key)}`;
       let named = false;
-      if (Object.prototype.hasOwnProperty.call(properties, key)) {
+      if (Object.hasOwn(properties, key)) {
         named = true;
         if (!check(properties[key]!, o[key], at, out)) {return undefined;}
       }
@@ -262,12 +262,12 @@ function kind(v: unknown): string {
 /** JSON equality: numbers by value (1 and 1.0 alike), objects by their keys whatever the order. */
 function equal(a: unknown, b: unknown): boolean {
   if (a === b) {return true;}
-  if (typeof a !== typeof b || matchesNull(a) || matchesNull(b) || !hasObjectType(a)) {return false;}
+  if (matchesNull(a) || matchesNull(b) || !hasObjectType(a) || !hasObjectType(b)) {return false;}
   if (Array.isArray(a) !== Array.isArray(b)) {return false;}
   if (Array.isArray(a)) {return a.length === (b as unknown[]).length && a.every((x, i) => equal(x, (b as unknown[])[i]));}
-  const ka = Object.keys(a as object);
-  const kb = Object.keys(b as object);
-  return ka.length === kb.length && ka.every((k) => Object.prototype.hasOwnProperty.call(b, k) && equal((a as Object_)[k], (b as Object_)[k]));
+  const ka = Object.keys(a);
+  const kb = Object.keys(b);
+  return ka.length === kb.length && ka.every((k) => Object.hasOwn(b, k) && equal((a as Object_)[k], (b as Object_)[k]));
 }
 
 function multiple(value: number, of: number): boolean {
@@ -288,7 +288,7 @@ function regex(pattern: string): RegExp {
 
 /** A key as one JSON Pointer segment. */
 function pointer(key: string): string {
-  return key.replace(/~/gu, "~0").replace(/\//gu, "~1");
+  return key.replaceAll('~', "~0").replaceAll('/', "~1");
 }
 
 const DATE = /^(?<year>\d{4})-(?<month>\d{2})-(?<day>\d{2})$/u;
@@ -386,7 +386,7 @@ function format(name: string, v: string): boolean {
 // Digit and hyphen labels or an address literal.
 const ATOM = "[A-Za-z0-9!#$%&'*+\\-/=?^_`{|}~]+";
 const DOT_STRING = new RegExp(`^${ATOM}(?:\\.${ATOM})*$`);
-const QUOTED = /^"(?:[\x20\x21\x23-\x5b\x5d-\x7e]|\\[\x20-\x7e])*"$/u;
+const QUOTED = /^"(?:[\x20\x21\x23-\x5B\x5D-\x7E]|\\[\x20-\x7E])*"$/u;
 const LABEL = /^[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?$/u;
 
 function email(v: string): boolean {
@@ -404,7 +404,7 @@ function email(v: string): boolean {
 
 // RFC 3986's URI: a scheme, `:`, an authority after `//` or a path, a query and a fragment, each
 // Of the characters its part allows, a `%` always followed by two hexadecimal digits.
-const UNRESERVED = "A-Za-z0-9\\-._~";
+const UNRESERVED = String.raw`A-Za-z0-9\-._~`;
 const SUB_DELIMS = "!$&'()*+,;=";
 const PCT = "%[0-9A-Fa-f]{2}";
 const PCHAR = `(?:[${UNRESERVED}${SUB_DELIMS}:@]|${PCT})`;
@@ -419,18 +419,18 @@ function uri(v: string): boolean {
   // Without an authority a path may not start with `//`.
   if (matchesUndefined(authority)) {return !(regexMatch[3] ?? "").startsWith("//");}
   const at = authority.lastIndexOf("@");
-  if (at >= 0 && !USERINFO.test(authority.slice(0, at))) {return false;}
+  if (at !== -1 && !USERINFO.test(authority.slice(0, at))) {return false;}
   const hostport = authority.slice(at + 1);
   if (hostport.startsWith("[")) {
     const close = hostport.indexOf("]");
-    if (close < 0) {return false;}
+    if (close === -1) {return false;}
     const literal = hostport.slice(1, close);
     const ok = /^v[0-9a-f]+\.[A-Za-z0-9\-._~!$&'()*+,;=:]+$/i.test(literal) || ipv6(literal);
     return ok && /^(?::\d*)?$/u.test(hostport.slice(close + 1));
   }
   const colon = hostport.lastIndexOf(":");
-  const host = colon >= 0 ? hostport.slice(0, colon) : hostport;
-  if (colon >= 0 && !/^\d*$/u.test(hostport.slice(colon + 1))) {return false;}
+  const host = colon !== -1 ? hostport.slice(0, colon) : hostport;
+  if (colon !== -1 && !/^\d*$/u.test(hostport.slice(colon + 1))) {return false;}
   return REG_NAME.test(host);
 }
 
@@ -490,7 +490,7 @@ function uLabel(label: string): boolean {
 function punycode(input: string): string | undefined {
   const base = 36; const tMin = 1; const tMax = 26; const skew = 38; const damp = 700;
   const delimiter = input.lastIndexOf("-");
-  const output = delimiter > 0 ? [...input.slice(0, delimiter)].map((c) => c.codePointAt(0)!) : [];
+  const output = delimiter > 0 ? Array.from(input.slice(0, delimiter), (character) => character.codePointAt(0)!) : [];
   if (output.some((c) => c >= 0x80)) {return undefined;}
   let n = 128; let i = 0; let bias = 72;
   const adapt = (delta: number, points: number, first: boolean): number => {
@@ -503,7 +503,7 @@ function punycode(input: string): string | undefined {
     }
     return k + Math.floor(((base - tMin + 1) * delta) / (delta + skew));
   };
-  const digit = (c: string): number => (/[a-z]/u.test(c) ? c.charCodeAt(0) - 97 : /[0-9]/u.test(c) ? c.charCodeAt(0) - 22 : -1);
+  const digit = (c: string): number => (/[a-z]/u.test(c) ? c.charCodeAt(0) - 97 : (/[0-9]/u.test(c) ? c.charCodeAt(0) - 22 : -1));
   let pos = delimiter > 0 ? delimiter + 1 : 0;
   if (pos >= input.length && delimiter <= 0) {return undefined;}
   while (pos < input.length) {
@@ -514,7 +514,7 @@ function punycode(input: string): string | undefined {
       const d = digit(input[pos++]!);
       if (d < 0) {return undefined;}
       i += d * w;
-      const t = k <= bias ? tMin : k >= bias + tMax ? tMax : k - bias;
+      const t = k <= bias ? tMin : (k >= bias + tMax ? tMax : k - bias);
       if (d < t) {break;}
       w *= base - t;
       if (!Number.isSafeInteger(i) || !Number.isSafeInteger(w)) {return undefined;}
@@ -534,7 +534,7 @@ function ipv6(v: string): boolean {
   if (halves.length > 2) {return false;}
   const groups = (h: string): string[] => (h === "" ? [] : h.split(":"));
   const parts = halves.flatMap(groups);
-  const last = parts[parts.length - 1] ?? "";
+  const last = parts.at(-1) ?? "";
   const v4 = last.includes(".");
   if (v4 && !format("ipv4", last)) {return false;}
   const words = parts.length + (v4 ? 1 : 0);

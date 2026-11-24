@@ -53,8 +53,8 @@ const handle = async function (message: Message): Promise<void> {
     try {
       await db.prepare(`explain ${message.sql}`).bind(...Array.from({ length: message.params }, () => null)).all();
       send({ kind: "explain", id: message.id });
-    } catch (e) {
-      send({ kind: "explain", id: message.id, error: (e as Error).message });
+    } catch (error) {
+      send({ kind: "explain", id: message.id, error: (error as Error).message });
     }
   }
 };

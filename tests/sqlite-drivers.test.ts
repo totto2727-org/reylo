@@ -36,7 +36,7 @@ const analyze = async function (root: string, env: Record<string, string>, sql: 
   const session = await Session.open(root, env);
   try {
     const outcome = await session.analyze(sql);
-    assert.ok(outcome.ok, !outcome.ok ? outcome.message : "");
+    assert.ok(outcome.ok, outcome.ok ? "" : outcome.message);
     return outcome;
   } finally {
     await session.close();
@@ -93,7 +93,7 @@ test("a session whose connection was released checks a statement it reads from .
     // A build step's session releases its connection once idle, while the schema it read is still trusted.
     await session.release();
     const second = await session.analyze(PRETTY);
-    assert.ok(second.ok, !second.ok ? second.message : "");
+    assert.ok(second.ok, second.ok ? "" : second.message);
     assert.equal(second.source, "cache");
     assert.match(second.analysis.diagnostics[0]?.message ?? "", /^@libsql\/client runs SQLite 3\.45\.1, which refuses this statement: no such function: json_pretty$/u);
   } finally {
@@ -174,7 +174,7 @@ test("D1 compiles each statement against the schema as it is now, after a migrat
     assert.equal(await session.recheck(), true);
     for (const sql of [TAGGED, "select name from tags"]) {
       const outcome = await session.analyze(sql);
-      assert.ok(outcome.ok, !outcome.ok ? outcome.message : "");
+      assert.ok(outcome.ok, outcome.ok ? "" : outcome.message);
       assert.deepEqual(outcome.analysis.diagnostics, [], sql);
     }
   } finally {

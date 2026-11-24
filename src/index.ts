@@ -202,7 +202,7 @@ export function defineQuery<Params, Row, C extends Cardinality, D extends Dialec
       query: standardQuery(module, (rows) => materialize(rows as Row[])),
     },
     "~reylo": undefined as unknown as ReyloTypes<Params, Row, C>,
-    run: ((client: ClientFor<D>, params?: Params) => run(client, params ?? ({} as Params))) as Query<Params, Row, C, D>["run"],
+    run: ((client: ClientFor<D>, params?: Params) => run(client, params ?? ({} as Params))),
     runSync: ((client: SyncClientFor<D>, params?: Params) => {
       const values = (params ?? {}) as Record<string, unknown>;
       const runOnce = () => {
@@ -214,7 +214,7 @@ export function defineQuery<Params, Row, C extends Cardinality, D extends Dialec
       };
       const tracing = listening();
       return tracing ? tracing.traceSync(runOnce, trace(client, values, true)) : runOnce();
-    }) as Query<Params, Row, C, D>["runSync"],
+    }),
     try: ((client: ClientFor<D>, params?: Params) =>
       run(client, params ?? ({} as Params)).then(
         (value) => ({ value }),
@@ -234,7 +234,7 @@ export function defineQuery<Params, Row, C extends Cardinality, D extends Dialec
         throw error;
       }
     }) as Query<Params, Row, C, D>["trySync"],
-    with: ((client: ClientFor<D>) => (params?: Params) => run(client, params ?? ({} as Params))) as Query<Params, Row, C, D>["with"],
+    with: ((client: ClientFor<D>) => (params?: Params) => run(client, params ?? ({} as Params))),
   };
   // `.run()`, `.try()` and the function `.with()` returns, published on the tracing channel as one
   // Call each (src/trace.ts).
@@ -254,7 +254,7 @@ export function defineQuery<Params, Row, C extends Cardinality, D extends Dialec
         ? Promise.resolve(materialize(rows as Row[]))
         : rows.then(
             (rows) => materialize(rows as Row[]),
-            (error) => Promise.reject(named(error)),
+            (error) => { throw named(error); },
           );
     } catch (error) {
       return Promise.reject(named(error));
@@ -264,7 +264,7 @@ export function defineQuery<Params, Row, C extends Cardinality, D extends Dialec
   // Below do. The driver's own errors, and Reylo's about the client, pass through as they are.
   function named(error: unknown): unknown {
     if (where && (error instanceof ParameterError || error instanceof DecodeError) && !error.message.startsWith(where)) {
-      const message = error.message;
+      const {message} = error;
       error.message = where + message;
       // V8 writes the stack when it is first read, with the message as it is then; a stack written
       // Earlier (read before, or on Bun) still has the old message in its first line.
@@ -292,7 +292,7 @@ export function defineQuery<Params, Row, C extends Cardinality, D extends Dialec
   }
   registerObjectDecoder(query, (rows) => {
     if (module.dialect !== "sqlite") {throw new TypeError("Object-row execution supports only SQLite queries.");}
-    const columns = module.columns;
+    const {columns} = module;
     if (matchesUndefined(columns)) {throw new TypeError("A query defined by hand without its columns cannot map rows to its output.");}
     const keyed = rows.map((row) => {
       if (matchesNull(row) || !hasObjectType(row) || Array.isArray(row)) {throw new DecodeError("Expected an object row from the query executor.");}

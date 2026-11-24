@@ -91,7 +91,7 @@ test("the bridge to a Unix socket closes a connection that does not carry its to
     const pg = await hostUrl(`postgres://postgres@/app?host=${dir}`);
     assert.ok(pg.bridge && pg.url.startsWith("postgres://postgres@127.0.0.1:"), pg.url);
     // A startup message for user postgres, as another local process would send it.
-    const startup = Buffer.from("\0\0\0\x24\0\x03\0\0user\0postgres\0database\0app\0\0", "latin1");
+    const startup = Buffer.from("\0\0\0\u0024\0\u0003\0\0user\0postgres\0database\0app\0\0", "latin1");
     assert.equal((await knock(pg.url, Buffer.concat([startup, startup]))).length, 0);
     assert.equal(reached, 0);
     pg.close();

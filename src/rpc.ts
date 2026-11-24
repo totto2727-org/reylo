@@ -4,6 +4,9 @@ import { nativeErrorText } from "./native-error-text.ts";
 // Minimal JSON-RPC 2.0 server over stdio with LSP-style Content-Length framing,
 // Which is what tsc uses to talk to content mapper processes.
 
+// oxlint-disable-next-line unicorn/text-encoding-identifier-case -- The content mapper protocol requires this exact encoding name on the wire.
+export const CONTENT_MAPPER_POSITION_ENCODING = "utf-8";
+
 type Handler = (params: unknown) => unknown | Promise<unknown>;
 
 export function serve(handlers: Record<string, Handler>): void {

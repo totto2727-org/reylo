@@ -52,7 +52,7 @@ export declare namespace StandardSchemaV1 {
     /** Validates unknown input values. */
     readonly validate: (
       value: unknown,
-      options?: StandardSchemaV1.Options | undefined,
+      options?: Options  ,
     ) => Result<Output> | Promise<Result<Output>>;
   }
 
@@ -75,7 +75,7 @@ export declare namespace StandardSchemaV1 {
   /** The result interface if validation fails. */
   export interface FailureResult {
     /** The issues of failed validation. */
-    readonly issues: ReadonlyArray<Issue>;
+    readonly issues: readonly Issue[];
   }
 
   /** The issue interface of the failure output. */
@@ -83,7 +83,7 @@ export declare namespace StandardSchemaV1 {
     /** The error message of the issue. */
     readonly message: string;
     /** The path of the issue, if any. */
-    readonly path?: ReadonlyArray<PropertyKey | PathSegment> | undefined;
+    readonly path?: readonly (PropertyKey | PathSegment)[] | undefined;
   }
 
   /** The path segment interface of the issue. */
@@ -116,18 +116,18 @@ export declare namespace StandardJSONSchemaV1 {
   export interface Props<Input = unknown, Output = Input>
     extends StandardTypedV1.Props<Input, Output> {
     /** Methods for generating the input/output JSON Schema. */
-    readonly jsonSchema: StandardJSONSchemaV1.Converter;
+    readonly jsonSchema: Converter;
   }
 
   /** The Standard JSON Schema converter interface. */
   export interface Converter {
     /** Converts the input type to JSON Schema. May throw if conversion is not supported. */
     readonly input: (
-      options: StandardJSONSchemaV1.Options,
+      options: Options,
     ) => Record<string, unknown>;
     /** Converts the output type to JSON Schema. May throw if conversion is not supported. */
     readonly output: (
-      options: StandardJSONSchemaV1.Options,
+      options: Options,
     ) => Record<string, unknown>;
   }
 

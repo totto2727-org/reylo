@@ -10,6 +10,7 @@ import { lexConfig, lexExpression, lexTemplate, scanStringLit, graphemeClusters 
 import { Peeker } from './peeker.ts';
 import { rangeBetween as between, emptyRangeAt, rangeString, isStringLiteral } from './types.ts';
 import type { Attribute, Block, Body, Diagnostic, Expression, ForExpression, Literal, ObjectKey, Pos, Range, Token, TraversalStep } from './types.ts';
+
 export * from './types.ts';
 
 const decoder = new TextDecoder();
@@ -355,10 +356,10 @@ export class Parser extends Peeker {
       if (sep.type === 'TokenCParen') { close = sep; break }
       if (sep.type === 'TokenEllipsis') {
         expandFinal = true;
-        if (this.peek().type !== 'TokenCParen') {
+        if (this.peek().type === 'TokenCParen') {close = this.read();} else {
           if (!this.recovery) {this.diag('Missing closing parenthesis', 'An expanded function argument (with ...) must be immediately followed by closing parentheses.', sep.range, between(name.range, sep.range));}
           close = this.recover('TokenCParen');
-        } else {close = this.read();}
+        }
         break;
       }
       if (sep.type !== 'TokenComma') {
@@ -575,7 +576,7 @@ export class Parser extends Peeker {
 
   private legacyIndex(dot: Token, number: Token, splat: boolean, subject: Range): TraversalStep {
     const numberText = text(number); const dotIndex = numberText.indexOf('.'); const range = between(dot.range, number.range);
-    if (dotIndex >= 0) {
+    if (dotIndex !== -1) {
       const first = numberText.slice(0, dotIndex); const second = numberText.slice(dotIndex + 1);
       this.diag('Invalid legacy index syntax', `When using the legacy index syntax, chaining two indexes together is not permitted. Use the proper index syntax${splat ? ' with a full splat expression [*]' : ''} instead, like [${first}][${second}].`, subject);
       return { kind: 'index', value: null, dynamic: true, range };
@@ -611,7 +612,7 @@ export class Parser extends Peeker {
     let nest = 0;
     for (;;) {
       const token = this.read();
-      let type = token.type;
+      let {type} = token;
       if (end === 'TokenTemplateSeqEnd' && type === 'TokenTemplateControl') {type = 'TokenTemplateInterp';}
       if (type === start) {nest++;}
       else if (type === end) { if (nest < 1) {return token;} nest-- }
@@ -670,7 +671,7 @@ export class Parser extends Peeker {
         }
         this.pushIncludeNewlines(false);
         const expression = this.parseExpression(); const close = this.peek();
-        if (close.type !== 'TokenTemplateSeqEnd') {
+        if (close.type === 'TokenTemplateSeqEnd') { this.read(); if (close.bytes.length === 2 && close.bytes[0] === 126) {ltrimNext = true} } else {
           if (!this.recovery) {
             if (close.type === 'TokenEOF') {this.diag('Unclosed template interpolation sequence', 'There is no closing brace for this interpolation sequence before the end of the file. This might be caused by incorrect nesting inside the given expression.', startRange);}
             else if (close.type === 'TokenColon') {this.diag('Extra characters after interpolation expression', 'Template interpolation doesn\'t expect a colon at this location. Did you intend this to be a literal sequence to be processed as part of another language? If so, you can escape it by starting with "$${" instead of just "${".', close.range, between(startRange, close.range));}
@@ -678,7 +679,7 @@ export class Parser extends Peeker {
             else {this.diag('Extra characters after interpolation expression', 'Expected a closing brace to end the interpolation expression, but found extra characters.\n\nThis can happen when you include interpolation syntax for another language, such as shell scripting, but forget to escape the interpolation start token. If this is an embedded sequence for another language, escape it by starting with "$${" instead of just "${".', close.range, between(startRange, close.range));}
           }
           this.recover('TokenTemplateSeqEnd');
-        } else { this.read(); if (close.bytes.length === 2 && close.bytes[0] === 126) {ltrimNext = true} }
+        }
         this.popIncludeNewlines();
         parts.push({ kind: 'interpolation', expression, range: between(next.range, close.range) });
       } else if (next.type === 'TokenTemplateControl') {
@@ -728,10 +729,10 @@ export class Parser extends Peeker {
           }
         }
         const close = this.peek();
-        if (close.type !== 'TokenTemplateSeqEnd') {
+        if (close.type === 'TokenTemplateSeqEnd') { this.read(); if (close.bytes.length === 2 && close.bytes[0] === 126) {ltrimNext = true} } else {
           if (!this.recovery) {this.diag(`Extra characters in ${word} marker`, 'Expected a closing brace to end the sequence, but found extra characters.', close.range, between(startRange, close.range));}
           this.recover('TokenTemplateSeqEnd');
-        } else { this.read(); if (close.bytes.length === 2 && close.bytes[0] === 126) {ltrimNext = true} }
+        }
         this.popIncludeNewlines();
       } else {
         if (!this.recovery) {this.diag('Unterminated template string', 'No closing marker was found for the string.', next.range, between(startRange, next.range));}
@@ -746,8 +747,8 @@ export class Parser extends Peeker {
 
 // Unicode White_Space as used by Go unicode.IsSpace. JavaScript's \s differs
 // For FEFF and NEL, so do not use String.trim() here.
-const spaceLeft = /^[\u0009-\u000d\u0020\u0085\u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000]+/u;
-const spaceRight = /[\u0009-\u000d\u0020\u0085\u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000]+$/u;
+const spaceLeft = /^[\u0009-\u000D\u0020\u0085\u00A0\u1680\u2000-\u200A\u2028\u2029\u202F\u205F\u3000]+/u;
+const spaceRight = /[\u0009-\u000D\u0020\u0085\u00A0\u1680\u2000-\u200A\u2028\u2029\u202F\u205F\u3000]+$/u;
 const trimLeft = (value: string): string => value.replace(spaceLeft, '');
 const trimRight = (value: string): string => value.replace(spaceRight, '');
 const cloneRange = (range: Range): Range => ({ filename: range.filename, start: { ...range.start }, end: { ...range.end } });
@@ -899,8 +900,8 @@ export function parseStringLiteralToken(token: Token): { value: string; diagnost
         const escape = escapes[slice[1]!];
         if (escape !== undefined) { output.push(encoder.encode(escape)); continue }
         if (slice[1] === 117 || slice[1] === 85) {
-          if (slice[1] === 117 && slice.length !== 6) {invalid('The \\u escape sequence must be followed by four hexadecimal digits.');}
-          else if (slice[1] === 85 && slice.length !== 10) {invalid('The \\U escape sequence must be followed by eight hexadecimal digits.');}
+          if (slice[1] === 117 && slice.length !== 6) {invalid(String.raw`The \u escape sequence must be followed by four hexadecimal digits.`);}
+          else if (slice[1] === 85 && slice.length !== 10) {invalid(String.raw`The \U escape sequence must be followed by eight hexadecimal digits.`);}
           else {
             const num = Number.parseInt(decoder.decode(slice.subarray(2)), 16);
             if (num > 0x10_FF_FF || num >= 0xD8_00 && num <= 0xDF_FF) {invalid(`Cannot encode character U+${num.toString(16).padStart(4, '0')} in UTF-8.`);}

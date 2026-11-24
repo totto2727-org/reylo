@@ -16,7 +16,7 @@ test("the comment ends the statement, before a closing semicolon, its file URL-e
   assert.equal(withSqlcommenter("select 1 # MySQL's\n", "queries/get_user.sql"), `select 1 # MySQL's\n${tag}`);
   // A quote, which URL encoding leaves, is escaped; a space, a `?` or a `:` is encoded, so no
   // Placeholder can appear in the comment.
-  assert.equal(withSqlcommenter("select 1", "it's here/a b?:c.sql"), "select 1 /*file='it\\'s%20here%2Fa%20b%3F%3Ac.sql'*/");
+  assert.equal(withSqlcommenter("select 1", "it's here/a b?:c.sql"), String.raw`select 1 /*file='it\'s%20here%2Fa%20b%3F%3Ac.sql'*/`);
 });
 
 // oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.

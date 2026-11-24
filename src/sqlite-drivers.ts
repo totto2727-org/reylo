@@ -273,7 +273,7 @@ async function startD1(entry: string, dir: string, ended: () => void): Promise<D
           // D1 wraps SQLite's message: "D1_ERROR: no such function: x at offset 7: SQLITE_ERROR".
           const message = error?.replace(/^D1_ERROR: /u, "").replace(/ at offset \d+/u, "").replace(/: SQLITE_\w+$/u, "");
           // A count of bindings D1 reads otherwise than the analysis is no refusal of the statement.
-          done(message && !/^Wrong number of parameter bindings/u.test(message) ? message : undefined);
+          done(message && !message.startsWith('Wrong number of parameter bindings') ? message : undefined);
         });
         child.channel?.ref();
         const text = JSON.stringify(ddl);
@@ -329,10 +329,10 @@ const utf8 = new TextEncoder();
  * statement's first word. In UTF-8 bytes, as the analysis's diagnostics are.
  */
 export function placeRefusal(sql: string, message: string): { start: number; length: number } {
-  const escape = (s: string): string => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const escape = (s: string): string => s.replaceAll(/[.*+?^${}()|[\]\\]/g, String.raw`\$&`);
   const fn = /(?:no such function|not authorized to use function): ([\w$]+)/i.exec(message)?.[1] ?? /arguments to function ([\w$]+)\(\)/i.exec(message)?.[1];
   const near = /near "([^"]+)"/.exec(message)?.[1];
-  const found = fn ? new RegExp(`\\b${escape(fn)}\\s*\\(`, "i").exec(sql) : near ? new RegExp(escape(near), "i").exec(sql) : null;
+  const found = fn ? new RegExp(`\\b${escape(fn)}\\s*\\(`, "i").exec(sql) : (near ? new RegExp(escape(near), "i").exec(sql) : null);
   const at = found ? { index: found.index, text: fn ?? near! } : { index: sql.search(/\S/), text: /\S+/.exec(sql)?.[0] ?? "" };
   return { start: utf8.encode(sql.slice(0, Math.max(at.index, 0))).length, length: Math.max(utf8.encode(at.text).length, 1) };
 }

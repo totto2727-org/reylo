@@ -48,7 +48,7 @@ export async function sqlModule(path: string, sql: string): Promise<SqlModule> {
     try {
       params = (await session.lex(sql)).params;
     } catch (error) {
-      throw new Error(`${path}: ${(error as Error).message}`);
+      throw new Error(`${path}: ${(error as Error).message}`, { cause: error });
     }
   }
   // A column list that does not read, or that disagrees with the table its insert writes, fails

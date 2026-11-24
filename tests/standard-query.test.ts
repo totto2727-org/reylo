@@ -43,7 +43,7 @@ test("postgres: the statement, its database, and each value as the text the serv
   const q = users["~standard"].query;
   assert.equal(q.dialect, "postgres");
   assert.equal(q.text, users.sql);
-  assert.deepEqual(q.encode({ id: 7, tags: [1, 2], doc: { a: [1] }, bytes: new Uint8Array([0, 255]), flag: true }), ["7", '{"1","2"}', '{"a":[1]}', "\\x00ff", "t"]);
+  assert.deepEqual(q.encode({ id: 7, tags: [1, 2], doc: { a: [1] }, bytes: new Uint8Array([0, 255]), flag: true }), ["7", '{"1","2"}', '{"a":[1]}', String.raw`\x00ff`, "t"]);
   // A key left out binds NULL, as `.run()` binds it; one the statement takes no null for is refused.
   assert.deepEqual(users["~standard"].query.encode({ id: 7 }), ["7", null, null, null, null]);
   assert.throws(() => q.encode({ tags: [1] }), (e) => e instanceof ParameterError && /"id" is missing/u.test(e.message));
@@ -167,7 +167,7 @@ test("sqlite: node:sqlite runs a built import as a Standard Query, with its own 
     statement.setReturnArrays(true);
     statement.setReadBigInts(true);
     const input = { ok: true, min: 1 };
-    const output = sq.decode(statement.all(...sq.encode(input)) as unknown as unknown[][]);
+    const output = sq.decode(statement.all(...sq.encode(input)) as unknown);
     assert.deepEqual(output, await query.run(conn, input));
     assert.deepEqual(output, [
       { id: 1, name: "ada", ok: true, big: BigInt("9007199254740993"), data: new Uint8Array([0, 255]) },

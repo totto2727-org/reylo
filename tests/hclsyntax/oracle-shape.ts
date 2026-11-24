@@ -15,8 +15,8 @@ export interface Fixture {
   diagnostics: unknown[];
   extra: unknown;
 }
-const object = function (value: unknown): RecordValue { assert(value !== null && typeof value === 'object' && !Array.isArray(value)); return value as RecordValue };
-const array = function (value: unknown): unknown[] { assert(Array.isArray(value)); return value };
+const object = function (value: unknown): RecordValue { assert.ok(value !== null && typeof value === 'object' && !Array.isArray(value)); return value as RecordValue };
+const array = function (value: unknown): unknown[] { assert.ok(Array.isArray(value)); return value };
 export function position(value: unknown): Pos { const v = object(value); return { line: v.Line as number, column: v.Column as number, byte: v.Byte as number } }
 export function range(value: unknown): Range { const v = object(value); return { filename: v.Filename as string, start: position(v.Start), end: position(v.End) } }
 export function diagnostics(value: unknown): Diagnostic[] {

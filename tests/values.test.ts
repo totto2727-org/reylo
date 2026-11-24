@@ -29,7 +29,7 @@ const typeOf = function (v: unknown): string {
 const TEXTS: Record<string, string> = {
   bool: "t", int2: "2", int4: "4", oid: "26", float4: "1.1", float8: "2.2", int8: "9007199254740993", numeric: "1.100000000000000001",
   money: "$1.50", date: "2026-10-20", timestamp: "2026-10-20 10:00:00.123456", timestamptz: "2026-10-20 10:00:00.123456+02",
-  time: "10:00:00", timetz: "10:00:00+02", interval: "1 day", json: '{"a":1}', jsonb: "[1,2]", bytea: "\\x0102ff", uuid: "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11",
+  time: "10:00:00", timetz: "10:00:00+02", interval: "1 day", json: '{"a":1}', jsonb: "[1,2]", bytea: String.raw`\x0102ff`, uuid: "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11",
   text: "hi", point: "(1,2)", int4range: "[1,5)", xid: "7", void: "",
 };
 
@@ -74,17 +74,17 @@ test("the representation, value by value", () => {
   assert.equal(d("timestamp", "0044-03-15 12:00:00 BC"), "-000043-03-15T12:00:00");
   assert.equal(d("timestamp", "infinity"), "infinity");
   assert.equal(d("interval", "1 year 2 mons"), "P1Y2M");
-  assert.deepEqual(d("bytea", "\\x0102ff"), Buffer.from([1, 2, 255]));
-  assert.deepEqual([...(d("bytea", "\\001\\\\x") as Uint8Array)], [1, 92, 120], "the escape format too");
+  assert.deepEqual(d("bytea", String.raw`\x0102ff`), Buffer.from([1, 2, 255]));
+  assert.deepEqual([...(d("bytea", String.raw`\001\\x`) as Uint8Array)], [1, 92, 120], "the escape format too");
   assert.deepEqual(d("jsonb", '{"big":9007199254740993}'), { big: 9_007_199_254_740_992 });
   assert.equal(d("bool", "f"), false);
-  assert.ok(Number.isNaN(d("float8", "NaN") as number));
+  assert.ok(Number.isNaN(d("float8", "NaN")));
   assert.equal(d("float8", "-Infinity"), -Infinity);
 });
 
 // oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
 test("interval: an ISO 8601 duration with its sign in front, which Temporal reads, and each part signed where the parts' signs differ", () => {
-  const Temporal = (globalThis as unknown as { Temporal: { Duration: { from(text: string): { toString(): string } } } }).Temporal;
+  const {Temporal} = (globalThis as unknown as { Temporal: { Duration: { from(text: string): { toString(): string } } } });
   // Postgres's text in IntervalStyle postgres, Reylo's value, and Postgres's own in iso_8601, as Postgres 18 writes them.
   Iterator.from([
     ["1 mon", "P1M", "P1M"],
@@ -122,7 +122,7 @@ test("interval: an ISO 8601 duration with its sign in front, which Temporal read
 // oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
 test("date and timestamp: a year outside 0000 to 9999 in ISO 8601's extended form, as timestamptz's, which Temporal reads and a parameter takes back", () => {
   type PlainFrom = { from(text: string): { toString(): string } };
-  const Temporal = (globalThis as unknown as { Temporal: { PlainDate: PlainFrom; PlainDateTime: PlainFrom } }).Temporal;
+  const {Temporal} = (globalThis as unknown as { Temporal: { PlainDate: PlainFrom; PlainDateTime: PlainFrom } });
   const date = textDecoder("date");
   const timestamp = textDecoder("timestamp");
   Iterator.from([
@@ -175,7 +175,7 @@ test("date and timestamp: a year outside 0000 to 9999 in ISO 8601's extended for
 
 // oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
 test("timestamptz: the instant's ISO 8601 text in UTC, the server's fraction kept, which new Date(text) gets wrong for BC, year 1 and offsets with seconds", () => {
-  const Temporal = (globalThis as unknown as { Temporal: { Instant: { from(text: string): { toString(): string; epochNanoseconds: bigint } } } }).Temporal;
+  const {Temporal} = (globalThis as unknown as { Temporal: { Instant: { from(text: string): { toString(): string; epochNanoseconds: bigint } } } });
   Iterator.from([
     ["2026-10-20 03:03:00.123456-07", "2026-10-20T10:03:00.123456Z"],
     ["2026-10-20 10:00:00+00", "2026-10-20T10:00:00Z"],
@@ -248,7 +248,7 @@ test("SQLite: a BIGINT column on node:sqlite exact past 2^53 beside an INTEGER r
   const q: QueryModule<"sqlite"> = { dialect: "sqlite", sql: "select n, big from t", params: [], columns: [["n", "int"], ["big", "int8"]] };
   const d1 = (results: unknown[]) => ({ batch: promiseDriverStub(() => []), prepare: () => ({ first: promiseDriverStub(() => null), bind: () => ({ all: promiseDriverStub(() => ({ results })) }) }) });
   assert.deepEqual(await execute(d1([{ n: 5, big: 9_007_199_254_740_991 }, { n: 6, big: -3 }]), q), [{ n: 5, big: BigInt("9007199254740991") }, { n: 6, big: -BigInt("3") }]);
-  await assert.rejects(execute(d1([{ n: 5, big: 9_007_199_254_740_992 }]), q) as Promise<unknown>, (e: Error) => e instanceof DecodeError && /^Column "big" is a 64-bit integer, and the driver already rounded its value to 9007199254740992/u.test(e.message));
+  await assert.rejects(execute(d1([{ n: 5, big: 9_007_199_254_740_992 }]), q) as Promise<unknown>, (e: Error) => e instanceof DecodeError && e.message.startsWith('Column "big" is a 64-bit integer, and the driver already rounded its value to 9007199254740992'));
   // LibSQL under each intMode: a number, a BigInt or the digits.
   const libsql = (rows: unknown[]) => ({ execute: promiseDriverStub(() => ({ rows })), executeMultiple: async () => {} });
   for (const big of [7, BigInt("7"), "7"]) {assert.deepEqual(await execute(libsql([{ n: 5, big }]), q), [{ n: 5, big: BigInt("7") }], typeof big);}
@@ -264,14 +264,14 @@ test("coerce: a value a driver decoded, given its kind; an integer a number cann
   assert.equal(coerce("int8", BigInt("9007199254740993"), "c"), BigInt("9007199254740993"));
   assert.equal(coerce("int8", "9007199254740993", "c"), BigInt("9007199254740993"), "a driver's exact text");
   assert.equal(coerce("int8", 42, "c"), BigInt("42"));
-  assert.throws(() => coerce("int8", 9_007_199_254_740_992, "big_id"), (e: Error) => e instanceof DecodeError && /^Column "big_id" is a 64-bit integer, and the driver already rounded its value to 9007199254740992/u.test(e.message));
+  assert.throws(() => coerce("int8", 9_007_199_254_740_992, "big_id"), (e: Error) => e instanceof DecodeError && e.message.startsWith('Column "big_id" is a 64-bit integer, and the driver already rounded its value to 9007199254740992'));
   assert.deepEqual(coerce("int8[]", ["1", BigInt("2")], "c"), [BigInt("1"), BigInt("2")]);
   assert.equal(coerce("decimal", 1.5, "c"), "1.5");
   assert.equal(coerce("date", nativeDriverDate("2026-10-20T00:00:00Z"), "c"), "2026-10-20");
   // Bun.sql decodes a date or timestamp before 1 AD as an Invalid Date (its infinities are ±Infinity):
   // Refused, never read as infinity.
   Iterator.from(["date", "timestamp", "timestamptz", "timestamp|timestamptz"]).forEach((kind) => {
-    assert.throws(() => coerce(kind, nativeDriverDate(Number.NaN), "born"), (e: Error) => e instanceof DecodeError && /^Column "born": the driver returned an Invalid Date/u.test(e.message), kind);
+    assert.throws(() => coerce(kind, nativeDriverDate(Number.NaN), "born"), (e: Error) => e instanceof DecodeError && e.message.startsWith('Column "born": the driver returned an Invalid Date'), kind);
   });
   assert.equal(coerce("timestamptz", Infinity, "c"), "infinity");
   assert.equal(coerce("timestamptz", -Infinity, "c"), "-infinity");
@@ -291,7 +291,7 @@ test("coerce: a value a driver decoded, given its kind; an integer a number cann
   // The bounds, exactly: ±(2^53 - 1) is a number, ±2^53 refused.
   assert.deepEqual([BigInt("9007199254740991"), -BigInt("9007199254740991"), BigInt("0")].map((v) => coerce("int", v, "n")), [9_007_199_254_740_991, -9_007_199_254_740_991, 0]);
   Iterator.from([BigInt("9007199254740992"), -BigInt("9007199254740992"), BigInt("2") ** BigInt("63") - BigInt("1"), -(BigInt("2") ** BigInt("63"))]).forEach((v) => {assert.throws(() => coerce("int", v, "n"), DecodeError, String(v));});
-  assert.throws(() => coerce("int", BigInt("9007199254740993"), "big_id"), (e: Error) => e instanceof DecodeError && /^Column "big_id" holds 9007199254740993, an integer past ±\(2\^53 - 1\)/.test(e.message));
+  assert.throws(() => coerce("int", BigInt("9007199254740993"), "big_id"), (e: Error) => e instanceof DecodeError && e.message.startsWith('Column "big_id" holds 9007199254740993, an integer past ±(2^53 - 1)'));
   assert.throws(() => coerce("int", 9_007_199_254_740_992, "big_id"), /Column "big_id" holds an integer past ±\(2\^53 - 1\), which the driver already rounded to 9007199254740992/);
   // A NUMERIC may hold a REAL past 2^53, which is no rounded integer.
   assert.equal(coerce("int|float|text", 1e20, "c"), 1e20);
@@ -337,7 +337,7 @@ test("SQLite: Reylo's own statement per database and text, with integers read as
   assert.deepEqual(row, { id: 1, n: 5, r: 1.5, b: Uint8Array.of(1, 2), doc: { a: 1 }, flag: true, x: 7 });
   // The failing control: the app's own statement keeps its database's settings.
   assert.deepEqual(db.prepare("select n from t where id = 1").get(), [BigInt("5")]);
-  assert.throws(() => execute(db, q, { id: 2 }), (e: Error) => e instanceof DecodeError && e instanceof TypeError && /^Column "n" holds 9007199254740993/u.test(e.message));
+  assert.throws(() => execute(db, q, { id: 2 }), (e: Error) => e instanceof DecodeError && e instanceof TypeError && e.message.startsWith('Column "n" holds 9007199254740993'));
   // A boolean column holding 2, which SQLite lets in: refused, naming it.
   assert.throws(() => execute(db, q, { id: 3 }), /^TypeError: Column "flag" is a boolean, stored as 0 or 1, and holds 2/u);
   // A query defined by hand: integers exact, nothing else known.
@@ -533,7 +533,7 @@ test("MySQL: a VECTOR is an array of its floats on every driver that reads one, 
   const fields = [{ name: "v", columnType: 242, decimals: 0 }, { name: "vn", columnType: 242, decimals: 0 }];
   assert.deepEqual(await execute({ query: promiseDriverStub(() => [[], []]), execute: promiseDriverStub(() => [[{ v: floats, vn: null }], fields]) } as never, q), expected);
   assert.deepEqual(await execute({ query: promiseDriverStub(() => [[], []]), execute: async () => [[{ v: Buffer.from(bytes), vn: null }], fields] } as never, q), expected);
-  assert.deepEqual([...((await execute({ batch: promiseDriverStub(() => ({})), query: async () => [{ v: Buffer.from(bytes), vn: null }] } as never, q)) as unknown[])], expected);
+  assert.deepEqual([...((await execute({ batch: promiseDriverStub(() => ({})), query: async () => [{ v: Buffer.from(bytes), vn: null }] }, q)) as unknown[])], expected);
   const planetscale = {
     execute: async (_: string, __: unknown, options: { cast: (f: { type: string; charset?: number }, v: string | null) => unknown }) => ({
       rows: [{ v: options.cast({ type: "VECTOR", charset: 63 }, String.fromCharCode(...bytes)), vn: options.cast({ type: "VECTOR", charset: 63 }, null) }],
@@ -549,15 +549,15 @@ test("MySQL: a VECTOR is an array of its floats on every driver that reads one, 
   // A parameter binds the text of its floats, which the engine's `to_vector(?)` reads, on every driver.
   const w: QueryModule<"mysql"> = { dialect: "mysql", sql: "insert into items (v) values (to_vector(:v))", params: ["v"], inputs: { v: { type: vector } } };
   const seen: unknown[][] = [];
-  await execute({ query: promiseDriverStub(() => [[], []] as [unknown, unknown]), execute: async (_: unknown, v?: unknown[]) => (seen.push(v!), [[], []] as [unknown, unknown]) } as never, w, { v: floats });
-  await execute({ query: async (_: string, v: unknown) => (seen.push(v as unknown[]), []), batch: promiseDriverStub(() => []) } as never, w, { v: floats });
-  await execute({ unsafe: async (_: string, v?: unknown[]) => (seen.push(v!), []), commitDistributed: async () => {} } as never, w, { v: floats });
+  await execute({ query: promiseDriverStub(() => [[], []] as [unknown, unknown]), execute: async (_: unknown, v?: unknown[]) => (seen.push(v!), [[], []] as [unknown, unknown]) }, w, { v: floats });
+  await execute({ query: async (_: string, v: unknown) => (seen.push(v as unknown[]), []), batch: promiseDriverStub(() => []) }, w, { v: floats });
+  await execute({ unsafe: async (_: string, v?: unknown[]) => (seen.push(v!), []), commitDistributed: async () => {} }, w, { v: floats });
   await execute({ execute: async (_: string, v: unknown[]) => (seen.push(v), { rows: [] }) } as never, w, { v: floats });
-  await execute({ batch: promiseDriverStub(() => ({})), query: async (_: string, v: unknown) => (seen.push(v as unknown[]), []) } as never, w, { v: null });
+  await execute({ batch: promiseDriverStub(() => ({})), query: async (_: string, v: unknown) => (seen.push(v as unknown[]), []) }, w, { v: null });
   assert.deepEqual(seen, [...Array(4).fill(["[1,2.5,-3,0.10000000149011612]"]), [null]]);
   const fake = { query: promiseDriverStub(() => [[], []]), execute: promiseDriverStub(() => [[], []]) } as never;
   await assert.rejects(execute(fake, w, { v: [1, "2"] }) as Promise<unknown>, /^TypeError: Parameter "v" is a VECTOR, an array of finite numbers, and the element at \[1\] is "2"\.$/u);
-  await assert.rejects(execute(fake, w, { v: [1, NaN] }) as Promise<unknown>, /the element at \[1\] is NaN/u);
+  await assert.rejects(execute(fake, w, { v: [1, Number.NaN] }) as Promise<unknown>, /the element at \[1\] is NaN/u);
   await assert.rejects(execute(fake, w, { v: [Infinity] }) as Promise<unknown>, /the element at \[0\] is Infinity/u);
   await assert.rejects(execute(fake, w, { v: [1, null] }) as Promise<unknown>, /^TypeError: Parameter "v" is an array whose elements may not be null, and the element at \[1\] is/u);
 });

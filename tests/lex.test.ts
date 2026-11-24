@@ -42,11 +42,11 @@ test("a colon that opens a Postgres subscript is a slice, not a parameter", () =
 test("MySQL text is read as a session in the default sql_mode reads it", () => {
   // A backslash escapes the character after it, in either quote: a placeholder after `\'` is
   // Still in the string, and one after `'\\'` is not.
-  assert.deepEqual(names("select 'it\\'s :not', 'a\\\\', :x, \"say \\\":no\", 'a\\nb' from t where id = :id", "mysql"), ["x", "id"]);
+  assert.deepEqual(names(String.raw`select 'it\'s :not', 'a\\', :x, "say \":no", 'a\nb' from t where id = :id`, "mysql"), ["x", "id"]);
   // Postgres and SQLite read the backslash as a character.
-  assert.deepEqual(names("select 'C:\\', :x"), ["x"]);
-  assert.deepEqual(names("select 'C:\\', :x", "sqlite"), ["x"]);
-  assert.deepEqual(names("select 'C:\\', :x", "mysql"), []);
+  assert.deepEqual(names(String.raw`select 'C:\', :x`), ["x"]);
+  assert.deepEqual(names(String.raw`select 'C:\', :x`, "sqlite"), ["x"]);
+  assert.deepEqual(names(String.raw`select 'C:\', :x`, "mysql"), []);
   // `#` starts a line comment; `--` does only before a space or a control character, or at the end.
   assert.deepEqual(names("select :a # :b\n, :c", "mysql"), ["a", "c"]);
   assert.deepEqual(names("select :a --:b", "mysql"), ["a", "b"]);

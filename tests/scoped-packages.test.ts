@@ -37,11 +37,11 @@ Iterator.from(["postgres", "mysql", "duckdb"] as const).forEach((dialect) => {
 
 // oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
 test("the scoped public runtime preserves the Standard Query contract", () => {
-  const query = defineQuery<{ id: number }, { id: number }, "one", "sqlite">({
+  const {query} = defineQuery<{ id: number }, { id: number }, "one", "sqlite">({
     dialect: "sqlite", sql: "select :id as id", text: "select ? as id", params: ["id"],
     inputs: { id: { type: { kind: "scalar", name: "int" }, nullable: false } },
     columns: [["id", "int"]], cardinality: "one",
-  })["~standard"].query;
+  })["~standard"];
   assert.equal(query.text, "select ? as id");
   assert.deepEqual(query.encode({ id: 7 }), [7]);
   assert.deepEqual(query.decode([[7]]), { id: 7 });

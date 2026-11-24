@@ -4,7 +4,7 @@
 // An engine installed while the process runs takes over: each call looks for it again, and the
 // Projects opened meanwhile are opened again on it.
 import { tooling } from "./engine-package.ts";
-import { serve } from "./rpc.ts";
+import { CONTENT_MAPPER_POSITION_ENCODING, serve } from "./rpc.ts";
 
 type Handler = (params: unknown) => unknown | Promise<unknown>;
 type Handlers = Record<string, Handler>;
@@ -34,7 +34,7 @@ const handle = (method: string, fallback: Handler): Handler => async (params) =>
 };
 
 serve({
-  initialize: handle("initialize", (params) => ({ protocolVersion: (params as { protocolVersion?: number } | undefined)?.protocolVersion ?? 1, positionEncoding: "utf-8", diagnosticSource: "reylo" })),
+  initialize: handle("initialize", (params) => ({ protocolVersion: (params as { protocolVersion?: number } | undefined)?.protocolVersion ?? 1, positionEncoding: CONTENT_MAPPER_POSITION_ENCODING, diagnosticSource: "reylo" })),
   openProject: handle("openProject", (params) => {
     const p = params as { projectHandle: string };
     opened.set(p.projectHandle, params);

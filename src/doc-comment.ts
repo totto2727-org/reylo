@@ -165,6 +165,6 @@ export function docComment(prose: string, sql: string | undefined, note = "", in
   }
   if (note) {parts.push(note);}
   if (!parts.length) {return "";}
-  const body = parts.join("\n\n").replaceAll("*/", "*\\/").split("\n");
+  const body = parts.join("\n\n").replaceAll("*/", String.raw`*\/`).split("\n");
   return [`${indent}/**`, ...body.map((l) => (l ? `${indent} * ${l}` : `${indent} *`)), `${indent} */`, ""].join("\n");
 }

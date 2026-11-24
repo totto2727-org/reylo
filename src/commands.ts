@@ -70,7 +70,7 @@ const located = function (text: string, start: number, length: number): { at: st
   const gutter = String(lineNumber);
   return {
     at: `${lineNumber}:${column + 1}`,
-    frame: [`  ${paint("dim", `${gutter} |`)} ${line}`, `  ${paint("dim", `${" ".repeat(gutter.length)} |`)} ${line.slice(0, column).replace(/[^\t]/g, " ")}${paint("red", "^".repeat(span))}`],
+    frame: [`  ${paint("dim", `${gutter} |`)} ${line}`, `  ${paint("dim", `${" ".repeat(gutter.length)} |`)} ${line.slice(0, column).replaceAll(/[^\t]/g, " ")}${paint("red", "^".repeat(span))}`],
   };
 };
 
@@ -204,7 +204,7 @@ const generate = async function (args: string[]): Promise<number> {
     // The hint names the project's own file where the run covered one project that has one; where
     // No .sql file opened a project, the file of the one directory searched.
     const sessions = [...projects.keys()];
-    const own = sessions.length === 1 ? sessions[0]!.project.file : !sessions.length && paths.length <= 1 ? findProjectFile(resolve(paths[0] ?? ".")) : undefined;
+    const own = sessions.length === 1 ? sessions[0]!.project.file : (!sessions.length && paths.length <= 1 ? findProjectFile(resolve(paths[0] ?? ".")) : undefined);
     console.log(`${skipped.length ? "\n" : ""}No query under ${(paths.length ? paths : ["."]).join(", ")}: name the directory that holds them, or set cli.include in ${own ? shown(own) : PROJECT_FILE}.`);
     return 1;
   }

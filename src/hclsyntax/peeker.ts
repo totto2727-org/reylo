@@ -15,7 +15,7 @@ export class Peeker {
   public constructor(tokens: Token[], includeComments = false) {
     this.tokens = tokens;
     this.includeComments = includeComments;
-    if (!tokens.length || tokens[tokens.length - 1]!.type !== 'TokenEOF') {throw new Error('peeker requires an EOF-terminated token stream');}
+    if (!tokens.length || tokens.at(-1)!.type !== 'TokenEOF') {throw new Error('peeker requires an EOF-terminated token stream');}
   }
   public peek(): Token { return this.nextToken()[0] }
   public read(): Token { const [token, index] = this.nextToken(); this.nextIndex = index; return token }
@@ -25,17 +25,17 @@ export class Peeker {
     for (let i = this.nextIndex; i < this.tokens.length; i++) {
       const token = this.tokens[i]!;
       if (token.type === 'TokenComment' && !this.includeComments) {
-        if (this.includingNewlines() && token.bytes.length && token.bytes[token.bytes.length - 1] === 10) {
-          return [{ type: 'TokenNewline', bytes: token.bytes.subarray(token.bytes.length - 1), range: token.range }, i + 1];
+        if (this.includingNewlines() && token.bytes.length && token.bytes.at(-1) === 10) {
+          return [{ type: 'TokenNewline', bytes: token.bytes.subarray(- 1), range: token.range }, i + 1];
         }
         continue;
       }
       if (token.type === 'TokenNewline' && !this.includingNewlines()) {continue;}
       return [token, i + 1];
     }
-    return [this.tokens[this.tokens.length - 1]!, this.tokens.length];
+    return [this.tokens.at(-1)!, this.tokens.length];
   }
-  public includingNewlines(): boolean { return this.includeNewlinesStack[this.includeNewlinesStack.length - 1]! }
+  public includingNewlines(): boolean { return this.includeNewlinesStack.at(-1)! }
   public pushIncludeNewlines(include: boolean): void { this.includeNewlinesStack.push(include) }
   public popIncludeNewlines(): boolean {
     if (this.includeNewlinesStack.length === 1) {throw new Error('unbalanced IncludeNewlinesStack pop');}

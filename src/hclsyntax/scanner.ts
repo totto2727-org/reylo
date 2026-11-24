@@ -10,6 +10,7 @@ import * as tables from './scanner-tables.ts';
 import * as stringTables from './string-literal-tables.ts';
 import { RagelState, runRagel } from './scanner-ragel.ts';
 import { graphemeClusters } from './scanner-grapheme.ts';
+
 export { graphemeClusters } from './scanner-grapheme.ts';
 
 const selfTokens: Record<number, string> = {
@@ -75,7 +76,7 @@ const scanTokens = function (input: Uint8Array, filename: string, start: Pos, mo
     pos = end;
     tokens.push({ type, bytes, range: { filename, start: begin, end } });
   };
-  const s = new RagelState(mode === 'normal' ? tables.en_main : mode === 'template' ? tables.en_bareTemplate : tables.en_identOnly);
+  const s = new RagelState(mode === 'normal' ? tables.en_main : (mode === 'template' ? tables.en_bareTemplate : tables.en_identOnly));
   const stack: number[] = [];
   const retBraces: number[] = [];
   const heredocs: { marker: Uint8Array; startOfLine: boolean }[] = [];
@@ -104,12 +105,12 @@ const scanTokens = function (input: Uint8Array, filename: string, start: Pos, mo
     lit(type, kind);
     braces++;
     retBraces.push(braces);
-    if (heredocs.length) {heredocs[heredocs.length - 1]!.startOfLine = false;}
+    if (heredocs.length) {heredocs.at(-1)!.startOfLine = false;}
     return call(tables.en_main);
   };
   const midline = (kind: 'hold' | 'rewind'): void => {
     end(kind);
-    heredocs[heredocs.length - 1]!.startOfLine = false;
+    heredocs.at(-1)!.startOfLine = false;
     token('TokenStringLit');
   };
   runRagel(data, tables, s, id => {
@@ -144,7 +145,7 @@ const scanTokens = function (input: Uint8Array, filename: string, start: Pos, mo
       case 22: { s.act = 12; break; }
       case 25: {
         s.te = s.p + 1;
-        const doc = heredocs[heredocs.length - 1]!;
+        const doc = heredocs.at(-1)!;
         if (doc.startOfLine && equalBytes(trimSpace(data.subarray(s.ts, s.te)), doc.marker)) {
           let nls = s.te - 1;
           const nle = s.te;
@@ -207,7 +208,7 @@ const scanTokens = function (input: Uint8Array, filename: string, start: Pos, mo
       case 68: { lit('TokenOBrace', 'next'); braces++; break; }
       case 69: case 70: {
         s.te = s.p + 1;
-        if (retBraces.length && retBraces[retBraces.length - 1] === braces) {
+        if (retBraces.length && retBraces.at(-1) === braces) {
           token('TokenTemplateSeqEnd');
           braces--;
           retBraces.pop();
@@ -225,7 +226,7 @@ const scanTokens = function (input: Uint8Array, filename: string, start: Pos, mo
         lit('TokenOHeredoc', 'next');
         let marker = data.subarray(s.ts + 2, s.te - 1);
         if (marker[0] === 45) {marker = marker.subarray(1);}
-        if (marker[marker.length - 1] === 13) {marker = marker.subarray(0, marker.length - 1);}
+        if (marker.at(-1) === 13) {marker = marker.subarray(0, - 1);}
         heredocs.push({ marker, startOfLine: true });
         return call(tables.en_heredocTemplate);
       }
@@ -354,7 +355,7 @@ export function checkInvalidTokens(tokens: Token[]): Diagnostic[] {
         break;
       }
       case 'TokenQuotedNewline': {
-        add('Invalid multi-line string', 'Quoted strings may not be split over multiple lines. To produce a multi-line string, either use the \\n escape to represent a newline character or use the "heredoc" multi-line template syntax.');
+        add('Invalid multi-line string', String.raw`Quoted strings may not be split over multiple lines. To produce a multi-line string, either use the \n escape to represent a newline character or use the "heredoc" multi-line template syntax.`);
         break;
       }
       case 'TokenInvalid': {

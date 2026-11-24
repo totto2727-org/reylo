@@ -92,9 +92,9 @@ async function fulfil(need: Need, io: EngineIo): Promise<Answer> {
       return { describe: { params: d.params.map((parameter) => parameter.oid), columns: d.columns } };
     }
     return { rows: await io.query(need.sql, need.params) };
-  } catch (e) {
-    if (e instanceof Unreachable) {throw e;}
-    const err = e as Error & { code?: string; position?: string | number };
+  } catch (error_) {
+    if (error_ instanceof Unreachable) {throw error_;}
+    const err = error_ as Error & { code?: string; position?: string | number };
     const error: DbError = { message: err.message };
     if (err.code) {error.code = err.code;}
     if (!matchesUndefined(err.position)) {error.position = Number(err.position);}

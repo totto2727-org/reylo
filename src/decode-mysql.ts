@@ -75,7 +75,7 @@ const wallClock = function (s: string, decimals: number, type: number): string {
   let text = s;
   if (decimals > 0) {
     const dot = text.indexOf(".");
-    text = dot < 0 ? `${text}.${"0".repeat(decimals)}` : text.padEnd(dot + 1 + decimals, "0");
+    text = dot === -1 ? `${text}.${"0".repeat(decimals)}` : text.padEnd(dot + 1 + decimals, "0");
   }
   return type === TIME ? text : text.replace(" ", "T");
 };
@@ -103,7 +103,7 @@ const LONGLONG = 8;
 type Fix = (v: unknown, name: string) => unknown;
 const toBool: Fix = truth;
 // A BIGINT's text is always its digits: BigInt reads it straight.
-const toBigInt: Fix = (v, name) => (matchesString(v) ? BigInt(v) : matchesNumber(v) || matchesBigInt(v) ? bigInteger(v, name) : v);
+const toBigInt: Fix = (v, name) => (matchesString(v) ? BigInt(v) : (matchesNumber(v) || matchesBigInt(v) ? bigInteger(v, name) : v));
 
 // A VECTOR is MySQL's one array: mysql2 decodes its floats, mariadb and PlanetScale give its bytes.
 const toFloats: Fix = (v, name) => coerce("float[]", v, name);
@@ -212,7 +212,7 @@ export async function mariadb(c: AnyClient, text: string, values: unknown[], col
   // Module's kinds, else by the columns' metadata (mariadb 2 has no isSet()).
   const work: { name: string; date: boolean }[] = columns
     ? columns.filter(([, kind]) => kind === "text" || kind.split("|").includes("timestamp")).map(([name, kind]) => ({ name, date: kind !== "text" }))
-    : (((result as { meta?: MariadbColumn[] }).meta ?? callbackMeta ?? []) as MariadbColumn[])
+    : (((result as { meta?: MariadbColumn[] }).meta ?? callbackMeta ?? []))
         .map((m) => ({ name: hasFunctionType(m.name) ? m.name() : m.name, type: m.type, set: (hasFunctionType(m.isSet) && m.isSet()) || m.type === "SET" }))
         .filter((m): m is { name: string; type: string | undefined; set: boolean } => !matchesUndefined(m.name) && (m.set || m.type === "DATETIME" || m.type === "TIMESTAMP"))
         .map((m) => ({ name: m.name, date: !m.set }));
@@ -270,11 +270,11 @@ const planetscaleCast = function (field: PlanetscaleField, value: string | null)
     case "UINT24":
     case "UINT32":
     case "YEAR": {
-      return parseInt(value, 10);
+      return Number.parseInt(value, 10);
     }
     case "FLOAT32":
     case "FLOAT64": {
-      return parseFloat(value);
+      return Number.parseFloat(value);
     }
   }
   if (field.charset === 63) {return bytesOf(value);}
@@ -295,7 +295,7 @@ export async function planetscale(m: AnyClient, text: string, values: unknown[],
   // PlanetScale's result always carries its rows, an empty array for a statement that returns
   // None. Another driver's execute() (TiDB Cloud's answers with the rows themselves) would read
   // As no rows at all.
-  if (!Array.isArray(result?.rows)) {throw new TypeError(`reylo ran this statement through execute(), as on PlanetScale's @planetscale/database, and the client answered with ${Array.isArray(result) ? "an array" : matchesNull(result) || !hasObjectType(result) ? String(result) : "an object"} rather than a result with rows. It takes execute(text, values) as on mysql2 and PlanetScale, or a Drizzle database over one of them.`);}
+  if (!Array.isArray(result?.rows)) {throw new TypeError(`reylo ran this statement through execute(), as on PlanetScale's @planetscale/database, and the client answered with ${Array.isArray(result) ? "an array" : (matchesNull(result) || !hasObjectType(result) ? String(result) : "an object")} rather than a result with rows. It takes execute(text, values) as on mysql2 and PlanetScale, or a Drizzle database over one of them.`);}
   fixRows(result.rows, columnFixes(columns));
   return result.rows;
 }

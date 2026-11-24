@@ -65,7 +65,7 @@ export function renderType(t: EngineType, inJson = false, dialect: Dialect = "po
       // `a|b` is either: a MySQL column whose type the execution decides (`:n + 1` is a BIGINT
       // Or a DOUBLE by what is bound), or a truth value a document holds as `true` or as 1.
       if (!inJson) {return typeOfKind(scalarKind(t.name, dialect));}
-      const parts = t.name.split("|").map((name) => (dialect === "sqlite" ? sqliteJson : dialect === "mysql" ? mysqlJson : json)[name] ?? JSON_TYPE);
+      const parts = t.name.split("|").map((name) => (dialect === "sqlite" ? sqliteJson : (dialect === "mysql" ? mysqlJson : json))[name] ?? JSON_TYPE);
       return parts.includes(JSON_TYPE) ? JSON_TYPE : [...new Set(parts.flatMap((part) => part.split(" | ")))].join(" | ");
     }
     case "enum": { return t.labels.length ? t.labels.map((label) => JSON.stringify(label)).join(" | ") : "string"; }
@@ -76,7 +76,7 @@ export function renderType(t: EngineType, inJson = false, dialect: Dialect = "po
       // (`array[1, 2]`, `array_agg` over a NOT NULL column). A parameter's are strict
       // (`renderParamType`).
       const item = renderType(t.of, inJson, dialect);
-      const inner = t.nullable_items !== false ? orNull(item) : item;
+      const inner = t.nullable_items === false ? item : orNull(item);
       return /[|&]/u.test(inner) ? `(${inner})[]` : `${inner}[]`;
     }
     // A JSON value whose shape the statement builds.
@@ -139,7 +139,7 @@ export function schemaType(schema: unknown, input = false): string {
   if (Array.isArray(m.anyOf)) {return union(m.anyOf.map(sub));}
   if (Array.isArray(m.enum)) {return union(m.enum.map(literalType));}
   if (!matchesUndefined(m.not)) {return "never";}
-  const kinds = matchesString(m.type) ? [m.type] : Array.isArray(m.type) ? m.type.filter((k): k is string => matchesString(k)) : [];
+  const kinds = matchesString(m.type) ? [m.type] : (Array.isArray(m.type) ? m.type.filter((k): k is string => matchesString(k)) : []);
   return kinds.length ? union(kinds.map((kind) => kindType(kind, m, input))) : JSON_TYPE;
 }
 

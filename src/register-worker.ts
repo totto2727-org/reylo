@@ -13,8 +13,8 @@ parentPort!.on("message", async ({ path, source, port, done }: Request) => {
   let reply: { code: string } | { error: string };
   try {
     reply = { code: (await (await tooling(dirname(path))).sqlModule(path, source)).code };
-  } catch (e) {
-    reply = { error: (e as Error).message };
+  } catch (error) {
+    reply = { error: (error as Error).message };
   }
   port.postMessage(reply);
   port.close();

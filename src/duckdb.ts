@@ -152,7 +152,7 @@ const copyOf = function (path: string, fresh = false): string {
   const stamp = (p: string): string => (existsSync(p) ? `${statSync(p).size}:${statSync(p).mtimeMs}` : "-");
   const key = `${stamp(path)}/${stamp(wal)}`;
   const held = copies.get(path);
-  if (held && held.key === key && !fresh) {return held.file;}
+  if (held?.key === key && !fresh) {return held.file;}
   if (held) {rmSync(held.dir, { force: true, recursive: true });}
   const dir = mkdtempSync(join(tmpdir(), "reylo-duckdb-"));
   const file = join(dir, basename(path));
@@ -194,19 +194,19 @@ export function duckdbDatabase(path: string, root: string): { run<T>(work: (io: 
     async run(work) {
       const options: Record<string, string> = { file_search_path: root };
       if (path !== ":memory:") {options.access_mode = "READ_ONLY";}
-      const instance = await api.DuckDBInstance.create(path, options).catch((e: unknown) => {
-        const message = e instanceof Error ? e.message : String(e);
+      const instance = await api.DuckDBInstance.create(path, options).catch((error: unknown) => {
+        const message = error instanceof Error ? error.message : String(error);
         if (LOCKED.test(message)) {return openCopy(api, path, options);}
         const holder = HELD_ON_WINDOWS.exec(message)?.[1];
         if (holder) {opened(new Error(`${holder} holds it for writing, and on Windows no other process can read it meanwhile, not even to copy it: type-check while that process is stopped`));}
-        return opened(e);
+        return opened(error);
       });
       try {
         const c = await instance.connect().catch(opened);
         try {
           return await work({
             describe: (sql) => describe(api, c, sql),
-            query: async (sql, params) => (await c.runAndReadAll(sql, params as never)).getRowsJson(),
+            query: async (sql, params) => (await c.runAndReadAll(sql, params)).getRowsJson(),
           });
         } finally {
           c.closeSync();

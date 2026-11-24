@@ -193,7 +193,7 @@ test("try resolves to the value or to the database's error, and rejects with eve
   const unique = thrown(`duplicate key value violates unique constraint "users_email_key"`, { severity: "ERROR", code: "23505", table: "users", constraint: "users_email_key" });
   const refused = thrown("connect ECONNREFUSED 127.0.0.1:1", { errno: -61, code: "ECONNREFUSED" });
   const answering = (rows: unknown[]) => ({ query: promiseDriverStub(() => ({ rows })) });
-  const failing = (error: Error) => ({ query: async () => Promise.reject(error) });
+  const failing = (error: Error) => ({ query: async () => { throw error; } });
   const many = defineQuery<{ id: number }, { id: number }, "many", "postgres">({ dialect: "postgres", sql: "select id from users where id = :id", params: ["id"], cardinality: "many" });
   const one = defineQuery<{ id: number }, { id: number }, "one", "postgres">({ dialect: "postgres", sql: "select id from users where id = :id", params: ["id"], cardinality: "one", source: "get_user.sql" });
 

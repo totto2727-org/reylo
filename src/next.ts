@@ -57,7 +57,7 @@ export function withReylo<Config extends NextConfig>(config: Config = {} as Conf
         },
       },
     }),
-  } as Config;
+  };
 }
 
 // Next's own check (`next/dist/lib/typescript/runTypeCheckCli`), with `--runExternalCode`: the

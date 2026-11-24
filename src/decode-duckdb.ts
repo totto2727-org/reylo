@@ -138,7 +138,7 @@ async function loadNodeApi(c: DuckdbClient): Promise<Api> {
 }
 
 /** Whether a client is @duckdb/node-api's DuckDBConnection. */
-export function isDuckdb(c: { [key: string]: unknown } | null | undefined): boolean {
+export function isDuckdb(c: Record<string, unknown> | null | undefined): boolean {
   return !matchesNullish(c) && hasFunctionType(c.runAndReadAll) && hasFunctionType(c.prepare) && hasFunctionType(c.run);
 }
 
@@ -272,7 +272,7 @@ const TIMES = new Set(["date", "timestamp", "timestamp_s", "timestamp_ms", "time
  * each part with its sign; any other text as it is, which DuckDB reads as its own (`1 day`).
  */
 export function duckdbInterval(text: string): string {
-  const n = "([+-]?\\d+(?:[.,]\\d+)?)";
+  const n = String.raw`([+-]?\d+(?:[.,]\d+)?)`;
   const regexMatch = new RegExp(`^\\s*([+-])?P(?:${n}Y)?(?:${n}M)?(?:${n}W)?(?:${n}D)?(?:T(?:${n}H)?(?:${n}M)?(?:${n}S)?)?\\s*$`, "i").exec(text);
   if (matchesNull(regexMatch) || !/\d/u.test(text)) {return text;}
   const negate = regexMatch[1] === "-";
@@ -407,7 +407,7 @@ function decode(v: unknown, t: DuckType, column: string): unknown {
     }
     case T.UNION: {
       const at = t.memberTags!.indexOf(o.tag);
-      return { tag: o.tag, value: at < 0 ? o.value : decode(o.value, t.memberTypes![at]!, column) };
+      return { tag: o.tag, value: at === -1 ? o.value : decode(o.value, t.memberTypes![at]!, column) };
     }
     case T.VARIANT: {
       // A VARIANT holds a value of any type, which it carries beside it.

@@ -13,7 +13,7 @@ import type { ScalarKind } from './values.ts';
 import { hasObjectType, matchesNull, matchesString, matchesUndefined } from "./native-predicates.ts";
 
 type Dialect = "postgres" | "mysql" | "sqlite" | "duckdb";
-type Schema = { [key: string]: unknown };
+type Schema = Record<string, unknown>;
 type Analysis = {
   params: Readonly<{ name: string; type: EngineType; nullable: boolean; schema?: JsonSchema }[]>;
   columns: Readonly<{ name: string; type: EngineType; nullable: boolean }[]>;
@@ -127,7 +127,7 @@ const scalar = function (name: string, dialect: Dialect, inJson: boolean, input:
     case "uuid": { return { type: "string", format: "uuid" }; }
     case "time": { return { type: "string", format: "time" }; }
     case "unknown": { return {}; }
-    default: { return { type: "string", description: `${dialect === "mysql" ? "MySQL" : dialect === "duckdb" ? "DuckDB" : "pg"} type ${name}` }; }
+    default: { return { type: "string", description: `${dialect === "mysql" ? "MySQL" : (dialect === "duckdb" ? "DuckDB" : "pg")} type ${name}` }; }
   }
 };
 
@@ -139,7 +139,7 @@ const object = function (fields: Readonly<{ name: string }[]>, field: (f: number
   fields.forEach((currentField, i) => {
     properties[currentField.name] = field(i);
     const at = required.indexOf(currentField.name);
-    if (at >= 0) {required.splice(at, 1);}
+    if (at !== -1) {required.splice(at, 1);}
     if (!optional(i)) {required.push(currentField.name);}
   });
   return { type: "object", properties, required, ...(closed ? { additionalProperties: false } : {}) };

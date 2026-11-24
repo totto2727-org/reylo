@@ -265,7 +265,7 @@ async function pgPromise(db: AnyClient, text: string, values: unknown[], columns
   // A task's or transaction's connection is not reachable, so what Reylo learns is kept per object.
   const rows = await pgFamily(db, (types) => run({ text, values, types }), columns, load);
   const first = rows[0] as Record<string, unknown> | undefined;
-  if (first && columns && columns.length && !columns.every(([name]) => Object.prototype.hasOwnProperty.call(first, name))) {throw refuseReceive();}
+  if (first && columns?.length && !columns.every(([name]) => Object.hasOwn(first, name))) {throw refuseReceive();}
   return rows;
 }
 

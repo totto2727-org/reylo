@@ -203,7 +203,7 @@ const inUserinfo = function (parts: UrlPart[]): Set<UrlPart> {
   });
   const inside = new Set<UrlPart>();
   const scheme = skeleton.indexOf("://");
-  if (scheme < 0) {return inside;}
+  if (scheme === -1) {return inside;}
   const start = scheme + 3;
   const ends = ["/", "?", "#"].map((d) => skeleton.indexOf(d, start)).filter((k) => k >= 0);
   const authorityEnd = Math.min(skeleton.length, ...ends);
@@ -226,11 +226,11 @@ const commandOutput = function (command: string, cwd: string, env: Record<string
   if (run.error) {
     const timedOut = (run.error as NodeJS.ErrnoException).code === "ETIMEDOUT";
     outcome = { error: timedOut ? `which did not finish within ${COMMAND_TIMEOUT_MS / 1000} s` : `which could not start: ${run.error.message}` };
-  } else if (run.status !== 0) {
-    outcome = { error: `which ${matchesNull(run.status) ? `ended on ${run.signal}` : `exited with code ${run.status}`}${said ? `: ${said}` : ""}` };
-  } else {
+  } else if (run.status === 0) {
     const value = run.stdout.replace(/(\r?\n)+$/u, "");
     outcome = value ? { value } : { error: "which printed nothing" };
+  } else {
+    outcome = { error: `which ${matchesNull(run.status) ? `ended on ${run.signal}` : `exited with code ${run.status}`}${said ? `: ${said}` : ""}` };
   }
   commandOutputs.set(key, "value" in outcome ? outcome : { ...outcome, at: Date.now() });
   return outcome;
@@ -250,8 +250,8 @@ export function resolveProject(engine: Engine | MissingEngine, projectDir: strin
     let text: string | undefined;
     try {
       text = readFileSync(file, "utf8");
-    } catch (e) {
-      error = `Cannot read ${shown(file)}: ${(e as Error).message}`;
+    } catch (error_) {
+      error = `Cannot read ${shown(file)}: ${(error_ as Error).message}`;
     }
     const types = matchesUndefined(text) ? null : TYPES_KEY.exec(text);
     if (types) {
@@ -289,7 +289,11 @@ export function resolveProject(engine: Engine | MissingEngine, projectDir: strin
     : `No database URL: set DATABASE_URL in the environment, .env.local or .env, or "direct_url" in ${file ? shown(file) : PROJECT_FILE}.`;
   const written = config.direct_url;
   let refreshUrl: (() => string | undefined) | undefined;
-  if (!matchesUndefined(written)) {
+  if (matchesUndefined(written)) {
+    const hit = lookup("DATABASE_URL");
+    url = hit?.value;
+    if (hit) {urlSource = hit.source;}
+  } else {
     const missing: string[] = [];
     const sources: string[] = [];
     const parts = urlParts(written);
@@ -343,10 +347,6 @@ export function resolveProject(engine: Engine | MissingEngine, projectDir: strin
         }
       } else {url = texts.join("");}
     }
-  } else {
-    const hit = lookup("DATABASE_URL");
-    url = hit?.value;
-    if (hit) {urlSource = hit.source;}
   }
   const dialect = url ? dialectOf(url) : "sqlite";
   if (url && !dialect) {error ??= `Cannot tell the database from the URL (${urlSource}): reylo reads postgres://, postgresql://, mysql://, file:, sqlite:, duckdb: and hcl: URLs.`;}
@@ -355,8 +355,8 @@ export function resolveProject(engine: Engine | MissingEngine, projectDir: strin
   try {
     const source = url && hclPath(url, root);
     if (source) {watched.push(source);}
-  } catch (e) {
-    error ??= `${urlSource}: ${(e as Error).message}`;
+  } catch (error_) {
+    error ??= `${urlSource}: ${(error_ as Error).message}`;
   }
   // This fork supports only SQLite, including cached analysis without a URL.
   return { file, root, dialect: dialect ?? "sqlite", strictParams: config.strict_params ?? true, sqlcommenter: config.sqlcommenter ?? true, cli: config.cli ?? {}, url, urlSource, refreshUrl, watched, error, notice, missingUrl };

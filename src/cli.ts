@@ -4,7 +4,7 @@ import { tooling } from "./engine-package.ts";
 
 try {
   process.exitCode = await (await tooling()).runCli(process.argv.slice(2));
-} catch (e) {
-  console.error(`reylo: ${(e as Error).message}`);
+} catch (error) {
+  console.error(`reylo: ${(error as Error).message}`);
   process.exitCode = 1;
 }

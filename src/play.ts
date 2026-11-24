@@ -62,7 +62,7 @@ function parseArgs(args: string[]): { port?: number; open: boolean; help: boolea
 }
 
 function openBrowser(url: string): void {
-  const [command, args] = process.platform === "darwin" ? ["open", [url]] : process.platform === "win32" ? ["cmd", ["/c", "start", "", url]] : ["xdg-open", [url]];
+  const [command, args] = process.platform === "darwin" ? ["open", [url]] : (process.platform === "win32" ? ["cmd", ["/c", "start", "", url]] : ["xdg-open", [url]]);
   spawn(command, args, { detached: true, stdio: "ignore" }).on("error", () => {}).unref();
 }
 
@@ -79,8 +79,8 @@ export async function play(args: string[]): Promise<number> {
   let running: Playground;
   try {
     running = await startPlay({ port: options.port });
-  } catch (e) {
-    console.error(`reylo play: ${(e as Error).message}`);
+  } catch (error) {
+    console.error(`reylo play: ${(error as Error).message}`);
     return 1;
   }
   const { url, label, notice } = running;
@@ -141,7 +141,7 @@ export async function startPlay(options: { port?: number | undefined; cwd?: stri
   if (!page) {throw new Error("the playground's page is not in this install of reylo; reinstall reylo.");}
   const backend = await openBackend(cwd, options.env ?? process.env);
   const server = createServer((req, res) => {
-    handle(req, res, backend, page, () => server.address()).catch((e: unknown) => send(res, 500, { error: (e as Error).message }));
+    handle(req, res, backend, page, () => server.address()).catch((error: unknown) => send(res, 500, { error: (error as Error).message }));
   });
   const port = await listen(server, options.port);
   if (matchesUndefined(port)) {
@@ -174,16 +174,16 @@ async function openBackend(cwd: string, env: Record<string, string | undefined>)
 /** The project's database, through the type check's own session: its URL, its engine, its settings. */
 async function databaseBackend(session: Session): Promise<Backend> {
   const { project } = session;
-  const dialect = project.dialect;
+  const {dialect} = project;
   const schema = await session.schema();
   if (matchesNull(schema.value) || schema.fatal) {throw new Error(schema.fatal ? schema.error! : session.cannotConnect(schema.error));}
   const queries = CATALOG_QUERIES[dialect];
-  const rows = async (sql: string | undefined) => (sql ? await session.query(sql).catch(() => []) : []);
+  const rows = async (sql: string | undefined) => (sql ? session.query(sql).catch(() => []) : []);
   const cat = catalog(dialect, await rows(queries.tables), await rows(queries.functions), await rows(queries.types));
   return {
     dialect,
     ...(project.notice ? { notice: project.notice } : {}),
-    label: `${dialect === "postgres" ? "Postgres" : dialect === "mysql" ? "MySQL" : "SQLite"} at ${session.where()} (${project.urlSource})`,
+    label: `${dialect === "postgres" ? "Postgres" : (dialect === "mysql" ? "MySQL" : "SQLite")} at ${session.where()} (${project.urlSource})`,
     schema: (await schemaDdl(dialect, (sql) => session.query(sql))) ?? schemaText(dialect, cat),
     catalog: cat,
     async analyze(sql, width) {
@@ -217,7 +217,7 @@ async function schemaDdl(dialect: Dialect, query: (sql: string) => Promise<unkno
       const tables = await query("select table_name, table_type from information_schema.tables where table_schema = database() order by table_type = 'VIEW', table_name");
       const out: string[] = [];
       for (const [name, type] of tables as [string, string][]) {
-        const [row] = await query(`show create ${type === "VIEW" ? "view" : "table"} \`${name.replace(/`/gu, "``")}\``);
+        const [row] = await query(`show create ${type === "VIEW" ? "view" : "table"} \`${name.replaceAll('`', "``")}\``);
         // A table's next AUTO_INCREMENT value is its data's, not its schema's.
         out.push(`${String(row?.[1] ?? "").replace(/ AUTO_INCREMENT=\d+/u, "")};`);
       }
@@ -269,7 +269,7 @@ select ddl from (
 
 /** The schema as the page shows it where the database refuses to give it: each table's columns, as a CREATE TABLE writes them. */
 function schemaText(dialect: Dialect, cat: Catalog): string {
-  const q = (name: string): string => (/^[a-z_][a-z0-9_]*$/u.test(name) ? name : dialect === "mysql" ? `\`${name}\`` : `"${name.replace(/"/gu, '""')}"`);
+  const q = (name: string): string => (/^[a-z_][a-z0-9_]*$/u.test(name) ? name : (dialect === "mysql" ? `\`${name}\`` : `"${name.replace(/"/gu, '""')}"`));
   return cat.tables
     .map((t) => {
       const width = Math.max(...t.columns.map((column) => q(column.name).length));
@@ -287,7 +287,7 @@ async function handle(req: IncomingMessage, res: ServerResponse, backend: Backen
   // A DNS name rebound to 127.0.0.1, names another host or origin, and is refused, so no web page
   // Reads the schema through the playground.
   const local = (host: string | undefined): boolean => !!host && [`127.0.0.1:${port}`, `localhost:${port}`, `[::1]:${port}`].includes(host);
-  const origin = req.headers.origin;
+  const {origin} = req.headers;
   if (!local(req.headers.host) || (!matchesUndefined(origin) && !local(origin.replace(/^http:\/\//u, "")))) {return send(res, 403, { error: "the playground answers this machine's own pages and tools only" });}
   const url = new URL(req.url ?? "/", `http://${req.headers.host}`);
 
@@ -301,7 +301,7 @@ async function handle(req: IncomingMessage, res: ServerResponse, backend: Backen
       } catch {
         return send(res, 400, { error: "the body is not JSON" });
       }
-      sql = matchesString(body.sql) ? body.sql : matchesString(body.q) ? body.q : sql;
+      sql = matchesString(body.sql) ? body.sql : (matchesString(body.q) ? body.q : sql);
       if (matchesNumber(body.width)) {width = body.width;}
     } else if (req.method !== "GET") {return send(res, 405, { error: "GET or POST" });}
     if (matchesNull(sql)) {return send(res, 400, { error: "name the query: ?q=<sql>, or a JSON body {\"sql\": \"<sql>\"}" });}

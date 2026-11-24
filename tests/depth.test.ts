@@ -5,7 +5,8 @@ import { mkdtemp, writeFile } from "node:fs/promises";
 import { DatabaseSync } from "node:sqlite";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { Engine, engine } from "../src/engine.ts";
+import type { Engine} from "../src/engine.ts";
+import { engine } from "../src/engine.ts";
 import { Session } from "../src/analyze.ts";
 
 // The embedded SQLite reads an expression 350 deep, where SQLite's own bound is 1,000.

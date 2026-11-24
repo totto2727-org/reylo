@@ -19,7 +19,7 @@ const noParse = function (x: string): string {
 };
 const appTable: Record<number, Parser> = {
   20: (x) => x,
-  23: (x) => parseInt(x, 10),
+  23: (x) => Number.parseInt(x, 10),
   1184: (x) => `app:${x}`,
   1186: (x) => ({ interval: x }),
   1231: (x) => parseArray(x, parseFloat),
@@ -45,7 +45,7 @@ const COLUMNS: [string, number, string | null][] = [
   ["wall", 1114, "2024-01-15 10:30:00.123456"],
   ["day", 1082, "2024-01-15"],
   ["doc", 3802, '{"a":[1,2]}'],
-  ["bytes", 17, "\\x0102ff"],
+  ["bytes", 17, String.raw`\x0102ff`],
   ["flag", 16, "t"],
   ["boxes", 1020, "{(1,1),(0,0);(2,2),(1,1)}"],
   ["shapes", SHAPE_ARR, "{0101:NULL:0102}"],
@@ -163,10 +163,10 @@ const lateProbe: QueryModule<"postgres"> = { dialect: "postgres", sql: "select *
 // oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
 test("parseArray: quoting, escapes, NULL, nesting, bounds and box's delimiter", () => {
   assert.deepEqual(parseArray("{}", String), []);
-  assert.deepEqual(parseArray('{a,"b,c","NULL",NULL,"",\"q\\"x\\\\y\"}', String), ["a", "b,c", "NULL", null, "", 'q"x\\y']);
+  assert.deepEqual(parseArray('{a,"b,c","NULL",NULL,"",\"q\\"x\\\\y\"}', String), ["a", "b,c", "NULL", null, "", String.raw`q"x\y`]);
   assert.deepEqual(parseArray("{{1,2},{3,NULL}}", Number), [[1, 2], [3, null]]);
   assert.deepEqual(parseArray("[0:1]={7,8}", Number), [7, 8]);
-  assert.deepEqual(parseArray('{"(1,x)","(2,\\"y,z\\")"}', String), ["(1,x)", '(2,"y,z")']);
+  assert.deepEqual(parseArray(String.raw`{"(1,x)","(2,\"y,z\")"}`, String), ["(1,x)", '(2,"y,z")']);
   assert.deepEqual(parseArray("{(1,1),(0,0);(2,2),(1,1)}", String, ";"), ["(1,1),(0,0)", "(2,2),(1,1)"]);
 });
 
@@ -232,7 +232,7 @@ test("pg: a client set up with binary: true is refused, before the query and if 
   const original = sneaky.query;
   sneaky.query = async (config: string | Config, values?: unknown[]) => {
     if (typeof config === "object" && config.types) {
-      const types = config.types;
+      const {types} = config;
       config = { ...config, types: { getTypeParser: (oid: number) => (asked.push("binary"), types.getTypeParser(oid, "binary")) } };
     }
     return original(config, values);
@@ -244,8 +244,9 @@ test("pg: a client set up with binary: true is refused, before the query and if 
 /** Pg's Pool: no getTypeParser; query() runs on a client it checks out, whose `connect` listeners set parsers. */
 const pgPool = function (db: Db) {
   const clients: ReturnType<typeof pgClient>[] = [];
+  const options: { binary?: boolean; max: number } = { max: 2 };
   const pool = Object.assign(new EventEmitter(), {
-    options: { max: 2 } as { max: number; binary?: boolean },
+    options,
     Client: class {},
     clients,
     async connect() {
@@ -315,7 +316,7 @@ const pglite = function (db: Db, instance: Record<number, Parser> | undefined) {
       const answer = db.answer(text);
       const parsers = { ...instance, ...options?.parsers };
       const rows = answer.raw.map((raw) => {
-        const values = raw.map((v, i) => (v === null ? null : parsers[answer.fields[i]!.dataTypeID] ? parsers[answer.fields[i]!.dataTypeID]!(v) : v));
+        const values = raw.map((v, i) => (v === null ? null : (parsers[answer.fields[i]!.dataTypeID] ? parsers[answer.fields[i]!.dataTypeID]!(v) : v)));
         return options?.rowMode === "array" ? values : Object.fromEntries(answer.fields.map((field, i) => [field.name, values[i]]));
       });
       return { fields: answer.fields, rows };

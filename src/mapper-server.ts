@@ -5,7 +5,7 @@
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { dirname, relative, sep } from "node:path";
-import { serve } from "./rpc.ts";
+import { CONTENT_MAPPER_POSITION_ENCODING, serve } from "./rpc.ts";
 import { anyEngine } from './engine.ts';
 import type { Lexed } from './engine.ts';
 import { moduleTypes, queryErrorType, reyloImport, withinFile } from "./module-types.ts";
@@ -61,7 +61,7 @@ export function mapperHandlers(): MapperHandlers {
       // Builds from 2026-09-18 on send `protocolVersion: 1` and refuse a mapper that does not
       // Answer with the version it speaks; the npm nightly of the same day does not send it yet.
       const { protocolVersion } = (params ?? {}) as { protocolVersion?: number };
-      return { protocolVersion: protocolVersion ?? 1, positionEncoding: "utf-8", diagnosticSource: "reylo" };
+      return { protocolVersion: protocolVersion ?? 1, positionEncoding: CONTENT_MAPPER_POSITION_ENCODING, diagnosticSource: "reylo" };
     },
     async openProject(params) {
       const p = params as { projectHandle: string; options?: Record<string, unknown>; configFileName: string };

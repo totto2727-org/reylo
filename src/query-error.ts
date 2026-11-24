@@ -61,7 +61,7 @@ export interface PostgresErrorFields extends Error {
  * The names each field of an error may hold, by the error's code: what a statement that runs only
  * the server's own code writes through (its constraints, tables, columns and domains).
  */
-export type PostgresNarrowing = { readonly [C in PostgresCode]?: Readonly<{ constraint?: string; table?: string; column?: string; dataType?: string }> };
+export type PostgresNarrowing = Readonly<Partial<Record<PostgresCode, Readonly<{ constraint?: string; table?: string; column?: string; dataType?: string }>>>>;
 
 /** An error of one of the codes `C`, with the names `F` narrows its fields to. */
 type PostgresMember<C extends PostgresCode, F> = Omit<PostgresErrorFields, keyof F> & Readonly<{
@@ -111,7 +111,7 @@ export interface MysqlErrorFields extends Error {
 }
 
 /** The names each field of an error may hold, by the error's name: what a statement that runs no trigger and no stored function writes through. */
-export type MysqlNarrowing = { readonly [C in MysqlCode]?: Readonly<{ key?: string; constraint?: string; table?: string; column?: string }> };
+export type MysqlNarrowing = Readonly<Partial<Record<MysqlCode, Readonly<{ key?: string; constraint?: string; table?: string; column?: string }>>>>;
 
 /** An error of one of the names `C`, with the names `F` narrows its fields to. */
 type MysqlMember<C extends MysqlCode | undefined, F> = Omit<MysqlErrorFields, keyof F> & Readonly<{
@@ -146,7 +146,7 @@ export interface SqliteErrorFields extends Error {
 }
 
 /** The names each field of an error may hold, by the result code's name: what a statement that fires no trigger writes through. */
-export type SqliteNarrowing = { readonly [C in SqliteCode]?: Readonly<{ table?: string; columns?: Readonly<string[]>; constraint?: string }> };
+export type SqliteNarrowing = Readonly<Partial<Record<SqliteCode, Readonly<{ table?: string; columns?: Readonly<string[]>; constraint?: string }>>>>;
 
 /** An error of one of the codes `C`, with the names `F` narrows its fields to. */
 type SqliteMember<C extends SqliteCode | undefined, F> = Omit<SqliteErrorFields, keyof F> & Readonly<{
@@ -211,7 +211,7 @@ const record = (e: unknown): Record<string, unknown> | undefined => (hasObjectTy
 function postgresError(error: unknown) {
   const e = record(error);
   if (!e || !matchesString(e.severity) || !matchesString(e.message)) {return undefined;}
-  const code = matchesString(e.code) && SQLSTATE.test(e.code) ? e.code : matchesString(e.errno) && SQLSTATE.test(e.errno) ? e.errno : undefined;
+  const code = matchesString(e.code) && SQLSTATE.test(e.code) ? e.code : (matchesString(e.errno) && SQLSTATE.test(e.errno) ? e.errno : undefined);
   if (matchesUndefined(code)) {return undefined;}
   const position = text(e.position);
   return {
@@ -355,7 +355,7 @@ const SQLITE_NAME = /^SQLITE_[A-Z_]+$/u;
 function sqliteError(error: unknown) {
   const e = record(error);
   if (!e || !matchesString(e.message)) {return undefined;}
-  let message = e.message;
+  let {message} = e;
   const codes: number[] = [];
   let named = false;
   const name = (v: unknown): void => {

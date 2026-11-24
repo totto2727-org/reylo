@@ -14,7 +14,7 @@ export function hclCatalog(path: string, engine: EngineCore) {
   try {
     statements = sqliteSchemaFromHcl(readFileSync(path), path);
   } catch (error) {
-    throw new Error(`Cannot evaluate HCL schema ${path}: ${nativeErrorText(error, "message")}`);
+    throw new Error(`Cannot evaluate HCL schema ${path}: ${nativeErrorText(error, "message")}`, { cause: error });
   }
   const cache = new AnswerCache();
   const io: EngineIo = {

@@ -51,7 +51,7 @@ const paramType = function (q: Analysis["params"][number], rendered: string): st
  * a string.
  */
 export function reyloImport(...types: string[]): string {
-  const text = types.join("\n").replace(/"(?:[^"\\]|\\.)*"|\/\*[\s\S]*?\*\//g, (m) => (m.startsWith('"') ? '""' : ""));
+  const text = types.join("\n").replaceAll(/"(?:[^"\\]|\\.)*"|\/\*[\s\S]*?\*\//g, (m) => (m.startsWith('"') ? '""' : ""));
   return `import type { ${/(?<![\w$])Json(?![\w$]|\s*\??:)/u.test(text) ? "Json, " : ""}Query } from "@totto2727/reylo";`;
 }
 
@@ -61,9 +61,9 @@ export function reyloImport(...types: string[]): string {
  * nothing where there is none.
  */
 export function fieldComment(comment: string | undefined, indent = ""): string {
-  const text = (comment ?? "").replace(/\r\n?/g, "\n").replace(/[ \t]+$/gmu, "").trim();
+  const text = (comment ?? "").replaceAll(/\r\n?/g, "\n").replaceAll(/[ \t]+$/gmu, "").trim();
   if (!text) {return "";}
-  if (!text.includes("\n")) {return `/** ${text.replaceAll("*/", "*\\/")} */`;}
+  if (!text.includes("\n")) {return `/** ${text.replaceAll("*/", String.raw`*\/`)} */`;}
   return docComment(text, undefined, "", indent).trim();
 }
 
@@ -125,7 +125,7 @@ export function moduleTypes(sql: string, analysis: Analysis, dialect: Dialect, l
       diagnostics.push({ message, start: at?.start ?? 0, length, code: 12 });
     });
   }
-  const cardinality = analysis.cardinality;
+  const {cardinality} = analysis;
   if (analysis.diagnostics.some((d) => d.code === 6) || (dialect === "postgres" && analysis.kind === "")) {return { diagnostics, params: "unknown", row: "unknown", cardinality, names, queryError: queryErrorType(dialect, undefined) };}
   const columns = lastOfEachName(analysis.columns).map((c) => [`${ident(c.name)}: ${c.nullable ? orNull(renderType(c.type, false, dialect)) : renderType(c.type, false, dialect)}`, c.comment] as const);
   // A parameter is typed from its context (a column it is compared with or written to, a CAST);

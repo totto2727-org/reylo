@@ -29,14 +29,14 @@ export interface StandardQueryV1<Input = unknown, Output = Input, D extends Stan
 
 export declare namespace StandardQueryV1 {
   /** The Standard Query properties interface. */
-  export interface Props<Input = unknown, Output = Input, D extends StandardQueryV1.Dialect = StandardQueryV1.Dialect>
+  export interface Props<Input = unknown, Output = Input, D extends Dialect = Dialect>
     extends StandardTypedV1.Props<Input, Output> {
     /** The statement and its two mappings. */
     readonly query: Query<Output, D>;
   }
 
   /** The Standard Query query interface. */
-  export interface Query<Output = unknown, D extends StandardQueryV1.Dialect = StandardQueryV1.Dialect> {
+  export interface Query<Output = unknown, D extends Dialect = Dialect> {
     /** The database the statement is written for. A driver refuses a query for another one. */
     readonly dialect: D;
     /** The statement, with the database's positional placeholders: `$1`, `$2` on Postgres, `?` on MySQL and SQLite. */
@@ -116,7 +116,7 @@ export function standardQuery<D extends Dialect, Output>(module: QueryModule<D>,
       return bound.values as StandardQueryV1.RawValue<D>[];
     },
     decode(rows) {
-      const columns = module.columns;
+      const {columns} = module;
       if (matchesUndefined(columns)) {throw new TypeError("A query defined by hand without its columns cannot map rows to its output: a module a build step writes carries them.");}
       // SQLite's values go through `.run()`'s own `normalize`, its refusals of a storage class the
       // Column's type does not allow included. Its default reading suits a driver whose integer
@@ -127,7 +127,7 @@ export function standardQuery<D extends Dialect, Output>(module: QueryModule<D>,
       const keyed = rows.map((raw) => {
         if (raw.length !== columns.length) {throw new DecodeError(`The statement selects ${columns.length} columns, and a row has ${raw.length}.`);}
         const row: Record<string, unknown> = {};
-        for (let i = 0; i < raw.length; i++) {row[columns[i]![0]] = matchesNull(raw[i]) || matchesUndefined(raw[i]) ? null : sqlite ? raw[i] : decoders![i]!(raw[i]);}
+        for (let i = 0; i < raw.length; i++) {row[columns[i]![0]] = matchesNull(raw[i]) || matchesUndefined(raw[i]) ? null : (sqlite ? raw[i] : decoders![i]!(raw[i]));}
         return row;
       });
       return materialize(sqlite ? (normalize(keyed, columns) as Record<string, unknown>[]) : keyed);

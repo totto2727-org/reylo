@@ -52,7 +52,7 @@ export function passed(query: object, now = clock.now()): void {
 
 const yes = (v: string) => v === "true" || v === "1";
 const describe = (r: Readonly<string[]>): string => `${r[2]}${yes(r[3]!) ? " not null" : ""}${yes(r[4]!) ? " with a default" : ""}`;
-const table = (name: string): string => name.replace(/^"|"$/g, "").replace(/"\."/gu, ".");
+const table = (name: string): string => name.replaceAll(/^"|"$/g, "").replaceAll('"."', ".");
 
 /** The catalog query's columns, as upstream engine/core/src/fresh.rs names them; the sixth on Postgres and SQLite. */
 const COLUMNS = ["fresh_table", "fresh_column", "fresh_type", "fresh_not_null", "fresh_default", "fresh_expr"] as const;
@@ -75,7 +75,7 @@ export function differences(fresh: Fresh, rows: Readonly<unknown[]>, dialect?: "
   const columns = COLUMNS.slice(0, width);
   for (const row of rows) {
     if (matchesNull(row) || !hasObjectType(row)) {return undefined;}
-    const raw: unknown[] | undefined = Array.isArray(row) ? (row.length === width ? row : undefined) : Object.keys(row).length === width && columns.every((column) => column in row) ? columns.map((column) => (row as Record<string, unknown>)[column]) : undefined;
+    const raw: unknown[] | undefined = Array.isArray(row) ? (row.length === width ? row : undefined) : (Object.keys(row).length === width && columns.every((column) => column in row) ? columns.map((column) => (row as Record<string, unknown>)[column]) : undefined);
     if (matchesUndefined(raw)) {return undefined;}
     const values = raw.map((v) => (matchesNull(v) || matchesUndefined(v) ? "" : String(v)));
     now.set(`${values[0]}\u0000${values[1]}`, values);
@@ -125,10 +125,10 @@ function closes(s: string): number {
  */
 export function sqliteDefault(text: string): string {
   const t = text.trim();
-  const lone = /^(?:"((?:[^"]|"")*)"|`((?:[^`]|``)*)`|\[([^\]]*)\]|([A-Za-z_\u0080-\uffff][\w$\u0080-\uffff]*))$/.exec(t);
+  const lone = /^(?:"((?:[^"]|"")*)"|`((?:[^`]|``)*)`|\[([^\]]*)\]|([A-Za-z_\u0080-\uFFFF][\w$\u0080-\uFFFF]*))$/.exec(t);
   if (lone && !(!matchesUndefined(lone[4]) && /^(?:true|false|null|current_time|current_date|current_timestamp)$/i.test(lone[4]))) {
-    const name = !matchesUndefined(lone[1]) ? lone[1].replace(/""/gu, '"') : !matchesUndefined(lone[2]) ? lone[2].replace(/``/gu, "`") : (lone[3] ?? lone[4])!;
-    return `'${name.replace(/'/gu, "''")}'`;
+    const name = matchesUndefined(lone[1]) ? !matchesUndefined(lone[2]) ? lone[2].replace(/``/gu, "`") : (lone[3] ?? lone[4])! : lone[1].replace(/""/gu, '"');
+    return `'${name.replaceAll('\'', "''")}'`;
   }
   let out = "";
   for (let i = 0; i < t.length; ) {
@@ -147,10 +147,10 @@ export function sqliteDefault(text: string): string {
   return out;
 }
 
-const asciiUpper = (s: string): string => s.replace(/[a-z]+/gu, (m) => m.toUpperCase());
+const asciiUpper = (s: string): string => s.replaceAll(/[a-z]+/gu, (m) => m.toUpperCase());
 
 /** SQLite folds the case of ASCII letters alone. */
-const asciiLower = (s: string): string => s.replace(/[A-Z]+/gu, (m) => m.toLowerCase());
+const asciiLower = (s: string): string => s.replaceAll(/[A-Z]+/gu, (m) => m.toLowerCase());
 
 /** The error a call fails with when the schema changed under its query. */
 export function staleError(source: string | undefined, lines: Readonly<string[]>): Error {

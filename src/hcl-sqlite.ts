@@ -44,7 +44,7 @@ const boolean = function (expression: Expression): boolean {
 
 const path = function (expression: Expression): string[] {
   const parts = staticTraversal(expression);
-  if (parts && parts.every((part) => matchesString(part))) {return [...parts];}
+  if (parts?.every((part) => matchesString(part))) {return [...parts];}
   fail(expression, "Expected a static HCL reference.");
 };
 
@@ -133,8 +133,8 @@ const indexes = function (table: Table): { constraints: string[]; statements: st
       terms = on.map((term) => {
         labels(term, 0);
         shape(term.body, ["column", "expr", "desc"], []);
-        const column = term.body.attributes.column;
-        const expr = term.body.attributes.expr;
+        const {column} = term.body.attributes;
+        const {expr} = term.body.attributes;
         if (Boolean(column) === Boolean(expr)) {fail(term, "An index term requires exactly one column or expr.");}
         const value = column ? identifier(localColumn(column.expression, table.columns)) : `(${string(expr!.expression)})`;
         if (seen.has(value)) {fail(term, "Duplicate index term.");}
@@ -184,7 +184,7 @@ export function sqliteSchemaFromHcl(source: string | Uint8Array, filename = "sch
   const parsed = parseConfig(source, filename);
   const errors = parsed.diagnostics.filter((diagnostic) => diagnostic.severity === "error");
   if (errors.length) {throw new Error(errors.map((diagnostic) => `${diagnostic.subject?.filename ?? filename}:${diagnostic.subject?.start.line ?? 1}:${diagnostic.subject?.start.column ?? 1}: ${diagnostic.summary}: ${diagnostic.detail}`).join("\n"));}
-  const body = parsed.body;
+  const {body} = parsed;
   shape(body, [], ["schema", "table"]);
   const schemas = body.blocks.filter((block) => block.type === "schema");
   if (schemas.length !== 1 || labels(schemas[0]!, 1)[0] !== "main") {fail(body, "Exactly one SQLite schema \"main\" declaration is required.");}

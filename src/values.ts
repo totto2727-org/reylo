@@ -140,7 +140,7 @@ const DUCKDB_KINDS: Readonly<Record<string, ScalarKind>> = {
  * a BigInt either way, where no float shares the column: there a number may be either.
  */
 export function scalarKind(name: string, dialect: Dialect): Kind {
-  const kinds = [...new Set(name.split("|").flatMap((part) => (dialect === "sqlite" ? (SQLITE_KINDS[part] ?? "unknown") : dialect === "duckdb" ? (DUCKDB_KINDS[part] ?? "text") : (SQL_KINDS[part] ?? "text")).split("|")))];
+  const kinds = [...new Set(name.split("|").flatMap((part) => (dialect === "sqlite" ? (SQLITE_KINDS[part] ?? "unknown") : (dialect === "duckdb" ? (DUCKDB_KINDS[part] ?? "text") : (SQL_KINDS[part] ?? "text"))).split("|")))];
   const wide = kinds.includes("int8") && !kinds.includes("float") ? kinds.filter((k) => k !== "int") : kinds;
   return wide.join("|");
 }
@@ -350,7 +350,7 @@ export function duration(x: string): string {
 export function postgresInterval(text: string): string {
   const regexMatch = /^\s*([+-])(P[^+-]*)$/i.exec(text);
   if (matchesNull(regexMatch)) {return text;}
-  return regexMatch[1] === "+" ? regexMatch[2]! : regexMatch[2]!.replace(/(\d+(?:[.,]\d+)?)([YMWDHS])/gi, "-$1$2");
+  return regexMatch[1] === "+" ? regexMatch[2]! : regexMatch[2]!.replaceAll(/(\d+(?:[.,]\d+)?)([YMWDHS])/gi, "-$1$2");
 }
 
 type BufferClass = { from(data: string, encoding: string): Uint8Array; isBuffer(v: unknown): boolean };
@@ -358,13 +358,13 @@ const NodeBuffer = (globalThis as { Buffer?: BufferClass }).Buffer;
 // TextDecoder is a global in every runtime Reylo supports; it is typed here rather than through
 // The DOM lib or Node's, which a project that type-checks Reylo's sources need not have.
 const Utf8 = (globalThis as unknown as { TextDecoder: new (label?: string) => { decode(bytes: Uint8Array): string } }).TextDecoder;
-const utf8Decoder = new Utf8("utf-8");
+const utf8Decoder = new Utf8("utf8");
 
 /** UTF-8 bytes as text: a Buffer's own toString where the bytes are one. */
 export function utf8(bytes: Uint8Array): string {
   return NodeBuffer?.isBuffer(bytes) ? (bytes as Uint8Array & { toString(encoding: string): string }).toString("utf8") : utf8Decoder.decode(bytes);
 }
-const fromHex = (Uint8Array as unknown as { fromHex?: (hex: string) => Uint8Array }).fromHex;
+const {fromHex} = (Uint8Array as unknown as { fromHex?: (hex: string) => Uint8Array });
 
 /** Bytea's text: hex (`\x0102ff`, the server's default) or the escape format (`bytea_output = escape`). */
 export function bytea(x: string): Uint8Array {
@@ -373,14 +373,14 @@ export function bytea(x: string): Uint8Array {
     if (NodeBuffer) {return NodeBuffer.from(hex, "hex");}
     if (fromHex) {return fromHex(hex);}
     const out = new Uint8Array(hex.length / 2);
-    for (let i = 0; i < out.length; i++) {out[i] = parseInt(hex.slice(2 * i, 2 * i + 2), 16);}
+    for (let i = 0; i < out.length; i++) {out[i] = Number.parseInt(hex.slice(2 * i, 2 * i + 2), 16);}
     return out;
   }
   const out: number[] = [];
   for (let i = 0; i < x.length; i++) {
     if (x[i] !== "\\") {out.push(x.charCodeAt(i));}
     else if (x[i + 1] === "\\") {out.push(92), i++;}
-    else {out.push(parseInt(x.slice(i + 1, i + 4), 8)), (i += 3);}
+    else {out.push(Number.parseInt(x.slice(i + 1, i + 4), 8)), (i += 3);}
   }
   return Uint8Array.from(out);
 }
@@ -428,7 +428,7 @@ export function hstoreText(v: object, fail: (message: string) => never): string 
     const name = Array.isArray(v) || v instanceof Date || ArrayBuffer.isView(v) ? undefined : (v.constructor as { name?: unknown } | undefined)?.name;
     return fail(`is an hstore, an object of its keys whose values are strings or null; got ${matchesString(name) && name ? `a ${name}` : describe(v)}.`);
   }
-  const quote = (s: string): string => `"${s.replace(/[\\"]/g, "\\$&")}"`;
+  const quote = (s: string): string => `"${s.replaceAll(/[\\"]/g, String.raw`\$&`)}"`;
   const pairs: string[] = [];
   Iterator.from(Object.entries(v)).forEach(([key, value]) => {
     if (matchesUndefined(value)) {return;}
@@ -601,7 +601,7 @@ export function truth(v: unknown, column: string): boolean {
       break;
     }
   }
-  const shown = v instanceof Uint8Array ? `the bytes 0x${Array.from(v, (b) => b.toString(16).padStart(2, "0")).join("")}` : matchesString(v) ? JSON.stringify(v) : String(v);
+  const shown = v instanceof Uint8Array ? `the bytes 0x${Array.from(v, (b) => b.toString(16).padStart(2, "0")).join("")}` : (matchesString(v) ? JSON.stringify(v) : String(v));
   return refuseTruth(column, shown);
 }
 

@@ -199,8 +199,8 @@ const plan = function (name: string, kind: Kind, exact: boolean): Plan {
   // Refused. In a column with no type, or one built from what may be TEXT, the digits may be a
   // TEXT's, and stay as the driver gave them (wiki/driver-decoding.md). Any other text in a column of
   // Numbers or BLOBs alone is a TEXT the column's type does not allow.
-  const digits = (v: string): string | number => (DIGITS.test(v) ? exactInteger(BigInt(v), name) : texts ? v : refuse(v));
-  const str = numericOnly(kinds) || (numbers && !texts) ? digits : texts ? undefined : refuse;
+  const digits = (v: string): string | number => (DIGITS.test(v) ? exactInteger(BigInt(v), name) : (texts ? v : refuse(v)));
+  const str = numericOnly(kinds) || (numbers && !texts) ? digits : (texts ? undefined : refuse);
   // A NUMERIC's either: read as numbers, one past 2^53 may be a rounded INTEGER, which is refused.
   if (!exact && kinds.includes("int")) {return { name, big: (v) => exactInteger(v, name), num: (v) => (Number.isInteger(v) ? exactInteger(v, name) : v), str, blob };}
   // A REAL, a NUMERIC read exact, a column with no type: an integer is exact or refused, a number is
@@ -220,9 +220,9 @@ function refuseClass(column: string, kinds: string[], v: unknown): never {
   const held =
     matchesString(v)
       ? `the text ${JSON.stringify(v.length > 40 ? `${v.slice(0, 40)}…` : v)}`
-      : matchesNumber(v) || matchesBigInt(v)
+      : (matchesNumber(v) || matchesBigInt(v)
         ? `the number ${v}`
-        : `a BLOB of ${byteLength(v)} byte${byteLength(v) === 1 ? "" : "s"}`;
+        : `a BLOB of ${byteLength(v)} byte${byteLength(v) === 1 ? "" : "s"}`);
   throw new DecodeError(
     `Column "${column}" is typed ${type} and holds ${held}: outside a STRICT table SQLite stores a value of any type in any column, and Reylo refuses one its type does not allow rather than return it. Replace the value, or read what the column holds with cast(${column} as text).`,
   );

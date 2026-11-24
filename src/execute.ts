@@ -12,10 +12,9 @@ import { encodeDuckdb, isDuckdb, runDuckdb } from './decode-duckdb.ts';
 import type { DuckdbClient } from './decode-duckdb.ts';
 import { describe, hstoreText, ParameterError, postgresInterval, postgresYear, zoned } from './values.ts';
 import type { Columns } from './values.ts';
-import type { EngineType } from "./engine-type.ts";
+import type { EngineType,JsonSchema } from "./engine-type.ts";
 import { lexPlaceholders } from "./lex.ts";
 import { withSqlcommenter } from "./sqlcommenter.ts";
-import type { JsonSchema } from "./engine-type.ts";
 import type { Checks } from "./checks.ts";
 import type { Structured } from "./rows.ts";
 import { differences, due, passed, staleError } from './fresh.ts';
@@ -233,7 +232,7 @@ function underneath(c: AnyClient): AnyClient {
   if (matchesNullish(session) || !hasObjectType(session) || matchesNullish(session.dialect)) {return c;}
   const client = ((session.tx ?? session.client) as AnyClient | undefined) ?? c;
   // Drizzle-orm/durable-sqlite keeps the Durable Object's storage, whose SQL storage is its sql.
-  const sql = (client as { sql?: AnyClient }).sql;
+  const {sql} = (client as { sql?: AnyClient });
   return isDurableObjectSql(sql) ? sql! : client;
 }
 
@@ -305,7 +304,7 @@ const isSlonik = function (c: AnyClient): boolean {
 
 function asByteaHex(v: unknown) {
   if (!(v instanceof Uint8Array)) {return v;}
-  let hex = "\\x";
+  let hex = String.raw`\x`;
   Iterator.from(v).forEach((byte) => {hex += (byte < 16 ? "0" : "") + byte.toString(16);});
   return hex;
 }
@@ -328,7 +327,7 @@ async function executeAsync(c: AnyClient | null | undefined, query: QueryModule,
   checkParams(query, params);
   // The catalog facts the statement relied on, read again through the same client.
   if (query.fresh && due(query)) {
-    const fresh = query.fresh;
+    const {fresh} = query;
     let rows: unknown[] | undefined;
     try {
       rows = await executeAsync(c, { dialect: query.dialect, sql: fresh.query, params: [], text: fresh.query, order: [] }, {});
@@ -360,10 +359,10 @@ async function executeAsync(c: AnyClient | null | undefined, query: QueryModule,
       // Serializes to exactly its JSON text. So does an unsafe() client without typed().
       const json = () => bound.map((v, i) => (isJsonParam(v, i) ? jsonText(v) : v));
       // Slonik before every other query(): its query() takes only its sql tag's queries.
-      if (isSlonik(c)) {return await slonik(c, text, json().map(slonikParam), query.columns);}
+      if (isSlonik(c)) {return slonik(c, text, json().map(slonikParam), query.columns);}
       // Query() before unsafe(): Neon's neon() has both, and its unsafe() builds a fragment
       // For a template instead of running anything. Reylo decodes every value itself (decode.ts).
-      if (hasFunctionType(c.query)) {return await queryPostgres(c, text, json(), query.columns);}
+      if (hasFunctionType(c.query)) {return queryPostgres(c, text, json(), query.columns);}
       if (hasFunctionType(c.unsafe)) {
         // Postgres.js reads a string for a date or time parameter through `new Date(x)` and binds
         // Its toISOString(), so a timestamp's wall-clock time moved by the app's offset, and
@@ -376,10 +375,10 @@ async function executeAsync(c: AnyClient | null | undefined, query: QueryModule,
         // Transaction shows neither. Bun.sql serializes the value itself.
         const bun = hasFunctionType(c.commitDistributed);
         const asText = hasFunctionType(c.typed) && !bun;
-        const mapped = bound.map((v, i) => (isJsonParam(v, i) ? (asText ? c.typed(jsonText(v), 705) : { toJSON: () => jsonValue(v) }) : asText && matchesString(v) && isTime(type(i)) ? c.typed(v, 705) : v));
-        return bun ? bunRows(await c.unsafe(text, mapped), query.columns) : await postgresJs(c, text, mapped, query.columns);
+        const mapped = bound.map((v, i) => (isJsonParam(v, i) ? (asText ? c.typed(jsonText(v), 705) : { toJSON: () => jsonValue(v) }) : (asText && matchesString(v) && isTime(type(i)) ? c.typed(v, 705) : v)));
+        return bun ? bunRows(await c.unsafe(text, mapped), query.columns) : postgresJs(c, text, mapped, query.columns);
       }
-      if (hasFunctionType(c)) {return await neonCallable(c, text, json().map(asByteaHex), query.columns);}
+      if (hasFunctionType(c)) {return neonCallable(c, text, json().map(asByteaHex), query.columns);}
       break;
     }
     case "mysql": {
@@ -387,26 +386,26 @@ async function executeAsync(c: AnyClient | null | undefined, query: QueryModule,
       // Mariadb, checked before execute() because it has one too (returning rows, not a pair).
       // Its callback API (mariadb/callback) answers through the callback and returns a command
       // Object; its promise API returns a promise and ignores the callback.
-      if (hasFunctionType(c.batch) && hasFunctionType(c.query)) {return await mariadb(c, text, values.map(asBuffer), query.columns);}
+      if (hasFunctionType(c.batch) && hasFunctionType(c.query)) {return mariadb(c, text, values.map(asBuffer), query.columns);}
       // Mysql2's callback API: the promise() wrapper runs on the same connection.
       const m = hasFunctionType(c.promise) ? c.promise() : c;
       if (hasFunctionType(m.execute)) {
         // Mysql2 has query() beside execute(); PlanetScale's Connection, Client and transaction do not.
-        return hasFunctionType(m.query) ? await mysql2(m, text, values, query.columns) : await planetscale(m, text, values, query.columns);
+        return hasFunctionType(m.query) ? mysql2(m, text, values, query.columns) : planetscale(m, text, values, query.columns);
       }
       break;
     }
     case "duckdb": {
       // @duckdb/node-api's DuckDBConnection: each value given its kind by the result's own types (decode-duckdb.ts).
-      if (isDuckdb(c)) {return await runDuckdb(c as unknown as DuckdbClient, text, values, names.map((currentName, i) => type(i)), query.columns);}
+      if (isDuckdb(c)) {return runDuckdb(c as unknown as DuckdbClient, text, values, names.map((currentName, i) => type(i)), query.columns);}
       break;
     }
     case "sqlite": {
       // The driver's rows, each value given its kind (decode-sqlite.ts).
-      const columns = query.columns;
+      const {columns} = query;
       if (hasFunctionType(c.unsafe)) {return normalize(await c.unsafe(text, values), columns);}
       if (hasFunctionType(c.execute)) {return normalize((await c.execute({ sql: text, args: values })).rows, columns);}
-      if (isTurso(c)) {return await runTurso(c, text, values, columns);}
+      if (isTurso(c)) {return runTurso(c, text, values, columns);}
       // The sqlite package wraps sqlite3, and sqlite3 binds a BigInt as NULL.
       if (hasFunctionType(c.getDatabaseInstance)) {return normalize(await c.all(text, values.map((currentValue, i) => numberOrDigits(currentValue, type(i), "sqlite3"))), columns);}
       if (hasFunctionType(c.all) && hasFunctionType(c.exec)) {
@@ -703,7 +702,7 @@ const isVector = (type: EngineType): type is EngineType & { kind: "scalar" } => 
 function vectorText(v: Readonly<unknown[]>, name: string, what: string): string {
   v.forEach((e, i) => {
     if (!matchesNumber(e) || !Number.isFinite(e)) {
-      throw new ParameterError(`Parameter "${name}" is ${what}, an array of finite numbers, and the element at [${i}] is ${matchesString(e) ? JSON.stringify(e) : matchesNumber(e) ? e : typeof e}.`);
+      throw new ParameterError(`Parameter "${name}" is ${what}, an array of finite numbers, and the element at [${i}] is ${matchesString(e) ? JSON.stringify(e) : (matchesNumber(e) ? e : typeof e)}.`);
     }
   });
   return JSON.stringify(v);
@@ -739,7 +738,7 @@ export function arrayLiteral(array: Readonly<unknown[]>, delim = ","): string {
     if (matchesNullish(v)) {out += "NULL";}
     else if (Array.isArray(v)) {out += arrayLiteral(v, delim);}
     else if (ArrayBuffer.isView(v)) {out += `\\${  asByteaHex(new Uint8Array(v.buffer, v.byteOffset, v.byteLength))}`;}
-    else {out += `"${(v instanceof Date ? dateText(v) : hasObjectType(v) ? JSON.stringify(v) : String(v)).replace(/[\\"]/g, "\\$&")}"`;}
+    else {out += `"${(v instanceof Date ? dateText(v) : (hasObjectType(v) ? JSON.stringify(v) : String(v))).replaceAll(/[\\"]/g, String.raw`\$&`)}"`;}
   }
   return `${out  }}`;
 }
@@ -819,7 +818,7 @@ function unsupported(c: unknown, dialect: Dialect): TypeError {
       : hasFunctionType(o?.selectFrom) && hasFunctionType(o.executeQuery)
         ? ` Kysely decodes the values of its queries itself${o.isTransaction === true ? inTx : ": pass the pool or database its dialect was made with."}`
         : hasFunctionType(o?.$queryRawUnsafe)
-          ? ` Prisma decodes the values of its queries itself${!hasFunctionType(o.$transaction) ? inTx : ": pass a client of your database's driver, such as the pool its driver adapter was made with."}`
+          ? ` Prisma decodes the values of its queries itself${hasFunctionType(o.$transaction) ? ": pass a client of your database's driver, such as the pool its driver adapter was made with." : inTx}`
           : "";
   return new TypeError(`reylo cannot run a ${dialect} statement on ${seen}. It takes a client with ${accepted[dialect]}.${hint}`);
 }

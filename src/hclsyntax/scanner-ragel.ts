@@ -33,10 +33,10 @@ const NO_ACTIONS = 0;
 const FIRST_ACTION_OFFSET = 1;
 const DEAD_STATE = 0;
 
-const generatedEntry = (values: ArrayLike<number>, index: number): number => {
+const generatedEntry = (values: ArrayLike<number>, index: number): number =>
   // oxlint-disable-next-line typescript/no-non-null-assertion -- The generated transition tables and active scanner state supply the indexed slots.
-  return values[index]!;
-};
+  values[index]!
+;
 
 // Return true from an action to implement the generated `goto _again`.
 export function runRagel(data: Uint8Array, tables: RagelTables, state: RagelState, action: (id: number) => boolean | void): void {
@@ -111,7 +111,7 @@ export function runRagel(data: Uint8Array, tables: RagelTables, state: RagelStat
         if (tables.to_state_actions) {actions(generatedEntry(tables.to_state_actions, state.cs));}
         if (state.done || state.cs === DEAD_STATE) {return;}
         state.p += 1;
-        phase = state.p !== data.length ? 'resume' : 'test_eof';
+        phase = state.p === data.length ? 'test_eof' : 'resume';
         continue;
       }
       case 'test_eof': {

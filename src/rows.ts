@@ -73,7 +73,7 @@ export function prepareRows(name: string, type: RowsType, value: unknown, dialec
     throw new ParameterError(`Parameter "${name}": ${message}`);
   };
   if (matchesUndefined(value) || matchesNull(value)) {fail(type.one ? "pass one object, whose keys the column list names." : "pass an array of objects, whose keys the column list names; an empty array inserts nothing.");}
-  const rows = type.one ? [value] : Array.isArray(value) ? value : fail(`pass an array of objects, one per row; got ${describe(value)}.`);
+  const rows = type.one ? [value] : (Array.isArray(value) ? value : fail(`pass an array of objects, one per row; got ${describe(value)}.`));
   const known = new Map(type.fields.map((field) => [field.name, field]));
   let present: Set<string> | undefined;
   let first = -1;
@@ -101,12 +101,12 @@ export function prepareRows(name: string, type: RowsType, value: unknown, dialec
       }
       const checked = check(field.type, field.written, v, dialect, (message) => fail(`${where}"${field.name}" ${message}`));
       // A JSON member's schema fills its defaults and checks the value (wiki/typed-json-params.md).
-      if (!matchesUndefined(field.schema)) {
+      if (matchesUndefined(field.schema)) {written[field.name] = checked;} else {
         const filled = withDefaults(field.schema, checked);
         const failure = validate(field.schema, filled);
         if (failure) {fail(`${where}"${field.name}"${failure.path ? ` at ${failure.path}` : ""} ${failure.message}.`);}
         written[field.name] = filled;
-      } else {written[field.name] = checked;}
+      }
     });
     // One statement inserts every row of a call, so on MySQL, which copies no default, its column
     // List is the same for each: a key one row leaves out and another gives cannot have its
@@ -237,7 +237,7 @@ function scalar(name: string, written: string, v: unknown, dialect: Dialect, fai
       if (!(v instanceof Uint8Array)) {return fail(`is ${written}, binary data, a Uint8Array; got ${describe(v)}.`);}
       const n = /\(\s*(\d+)\s*\)/u.exec(written)?.[1];
       if (!matchesUndefined(n) && v.length > Number(n)) {fail(`is ${written}, at most ${n} bytes; got ${v.length}, which the database would refuse or cut.`);}
-      let hex = dialect === "postgres" ? "\\x" : "";
+      let hex = dialect === "postgres" ? String.raw`\x` : "";
       Iterator.from(v).forEach((byte) => {hex += (byte < 16 ? "0" : "") + byte.toString(16);});
       return hex;
     }
@@ -294,7 +294,7 @@ const MYSQL_INTEGERS: Record<string, Readonly<[bigint, bigint]>> = {
  * (`::time` keeps none, and `::datetime` is written as DATETIME(6)).
  */
 function wallClock(base: string, written: string, v: unknown, fail: (message: string) => never): void {
-  const example = base === "date" ? `"2026-10-12"` : base === "time" ? `"19:06:48"` : `"2026-10-12 19:06:48.282"`;
+  const example = base === "date" ? `"2026-10-12"` : (base === "time" ? `"19:06:48"` : `"2026-10-12 19:06:48.282"`);
   if (!matchesString(v)) {return void fail(`is ${written}, which takes its text (${example}), not ${describe(v)}${v instanceof Date ? ": drivers write a Date's time in different zones" : ""}.`);}
   const s = v.trim();
   const keeps = Number(/\(\s*(\d+)\s*\)/u.exec(written)?.[1] ?? (base === "time" ? 0 : 6));
@@ -311,7 +311,7 @@ function wallClock(base: string, written: string, v: unknown, fail: (message: st
     if (base === "date") {return matchesUndefined(m[4]);}
     return Number(m[4] ?? 0) < 24 && Number(m[5] ?? 0) < 60 && Number(m[6] ?? 0) < 60 && (m[7] ?? "").length <= keeps;
   })();
-  if (!ok) {fail(`is ${written}, as text like ${example}${keeps > 0 && base !== "date" ? ` with at most ${keeps} digits after the second's point` : base === "time" ? " with no fraction of a second" : ""}; got ${describe(v)}, which MySQL's CAST would make NULL or change.`);}
+  if (!ok) {fail(`is ${written}, as text like ${example}${keeps > 0 && base !== "date" ? ` with at most ${keeps} digits after the second's point` : (base === "time" ? " with no fraction of a second" : "")}; got ${describe(v)}, which MySQL's CAST would make NULL or change.`);}
 }
 
 /**

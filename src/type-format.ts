@@ -79,7 +79,7 @@ export function parseType(text: string): Node {
 }
 
 /** A doc comment on one line: `/** line one line two *\/`. */
-const oneLineDoc = (doc: string): string => doc.replace(/\n\s*\*\/$/u, " */").replace(/(?:\n[ \t]*\*[ \t]*)+/g, " ").replace(/^\/\*\*\s*/u, "/** ");
+const oneLineDoc = (doc: string): string => doc.replace(/\n\s*\*\/$/u, " */").replaceAll(/(?:\n[ \t]*\*[ \t]*)+/g, " ").replace(/^\/\*\*\s*/u, "/** ");
 
 /** Whether an object in the type has a field with a doc comment. */
 const hasDoc = (node: Node): boolean =>
@@ -146,7 +146,7 @@ export function formatType(text: string, width: number): string {
 /** What `.run()` resolves to for a statement's row type and cardinality, as the module's `Query` reads them. */
 export function resultType(row: string, cardinality: string): string {
   if (cardinality === "none" || row === "never") {return "void";}
-  const wrapped = /\|/u.test(row.replace(/\{[^{}]*\}/g, "")) ? `(${row})` : row;
+  const wrapped = /\|/u.test(row.replaceAll(/\{[^{}]*\}/g, "")) ? `(${row})` : row;
   if (cardinality === "one") {return row;}
   if (cardinality === "maybeOne") {return `${row} | null`;}
   return `${wrapped}[]`;

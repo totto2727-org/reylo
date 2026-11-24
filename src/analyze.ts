@@ -58,7 +58,7 @@ const sessions = new Map<string, Session>();
  */
 const openProject = async function (dir: string, env: Record<string, string | undefined>): Promise<{ project: ResolvedProject; engine: Engine | MissingEngine }> {
   const project = resolveProject(await anyEngine(), dir, env);
-  const own = await engine(project.dialect).catch((e: unknown) => (e instanceof MissingEngine ? e : new MissingEngine((e as Error).message)));
+  const own = await engine(project.dialect).catch((error: unknown) => (error instanceof MissingEngine ? error : new MissingEngine((error as Error).message)));
   return { project, engine: own };
 };
 
@@ -276,19 +276,19 @@ export class Session {
     const io = this.#connection();
     try {
       analysis = await (await io).analyze(sql);
-    } catch (e) {
+    } catch (error) {
       // A dead connection is reopened by the next call; a server error is reported.
-      if (e instanceof Unreachable) {
+      if (error instanceof Unreachable) {
         this.#drop(io);
-        this.#schema = { value: null, at: Date.now(), error: reason(e) };
-        return { ok: false, message: this.cannotConnect(reason(e)), code: 5 };
+        this.#schema = { value: null, at: Date.now(), error: reason(error) };
+        return { ok: false, message: this.cannotConnect(reason(error)), code: 5 };
       }
-      if (e instanceof NotMysql) {
+      if (error instanceof NotMysql) {
         this.#drop(io);
-        this.#schema = { value: null, at: Date.now(), error: this.notMysql(e), fatal: true };
+        this.#schema = { value: null, at: Date.now(), error: this.notMysql(error), fatal: true };
         return { ok: false, message: this.#schema.error!, code: 5 };
       }
-      return { ok: false, message: (e as Error).message, code: 5 };
+      return { ok: false, message: (error as Error).message, code: 5 };
     }
     if (options.store !== false) {writeEntry(this.root, file, { version: ENTRY_VERSION, dialect: this.project.dialect, schema: schema.value, analysis, at: Date.now() });}
     return { ok: true, analysis, source: "database", entry: file };
@@ -312,9 +312,9 @@ export class Session {
           this.#schema = undefined;
           this.#hclHash = hash;
         }
-      } catch (e) {
+      } catch (error) {
         await this.#release();
-        this.#schema = { value: null, at: now, error: `Cannot read HCL schema ${source}: ${(e as Error).message}`, fatal: true };
+        this.#schema = { value: null, at: now, error: `Cannot read HCL schema ${source}: ${(error as Error).message}`, fatal: true };
         return this.#schema;
       }
     }
@@ -323,9 +323,9 @@ export class Session {
     let io: Io;
     try {
       io = await pending;
-    } catch (e) {
+    } catch (error) {
       this.#drop(pending);
-      this.#schema = e instanceof Unreachable ? { value: null, at: now, error: reason(e) } : { value: null, at: now, error: e instanceof NotMysql ? this.notMysql(e) : (e as Error).message, fatal: true };
+      this.#schema = error instanceof Unreachable ? { value: null, at: now, error: reason(error) } : { value: null, at: now, error: error instanceof NotMysql ? this.notMysql(error) : (error as Error).message, fatal: true };
       return this.#schema;
     }
     try {
@@ -335,13 +335,13 @@ export class Session {
       // The engine's answers describe the old schema too.
       if (this.#schema?.value && this.#schema.value !== value) {await io.forget().catch(() => {});}
       this.#schema = { value, at: now };
-    } catch (e) {
+    } catch (error) {
       if (source) {
         this.#drop(pending);
-        this.#schema = { value: null, at: now, error: (e as Error).message, fatal: true };
-      } else if (e instanceof Unreachable) {
+        this.#schema = { value: null, at: now, error: (error as Error).message, fatal: true };
+      } else if (error instanceof Unreachable) {
         this.#drop(pending);
-        this.#schema = { value: null, at: now, error: reason(e) };
+        this.#schema = { value: null, at: now, error: reason(error) };
       } else {
         this.#schema = { value: `unverified ${process.pid} ${now}`, at: now };
       }

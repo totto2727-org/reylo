@@ -12,8 +12,8 @@ import type { Range, Token } from '../../src/hclsyntax/types.ts';
 import { actualAST, actualDiagnostics, diagnostics, oracleAST, oracleTokens, position } from './oracle-shape.ts';
 import type { Fixture } from './oracle-shape.ts';
 
-const fixtures = readFileSync(new URL('./fixtures.jsonl', import.meta.url), 'utf8').trimEnd().split('\n').map(line => JSON.parse(line) as Fixture);
-const manifest = JSON.parse(readFileSync(new URL('./manifest.json', import.meta.url), 'utf8')) as { fixtures: number; functions: Record<string, { name: string; calls: number; cases: number }[]> };
+const fixtures = readFileSync(new URL('fixtures.jsonl', import.meta.url), 'utf8').trimEnd().split('\n').map(line => JSON.parse(line) as Fixture);
+const manifest = JSON.parse(readFileSync(new URL('manifest.json', import.meta.url), 'utf8')) as { fixtures: number; functions: Record<string, { name: string; calls: number; cases: number }[]> };
 
 // oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
 test('HCL string tokens retain UTF-8 byte ranges and grapheme columns through Intl', () => {
@@ -21,7 +21,7 @@ test('HCL string tokens retain UTF-8 byte ranges and grapheme columns through In
   const scanned = lexConfig(source, 'unicode.hcl');
   assert.deepEqual(scanned.diagnostics, []);
   const literal = scanned.tokens.find(token => token.type === 'TokenQuotedLit');
-  assert(literal);
+  assert.ok(literal);
   assert.deepEqual(Buffer.from(literal.bytes), Buffer.from('e\u0301😀'));
   assert.deepEqual(literal.range, {
     end: { byte: 12, column: 8, line: 1 },
@@ -92,7 +92,7 @@ test('official HCL fixture manifest maps every exported case without silent omis
     assert.equal(matched.length, entry.calls, entry.name);
     assert.equal(new Set(matched.map(fixture => fixture.name)).size, entry.cases, entry.name);
   }});
-  Iterator.from(['TestParseConfig', 'TestParseConfig_incompleteFunctionCall', 'TestParseConfigDiagnostics', 'TestScanTokens_normal', 'TestScanTokens_template', 'TestScanStringLit', 'TestCheckInvalidTokensTest', 'TestValidIdentifier', 'TestExpressionParseAndValue', 'TestExpressionErrorMessages', 'TestParseExpression_incompleteFunctionCall', 'TestTemplateExprParseAndValue', 'TestTemplateExprIsStringLiteral']).forEach((required) => {assert(fixtures.some(fixture => fixture.name.split('/')[0] === required), required);});
+  Iterator.from(['TestParseConfig', 'TestParseConfig_incompleteFunctionCall', 'TestParseConfigDiagnostics', 'TestScanTokens_normal', 'TestScanTokens_template', 'TestScanStringLit', 'TestCheckInvalidTokensTest', 'TestValidIdentifier', 'TestExpressionParseAndValue', 'TestExpressionErrorMessages', 'TestParseExpression_incompleteFunctionCall', 'TestTemplateExprParseAndValue', 'TestTemplateExprIsStringLiteral']).forEach((required) => {assert.ok(fixtures.some(fixture => fixture.name.split('/')[0] === required), required);});
 });
 
 // Full three-scenario table from upstream hclsyntax/peeker_test.go.

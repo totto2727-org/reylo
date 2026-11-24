@@ -101,7 +101,7 @@ export function engine(dialect: Dialect): Promise<Engine> {
  * which parses the file, is every database's. A MissingEngine where there is none to run.
  */
 export async function anyEngine(): Promise<Engine | MissingEngine> {
-  return engine("sqlite").catch((e: unknown) => (e instanceof MissingEngine ? e : new MissingEngine((e as Error).message)));
+  return engine("sqlite").catch((error: unknown) => (error instanceof MissingEngine ? error : new MissingEngine((error as Error).message)));
 }
 
 type Answer = { status: string; id?: number; message?: string; code?: string; conn?: number; analysis?: Analysis; rows?: unknown[][]; server?: string; params?: number[]; columns?: Described["columns"] };
@@ -120,7 +120,7 @@ export interface Connection {
 
 /** The key a request's answer is kept by, for the requests whose answer is the same for the same request: `config` and `lex`. */
 const keptKey = function (request: object): string | undefined {
-  const op = (request as { op?: unknown }).op;
+  const {op} = (request as { op?: unknown });
   return op === "config" || op === "lex" ? JSON.stringify(request) : undefined;
 };
 

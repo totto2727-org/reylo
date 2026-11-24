@@ -52,7 +52,7 @@ type SocketDialect = "postgres" | "mysql";
 function splitQuery(url: string): [string, string?] {
   const separator = "?";
   const queryStart = url.indexOf(separator);
-  return queryStart < 0 ? [url] : [url.slice(0, queryStart), url.slice(queryStart + separator.length)];
+  return queryStart === -1 ? [url] : [url.slice(0, queryStart), url.slice(queryStart + separator.length)];
 }
 
 const decodeQueryPart = (part: string): string => {
@@ -66,7 +66,7 @@ const decodeQueryPart = (part: string): string => {
 function splitPair(pair: string): [string, string] {
   const separator = "=";
   const assignment = pair.indexOf(separator);
-  return assignment < 0
+  return assignment === -1
     ? [decodeQueryPart(pair), ""]
     : [decodeQueryPart(pair.slice(0, assignment)), decodeQueryPart(pair.slice(assignment + separator.length))];
 }
@@ -77,7 +77,7 @@ function join(base: string, pairs: string[]): string {
 
 const detectDialect = (url: string): SocketDialect | undefined => {
   const separator = url.indexOf(SCHEME_SEPARATOR);
-  const scheme = separator < 0 ? "" : url.slice(0, separator).toLowerCase();
+  const scheme = separator === -1 ? "" : url.slice(0, separator).toLowerCase();
   if (scheme === "postgres" || scheme === "postgresql") {return "postgres";}
   if (scheme === "mysql") {return "mysql";}
   return undefined;
@@ -87,7 +87,7 @@ const detectDialect = (url: string): SocketDialect | undefined => {
 const authorityRange = (base: string): { end: number; start: number } => {
   const authorityStart = base.indexOf(SCHEME_SEPARATOR) + SCHEME_SEPARATOR.length;
   const pathStart = base.indexOf("/", authorityStart);
-  const end = pathStart < 0 ? base.length : pathStart;
+  const end = pathStart === -1 ? base.length : pathStart;
   const firstAt = base.indexOf("@", authorityStart);
   const start = firstAt >= authorityStart && firstAt < end ? firstAt + "@".length : authorityStart;
   return { end, start };
@@ -137,7 +137,7 @@ function postgresSocket(base: string, pairs: string[], env: Record<string, strin
   const { end, start } = authorityRange(base);
   const authority = base.slice(start, end);
   const { encodedHost = "", port: authorityPort } = /^(?<encodedHost>.*?)(?::(?<port>\d+))?$/u.exec(authority)?.groups ?? {};
-  const host = params.get("host") ?? (encodedHost ? decodeURIComponent(encodedHost) : params.get("hostaddr") ? undefined : env.PGHOST);
+  const host = params.get("host") ?? (encodedHost ? decodeURIComponent(encodedHost) : (params.get("hostaddr") ? undefined : env.PGHOST));
   if (!host?.startsWith("/") || host.includes(",")) {return undefined;}
   const port = params.get("port") || authorityPort || env.PGPORT || DEFAULT_POSTGRES_PORT;
   return { path: `${host.replace(/\/$/u, "")}/.s.PGSQL.${port}`, params: ["host", "port", "sslmode"] };
@@ -291,9 +291,9 @@ function withoutTls(greeting: Buffer): void {
 /** A length-encoded integer, as MySQL's protocol writes one. */
 const lenenc = function (n: number): Buffer {
   if (n < 0xFB) {return Buffer.from([n]);}
-  const size = n < 0x1_00_00 ? 2 : n < 0x1_00_00_00 ? 3 : 8;
+  const size = n < 0x1_00_00 ? 2 : (n < 0x1_00_00_00 ? 3 : 8);
   const out = Buffer.alloc(1 + size);
-  out[0] = size === 2 ? 0xFC : size === 3 ? 0xFD : 0xFE;
+  out[0] = size === 2 ? 0xFC : (size === 3 ? 0xFD : 0xFE);
   out.writeUIntLE(n, 1, Math.min(size, 6));
   return out;
 };
@@ -313,7 +313,7 @@ export function takeAttribute(login: Buffer, name: string): { value: string; log
     const first = login[at++];
     if (matchesUndefined(first)) {throw new RangeError("short");}
     if (first < 0xFB) {return first;}
-    const size = first === 0xFC ? 2 : first === 0xFD ? 3 : 8;
+    const size = first === 0xFC ? 2 : (first === 0xFD ? 3 : 8);
     const value = login.readUIntLE(at, Math.min(size, 6));
     at += size;
     return value;
@@ -326,7 +326,7 @@ export function takeAttribute(login: Buffer, name: string): { value: string; log
   };
   const cstring = (): void => {
     const end = login.indexOf(STRING_TERMINATOR, at);
-    if (end < 0) {throw new RangeError("unterminated");}
+    if (end === -1) {throw new RangeError("unterminated");}
     at = end + STRING_TERMINATOR_BYTES;
   };
   try {
