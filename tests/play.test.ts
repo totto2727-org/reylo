@@ -91,7 +91,10 @@ test("reylo play answers this machine's own pages and tools, and refuses another
     assert.equal((await get(schema, { origin: play.url.slice(0, -1) })).status, 200);
     assert.equal((await get(schema, { origin: "https://example.com" })).status, 403);
     // Fetch() sends its own Host header; a name rebound to 127.0.0.1 sends the name.
-    const rebound = await new Promise<number>((done, fail) => request(schema, { headers: { host: `example.com:${new URL(play.url).port}` } }, (res) => (res.resume(), done(res.statusCode!))).on("error", fail).end());
+    const rebound = await new Promise<number>((done, fail) => request(schema, { headers: { host: `example.com:${new URL(play.url).port}` } }, (res) => {
+      res.resume();
+      return done(res.statusCode!);
+    }).on("error", fail).end());
     assert.equal(rebound, 403);
   } finally {
     await play.close();

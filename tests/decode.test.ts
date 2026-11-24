@@ -235,7 +235,10 @@ test("pg: a client set up with binary: true is refused, before the query and if 
   sneaky.query = async (config: string | Config, values?: unknown[]) => {
     if (typeof config === "object" && config.types) {
       const {types} = config;
-      config = { ...config, types: { getTypeParser: (oid: number) => (asked.push("binary"), types.getTypeParser(oid, "binary")) } };
+      config = { ...config, types: { getTypeParser: (oid: number) => {
+        asked.push("binary");
+        return types.getTypeParser(oid, "binary");
+      } } };
     }
     return original(config, values);
   };
@@ -284,7 +287,10 @@ test("pg-promise: result({ text, values, types }) on the database, a task and a 
   const calls: unknown[] = [];
   const make = (receive?: (e: { data: Record<string, unknown>[] }) => void) => ({
     manyOrNone: promiseDriverStub(() => []),
-    query: async (q: Config): Promise<any> => (calls.push(q), (await conn.query(q)).rows),
+    query: async (q: Config): Promise<any> => {
+      calls.push(q);
+      return (await conn.query(q)).rows;
+    },
     result: async (q: Config): Promise<any> => {
       calls.push(q);
       const r = await conn.query(q);

@@ -453,7 +453,10 @@ test("PlanetScale: Reylo's cast per query, the driver's own default with a DATET
 test("mariadb's callback API, whose rows carry no meta, and mariadb 2, whose columns have no isSet(): the module's kinds join a SET and give a DATETIME its T", async () => {
   const conn = {
     batch: () => ({}),
-    query: (_statement: unknown, __: unknown, done: (error: Error | null, rows?: unknown, meta?: unknown) => void) => (setImmediate(() => done(NO_DRIVER_ERROR, [{ tags: ["x", "z"], at: "2026-03-08 09:31:00.000", id: 1 }], [{ name: () => "tags", type: "SET" }])), { on() {} }),
+    query: (_statement: unknown, __: unknown, done: (error: Error | null, rows?: unknown, meta?: unknown) => void) => {
+      setImmediate(() => done(NO_DRIVER_ERROR, [{ tags: ["x", "z"], at: "2026-03-08 09:31:00.000", id: 1 }], [{ name: () => "tags", type: "SET" }]));
+      return { on() {} };
+    },
   };
   const fixtureQuery: QueryModule<"mysql"> = { dialect: "mysql", sql: "select 1", params: [], columns: [["tags", "text"], ["at", "timestamp"], ["id", "int"]] };
   assert.deepEqual(await execute(conn as never, fixtureQuery), [{ at: "2026-03-08T09:31:00.000", id: 1, tags: "x,z" }]);
@@ -473,7 +476,10 @@ test("runSync refuses a client whose prepared statement answers through a promis
 // oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
 test("mysql2: Reylo's typeCast only where it is needed, since mysql2 calls it for every value: a JSON or unknown column, unknown columns, or the app's typeCast, decimalNumbers or jsonStrings", async () => {
   const sent: unknown[] = [];
-  const pool = (connectionConfig: Record<string, unknown> | undefined) => ({ pool: connectionConfig && { config: { connectionConfig } }, query: promiseDriverStub(() => [[], []]), execute: async (options: { typeCast: unknown }) => (sent.push(typeof options.typeCast === "function" ? "cast" : options.typeCast), [[], []]) });
+  const pool = (connectionConfig: Record<string, unknown> | undefined) => ({ pool: connectionConfig && { config: { connectionConfig } }, query: promiseDriverStub(() => [[], []]), execute: async (options: { typeCast: unknown }) => {
+    sent.push(typeof options.typeCast === "function" ? "cast" : options.typeCast);
+    return [[], []];
+  } });
   const q = (columns?: [string, string][]): QueryModule<"mysql"> => ({ dialect: "mysql", sql: "select 1", params: [], ...(columns ? { columns } : {}) });
   await execute(pool({}) as never, q([["n", "int8"], ["amount", "decimal"], ["at", "timestamp"]]));
   await execute(pool({}) as never, q([["doc", "json"]]));
@@ -551,11 +557,26 @@ test("MySQL: a VECTOR is an array of its floats on every driver that reads one, 
   // A parameter binds the text of its floats, which the engine's `to_vector(?)` reads, on every driver.
   const w: QueryModule<"mysql"> = { dialect: "mysql", sql: "insert into items (v) values (to_vector(:v))", params: ["v"], inputs: { v: { type: vector } } };
   const seen: unknown[][] = [];
-  await execute({ query: promiseDriverStub(() => [[], []] as [unknown, unknown]), execute: async (_statement: unknown, boundValues?: unknown[]) => (seen.push(boundValues!), [[], []] as [unknown, unknown]) }, w, { v: floats });
-  await execute({ query: async (_sql: string, boundValues: unknown) => (seen.push(boundValues as unknown[]), []), batch: promiseDriverStub(() => []) }, w, { v: floats });
-  await execute({ unsafe: async (_sql: string, boundValues?: unknown[]) => (seen.push(boundValues!), []), commitDistributed: async () => {} }, w, { v: floats });
-  await execute({ execute: async (_sql: string, boundValues: unknown[]) => (seen.push(boundValues), { rows: [] }) } as never, w, { v: floats });
-  await execute({ batch: promiseDriverStub(() => ({})), query: async (_sql: string, boundValues: unknown) => (seen.push(boundValues as unknown[]), []) }, w, { v: SQL_NULL });
+  await execute({ query: promiseDriverStub(() => [[], []] as [unknown, unknown]), execute: async (_statement: unknown, boundValues?: unknown[]) => {
+    seen.push(boundValues!);
+    return [[], []] as [unknown, unknown];
+  } }, w, { v: floats });
+  await execute({ query: async (_sql: string, boundValues: unknown) => {
+    seen.push(boundValues as unknown[]);
+    return [];
+  }, batch: promiseDriverStub(() => []) }, w, { v: floats });
+  await execute({ unsafe: async (_sql: string, boundValues?: unknown[]) => {
+    seen.push(boundValues!);
+    return [];
+  }, commitDistributed: async () => {} }, w, { v: floats });
+  await execute({ execute: async (_sql: string, boundValues: unknown[]) => {
+    seen.push(boundValues);
+    return { rows: [] };
+  } } as never, w, { v: floats });
+  await execute({ batch: promiseDriverStub(() => ({})), query: async (_sql: string, boundValues: unknown) => {
+    seen.push(boundValues as unknown[]);
+    return [];
+  } }, w, { v: SQL_NULL });
   assert.deepEqual(seen, [...Array(4).fill(["[1,2.5,-3,0.10000000149011612]"]), [SQL_NULL]]);
   const fake = { query: promiseDriverStub(() => [[], []]), execute: promiseDriverStub(() => [[], []]) } as never;
   await assert.rejects(execute(fake, w, { v: [1, "2"] }) as Promise<unknown>, /^TypeError: Parameter "v" is a VECTOR, an array of finite numbers, and the element at \[1\] is "2"\.$/u);

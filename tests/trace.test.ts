@@ -133,7 +133,10 @@ test("a store bound to start is the current one while the driver runs, so its sp
       get(target, key) {
         const value = Reflect.get(target, key);
         if (typeof value !== "function") {return value;}
-        return key === "prepare" ? (sql: string) => (seen.push(store.getStore()), target.prepare(sql)) : value.bind(target);
+        return key === "prepare" ? (sql: string) => {
+          seen.push(store.getStore());
+          return target.prepare(sql);
+        } : value.bind(target);
       },
     });
     await getUser.run(watched, { id: 1 });
