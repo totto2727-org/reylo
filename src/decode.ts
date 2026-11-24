@@ -516,13 +516,13 @@ export function bunRows(rows: unknown[], columns: Columns | undefined): unknown[
   // A query defined by hand carries no kinds: only what Bun's own types say is converted.
   const work: (Readonly<[string, Kind, string?]>)[] = columns ? columns.filter(([, kind]) => BUN_KINDS.test(kind)) : Object.keys(first).map((name) => [name, "unknown"] as const);
   if (!work.length) {return rows;}
-  for (const row of rows as Record<string, unknown>[]) {
+  Iterator.from(rows as Record<string, unknown>[]).forEach((row) => {
     Iterator.from(work).forEach(([name, kind, delim]) => {
       const v = row[name];
       if (matchesNull(v) || matchesUndefined(v)) {return;}
       row[name] = kind === "unknown" ? byType(v, name) : bunValue(kind, v, name, delim);
     });
-  }
+  });
   return rows;
 }
 

@@ -247,14 +247,14 @@ export const mariadb = async function mariadb(client: DriverRow, text: string, v
   // A truth value a boolean; an INT a temporary table may widen to a BIGINT a BigInt, as the BIGINT is.
   fixRows(result as Record<string, unknown>[], columnFixes(columns));
   if (!work.length) {return result;}
-  for (const row of result as Record<string, unknown>[]) {
+  Iterator.from(result as Record<string, unknown>[]).forEach((row) => {
     Iterator.from(work).forEach(({ name, date }) => {
       const v = row[name];
       if (matchesNull(v) || matchesUndefined(v)) {return;}
       if (Array.isArray(v)) {row[name] = coerce("text", v, name);}
       else if (date && matchesString(v)) {row[name] = v.replace(" ", "T");}
     });
-  }
+  });
   return result;
 };
 
