@@ -46,6 +46,7 @@ Each run of `start` adds a post; `nub run setup` starts over. The tests roll the
 
 ## Notes
 
+- From the repository root, run `nub scripts/bun-example-types.ts --write` after changing a query or `setup.sql`. The root `nub run lint` checks that each `queries/*.d.sql.ts` file matches the content mapper output. Oxlint reads these declarations through `allowArbitraryExtensions`. TypeScript resolves Reylo through the example's installed package first and falls back to the repository source for root-only lint. The example's normal type check runs the mapper with `--runExternalCode`.
 - Without the `[test]` preload, `bun test` imports each `.sql` file as its path, a string, and the tests fail with a `TypeError` such as `createPost.runSync is not a function`.
 - Running `bun dist/main.js` still loads the preload of `bunfig.toml` in this directory, though the bundle never uses it: copied with `app.db` into an empty directory, `bun main.js` prints the same rows.
 - SQLite infers no literal union from a `check` constraint, so `role` is a `string` here.

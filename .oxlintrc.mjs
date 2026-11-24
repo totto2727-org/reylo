@@ -6,6 +6,8 @@ export default defineConfig({
   env: { node: true },
   extends: [preset],
   ignorePatterns: [
+    // The SQL content mapper generates these declarations, and the lint command checks their bytes.
+    'examples/bun/queries/*.d.sql.ts',
     // The HCL scanner generator owns these transition tables.
     'src/hclsyntax/scanner-tables.ts',
     'src/hclsyntax/string-literal-tables.ts',

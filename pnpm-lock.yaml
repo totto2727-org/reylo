@@ -14,6 +14,9 @@ importers:
       '@totto2727/reylo-sqlite':
         specifier: link:packages/sqlite
         version: link:packages/sqlite
+      '@types/bun':
+        specifier: 1.4.3
+        version: 1.4.3
       '@types/node':
         specifier: ^26.6.1
         version: 26.6.1
@@ -420,6 +423,9 @@ packages:
     resolution: {integrity: sha512-agfyNUvoCMFJJnxYTkdCsdrVVt6+qrGYFoOP7Tq9/C/HuLG8oiDor6XTE433bg+MCId5/9fuwBA4qHDyrNiBlQ==, tarball: https://registry.npmjs.org/@totto2727/oxlint/-/oxlint-0.2.0.tgz}
     engines: {node: '>=24'}
 
+  '@types/bun@1.4.3':
+    resolution: {integrity: sha512-N67Pqy8JXbAY/j0tNraS3V5mubGvc6rrrNDmDCtZLlFzccbUJPDb0tvgUBC5q4m8ybkP93Jcn1QB+RYQ6PvBhw==, tarball: https://registry.npmjs.org/@types/bun/-/bun-1.4.3.tgz}
+
   '@types/node@26.6.1':
     resolution: {integrity: sha512-VqGJBMCtdhqkBUCcBLvywI0NJ+KLuVzgNnlBUNFOQjqVxzo2lxLUNg1DSey8+u2u6ktswSAxg+s68QLzWHNOuA==, tarball: https://registry.npmjs.org/@types/node/-/node-26.6.1.tgz}
 
@@ -464,6 +470,9 @@ packages:
     engines: {node: '>=16.20.0'}
     cpu: [x64]
     os: [win32]
+
+  bun-types@1.4.3:
+    resolution: {integrity: sha512-tinRJNGOmUN+tEAsn2y2e942n9JHRHR42iUYzDH75NmhJqVBokGSQkkfSFdNWwsANIdrK6ACH9t01M452YyTwg==, tarball: https://registry.npmjs.org/bun-types/-/bun-types-1.4.3.tgz}
 
   effect@4.1.2:
     resolution: {integrity: sha512-d3Oah1WyKxFLFh19yWheS5IXIVaITzxZ71JkE1rkUozq/6EcJSU5nPk5bF2QrSygZ3SQoiNQB8TsxFriyMeMaQ==, tarball: https://registry.npmjs.org/effect/-/effect-4.1.2.tgz}
@@ -698,6 +707,10 @@ snapshots:
     transitivePeerDependencies:
       - vite-plus
 
+  '@types/bun@1.4.3':
+    dependencies:
+      bun-types: 1.4.3
+
   '@types/node@26.6.1':
     dependencies:
       undici-types: 8.9.0
@@ -722,6 +735,11 @@ snapshots:
 
   '@typescript/typescript-win32-x64@7.1.0-dev.20260918.1':
     optional: true
+
+  bun-types@1.4.3:
+    dependencies:
+      '@types/node': 26.6.1
+      undici-types: 8.9.0
 
   effect@4.1.2: {}
 

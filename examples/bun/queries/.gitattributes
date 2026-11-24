@@ -1,0 +1,3 @@
+# Keep the mapper's raw SQL literals and generated declarations consistent across platforms.
+*.sql text eol=lf
+*.d.sql.ts text eol=lf

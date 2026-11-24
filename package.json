@@ -45,7 +45,7 @@
   },
   "scripts": {
     "build": "nub scripts/build.ts",
-    "lint": "oxlint --config .oxlintrc.mjs",
+    "lint": "node scripts/bun-example-types.ts && oxlint --config .oxlintrc.mjs",
     "typecheck": "tsc --noEmit --runExternalCode",
     "test": "node --test 'tests/**/*.test.ts'"
   },
@@ -62,6 +62,7 @@
   "devDependencies": {
     "@totto2727/oxlint": "^0.2.0",
     "@totto2727/reylo-sqlite": "link:packages/sqlite",
+    "@types/bun": "1.4.3",
     "@types/node": "^26.6.1",
     "effect": "^4.0.6",
     "esbuild": "^0.28.2",

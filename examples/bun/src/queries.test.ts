@@ -7,7 +7,7 @@ import listPosts from "../queries/list_posts.sql";
 /* oxlint-enable import/no-relative-parent-imports */
 
 const db = new Database("app.db");
-afterAll(() => db.close());
+afterAll(() => {db.close();});
 
 test("get_user finds ada, and null for an id nobody has", async () => {
   const ada = await getUser.run(db, { id: 1 });
@@ -20,15 +20,16 @@ test("create_post returns the new row, which list_posts then lists", async () =>
   db.run("begin");
   try {
     // oxlint-disable-next-line rules/no-effect-runtime-run -- Reylo's public runSync executes SQLite through the native driver without Effect.
-    const post = createPost.runSync(db, { user_id: 1, title: "From the test", body: "draft" });
+    const post = createPost.runSync(db, { body: "draft", title: "From the test", user_id: 1 });
     expect(post.title).toBe("From the test");
 
     const posts = await listPosts.run(db, { role: "admin" });
     expect(posts.slice(0, 2)).toEqual([
       { author: "ada", body: "first post", id: 1, title: "Hello" },
+      // oxlint-disable-next-line unicorn/no-null -- This row has SQL NULL in its body column.
       { author: "ada", body: null, id: 2, title: "Again" },
     ]);
-    expect(posts.at(-1)).toEqual({ id: post.id, title: "From the test", body: "draft", author: "ada" });
+    expect(posts.at(-1)).toEqual({ author: "ada", body: "draft", id: post.id, title: "From the test" });
   } finally {
     db.run("rollback");
   }

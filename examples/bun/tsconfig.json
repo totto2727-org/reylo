@@ -1,9 +1,14 @@
 {
   "compilerOptions": {
+    "allowArbitraryExtensions": true,
     "target": "esnext",
     "module": "preserve",
     "moduleResolution": "bundler",
     "lib": ["esnext"],
+    "paths": {
+      "@totto2727/reylo": ["./node_modules/@totto2727/reylo/src/index", "../../src/index.ts"],
+      "@totto2727/reylo/esbuild": ["./node_modules/@totto2727/reylo/src/esbuild", "../../src/esbuild.ts"]
+    },
     "types": ["bun"],
     "strict": true,
     "noEmit": true,
