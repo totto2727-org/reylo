@@ -72,12 +72,12 @@ test("a failed call publishes its error: the driver's own, or Reylo's about the 
   const db = database();
   const rowCount = await traced(() => getUser.run(db, { id: 2 }).catch(() => {}));
   assert.deepEqual(names(rowCount), ["start", "end", "error", "asyncStart", "asyncEnd"]);
-  assert.match((rowCount[2]!.error as Error).message, /^queries\/get_user\.sql: Expected exactly one row, got 0$/);
+  assert.match((rowCount[2]!.error as Error).message, /^queries\/get_user\.sql: Expected exactly one row, got 0$/u);
 
   // oxlint-disable-next-line rules/no-effect-runtime-run -- This test exercises Reylo's native synchronous query API, which does not run Effect.
-  const unique = await traced(() => assert.throws(() => createUser.runSync(db, { email: "ada@example.com" }), /UNIQUE constraint failed/));
+  const unique = await traced(() => assert.throws(() => createUser.runSync(db, { email: "ada@example.com" }), /UNIQUE constraint failed/u));
   assert.deepEqual(names(unique), ["start", "error", "end"]);
-  assert.match((unique[1]!.error as Error).message, /UNIQUE constraint failed: users\.email/);
+  assert.match((unique[1]!.error as Error).message, /UNIQUE constraint failed: users\.email/u);
 });
 
 // oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.

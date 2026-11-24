@@ -161,7 +161,7 @@ export function docComment(prose: string, sql: string | undefined, note = "", in
 function openFence(text: string): string | undefined {
   let open: string | undefined;
   for (const line of text.split("\n")) {
-    const regexMatch = /^ {0,3}(`{3,}|~{3,})/.exec(line);
+    const regexMatch = /^ {0,3}(`{3,}|~{3,})/u.exec(line);
     if (!regexMatch) {continue;}
     if (!open) {open = regexMatch[1];}
     else if (regexMatch[1]![0] === open[0] && regexMatch[1]!.length >= open.length && !line.slice(regexMatch[0].length).trim()) {open = undefined;}

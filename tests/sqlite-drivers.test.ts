@@ -80,7 +80,7 @@ test("an analysis read from .reylo/ is checked on the drivers too", { skip }, as
   link(root, "@libsql/client");
   const second = await analyze(root, env, PRETTY);
   assert.equal(second.source, "cache");
-  assert.match(second.analysis.diagnostics[0]?.message ?? "", /^@libsql\/client runs SQLite 3\.45\.1, which refuses this statement: no such function: json_pretty$/);
+  assert.match(second.analysis.diagnostics[0]?.message ?? "", /^@libsql\/client runs SQLite 3\.45\.1, which refuses this statement: no such function: json_pretty$/u);
 });
 
 // oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
@@ -95,7 +95,7 @@ test("a session whose connection was released checks a statement it reads from .
     const second = await session.analyze(PRETTY);
     assert.ok(second.ok, !second.ok ? second.message : "");
     assert.equal(second.source, "cache");
-    assert.match(second.analysis.diagnostics[0]?.message ?? "", /^@libsql\/client runs SQLite 3\.45\.1, which refuses this statement: no such function: json_pretty$/);
+    assert.match(second.analysis.diagnostics[0]?.message ?? "", /^@libsql\/client runs SQLite 3\.45\.1, which refuses this statement: no such function: json_pretty$/u);
   } finally {
     await session.close();
   }
@@ -156,7 +156,7 @@ test("a project whose wrangler config binds no D1 database is not asked, until i
   assert.deepEqual((await analyze(root, env, PRETTY)).analysis.diagnostics, []);
   // The failed start is remembered only as long as the config it read.
   worker(root, true);
-  assert.match((await analyze(root, env, PRETTY)).analysis.diagnostics[0]?.message ?? "", /refuses this statement: not authorized to use function: json_pretty$/);
+  assert.match((await analyze(root, env, PRETTY)).analysis.diagnostics[0]?.message ?? "", /refuses this statement: not authorized to use function: json_pretty$/u);
 });
 
 // oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
@@ -182,5 +182,5 @@ test("D1 compiles each statement against the schema as it is now, after a migrat
   }
   // A later session, as a build step opens after a pause, asks D1 again.
   const pretty = await analyze(root, env, "select json_pretty(tag) as t from notes");
-  assert.match(pretty.analysis.diagnostics[0]?.message ?? "", /refuses this statement: not authorized to use function: json_pretty$/);
+  assert.match(pretty.analysis.diagnostics[0]?.message ?? "", /refuses this statement: not authorized to use function: json_pretty$/u);
 });

@@ -80,7 +80,7 @@ const located = function (text: string, start: number, length: number): { at: st
 // Imported CREATE INDEX, or a migration's CREATE TABLE of a table the database has) is an error
 // Like any other, which fails the run and is printed: the database cannot tell a migration from a
 // Command someone imports, and its message still says how to leave a migration out of the check.
-const NOT_A_QUERY = /^A typed \.sql file holds one statement and this one holds several, |^cannot insert multiple commands into a prepared statement/;
+const NOT_A_QUERY = /^A typed \.sql file holds one statement and this one holds several, |^cannot insert multiple commands into a prepared statement/u;
 
 const generate = async function (args: string[]): Promise<number> {
   const force = args.includes("--force");

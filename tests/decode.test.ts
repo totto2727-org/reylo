@@ -105,7 +105,7 @@ const database = function () {
     answer(text: string): { fields: { name: string; dataTypeID: number }[]; raw: (string | null)[][] } {
       if (text.includes("pg_catalog.pg_type")) {
         db.catalogQueries.push(text);
-        const wanted = /any\('\{([\d,]+)\}'/.exec(text)![1]!.split(",").map(Number);
+        const wanted = /any\('\{([\d,]+)\}'/u.exec(text)![1]!.split(",").map(Number);
         // An array oid asked about also brings the array type's own row after its element's, as a
         // Query matching every requested oid would return it.
         const rows = db.types
@@ -215,7 +215,7 @@ test("pg Client: a type created after Reylo read the catalog comes back decoded,
   const [row] = (await execute(client, lateProbe, { id: 1 })) as Record<string, unknown>[];
   assert.deepEqual([row!.lates, row!.late], [["x", "y"], "x"]);
   assert.equal(db.catalogQueries.length, 2);
-  assert.match(db.catalogQueries[1]!, /any\('\{70030,70031\}'::pg_catalog\.oid\[\]\)/);
+  assert.match(db.catalogQueries[1]!, /any\('\{70030,70031\}'::pg_catalog\.oid\[\]\)/u);
   await execute(client, lateProbe, { id: 1 });
   assert.equal(db.catalogQueries.length, 2, "a learned oid is not looked up again");
 });
@@ -236,7 +236,7 @@ test("pg: a client set up with binary: true is refused, before the query and if 
     }
     return original(config, values);
   };
-  await assert.rejects(execute(sneaky, built, { id: 1 }) as Promise<unknown>, /binary: true/);
+  await assert.rejects(execute(sneaky, built, { id: 1 }) as Promise<unknown>, /binary: true/u);
   assert.ok(asked.length > 0);
 });
 
@@ -270,7 +270,7 @@ test("pg Pool: pool.query with Reylo's table, so a connect listener's parsers do
   same(row, declared);
   assert.ok((pool.clients[0]!.calls[0] as Config).types, "the statement went through pool.query with types");
   pool.options.binary = true;
-  await assert.rejects(execute(pool, built, { id: 1 }) as Promise<unknown>, /binary: true/);
+  await assert.rejects(execute(pool, built, { id: 1 }) as Promise<unknown>, /binary: true/u);
 });
 
 // oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
@@ -296,11 +296,11 @@ test("pg-promise: result({ text, values, types }) on the database, a task and a 
   const camel = (e: { data: Record<string, unknown>[] }) => e.data.forEach((r) => Object.keys(r).forEach((k) => ((r[k.toUpperCase()] = r[k]), delete r[k])));
   const withReceive = Object.assign(make(camel), { $config: { options: { receive: camel } } });
   const before = calls.length;
-  await assert.rejects(execute(withReceive as never, built, { id: 1 }) as Promise<unknown>, /receive event rewrites every result/);
+  await assert.rejects(execute(withReceive as never, built, { id: 1 }) as Promise<unknown>, /receive event rewrites every result/u);
   assert.equal(calls.length, before);
   // A task exposes no options; a receive that renamed the columns is caught by the rows' keys.
   const task = make(camel);
-  await assert.rejects(execute(task as never, built, { id: 1 }) as Promise<unknown>, /receive event rewrites every result/);
+  await assert.rejects(execute(task as never, built, { id: 1 }) as Promise<unknown>, /receive event rewrites every result/u);
 });
 
 /** PGlite: a query's parsers merged over the instance's, as its parse.ts does. */
@@ -383,7 +383,7 @@ test("postgres.js: .raw() and Reylo's text parsers, the rows built with the modu
   // A query defined by hand has the server's names, and the catalog for the created types.
   const [bare] = (await execute(postgresJs(db) as never, probe, { id: 1 })) as Record<string, unknown>[];
   assert.deepEqual(bare!.ROLES, declared.roles);
-  await assert.rejects(execute(postgresJs(db, (r) => [...r, "ROW-TRANSFORMED"]) as never, built, { id: 1 }) as Promise<unknown>, /transform\.row rewrites every row/);
+  await assert.rejects(execute(postgresJs(db, (r) => [...r, "ROW-TRANSFORMED"]) as never, built, { id: 1 }) as Promise<unknown>, /transform\.row rewrites every row/u);
 });
 
 // oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.

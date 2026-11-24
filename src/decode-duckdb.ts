@@ -62,7 +62,7 @@ type Api = {
 // Helper of its own, which moves a `webpackIgnore` comment where Rspack no longer reads it.
 const NODE_API = "@duckdb/node-api";
 /** The module path of node-api's entry, as Node's CommonJS cache keys it. */
-const NODE_API_ENTRY = /[\\/]@duckdb[\\/]node-api[\\/]lib[\\/]index\.js$/;
+const NODE_API_ENTRY = /[\\/]@duckdb[\\/]node-api[\\/]lib[\\/]index\.js$/u;
 const apis = new WeakMap<object, Promise<Api>>();
 
 type ModuleCache = Record<string, { exports?: unknown } | undefined>;

@@ -65,8 +65,8 @@ test("SQLite: an insert's rows are checked and written in their order, a key lef
     const q = await built(root, url, "insert_events", insert);
     assert.deepEqual(plain(await q.run(db, { events: [{ id: 2, ts: "2026-10-20", status: "done", amount: 1.5, meta: { source: "x" } }, { id: 1, ts: "2026-10-20", status: "late", amount: null, meta: null }] })), [{ id: 2, status: "done" }, { id: 1, status: "late" }]);
     assert.deepEqual(plain(await q.run(db, { events: [{ id: 3, ts: "2026-10-21" }] })), [{ id: 3, status: "new" }]);
-    await assert.rejects(q.run(db, { events: [{ id: 4, ts: "x", status: null }] }), /"status" is text not null, and the row gives null/);
-    await assert.rejects(q.run(db, { events: [{ id: "4", ts: "x" }] }), /"id" is integer, an integer; got "4"/);
+    await assert.rejects(q.run(db, { events: [{ id: 4, ts: "x", status: null }] }), /"status" is text not null, and the row gives null/u);
+    await assert.rejects(q.run(db, { events: [{ id: "4", ts: "x" }] }), /"id" is integer, an integer; got "4"/u);
     // An explicit null stores NULL, never the text null, and a document stays JSON text.
     assert.deepEqual(db.prepare("select id, status, amount, meta, typeof(meta) as t from events order by id").all().map((r) => ({ ...r })), [
       { amount: null, id: 1, meta: null, status: "late", t: "null" },
@@ -100,7 +100,7 @@ test("SQLite: rows that leave out different keys go in one insert, each such row
     const { code } = await sqlModule(file, insert);
     assert.ok(!code.includes("structured:"), code);
     const q = await built(root, url, "insert_accounts", insert);
-    assert.match(q.sql, /CASE WHEN json_type\("reylo\.e"\.value, '\$\."role"'\) IS NOT NULL THEN "reylo\.e"\.value ->> '\$\."role"' ELSE \('member'\) END/);
+    assert.match(q.sql, /CASE WHEN json_type\("reylo\.e"\.value, '\$\."role"'\) IS NOT NULL THEN "reylo\.e"\.value ->> '\$\."role"' ELSE \('member'\) END/u);
     const rows = [{ name: "Ada" }, { id: 100, name: "Grace", role: "admin", nick: "g", token: "given", n: 1 }, { name: "Linus", email: null, nick: null, n: null }];
     assert.deepEqual(plain(await q.run(db, { a: rows })), [{ id: 1, role: "member" }, { id: 100, role: "admin" }, { id: 101, role: "member" }]);
     const stored = db.prepare("select id, name, email, role, nick, token, n, at, typeof(n) as tn from accounts order by id").all().map((r) => ({ ...r })) as Record<string, unknown>[];
@@ -108,11 +108,11 @@ test("SQLite: rows that leave out different keys go in one insert, each such row
     assert.deepEqual(stored.map((r) => [r.id, r.email, r.role, r.nick, r.n, r.tn]), [[1, null, "member", "member", 7, "integer"], [100, null, "admin", "g", 1, "integer"], [101, null, "member", null, null, "null"]]);
     // An expression default runs per row, current_timestamp once per statement, as the database's own.
     assert.equal(stored[1]!.token, "given");
-    assert.match(String(stored[0]!.token), /^[0-9a-f]{16}$/);
-    assert.match(String(stored[2]!.token), /^[0-9a-f]{16}$/);
+    assert.match(String(stored[0]!.token), /^[0-9a-f]{16}$/u);
+    assert.match(String(stored[2]!.token), /^[0-9a-f]{16}$/u);
     assert.notEqual(stored[0]!.token, stored[2]!.token);
     assert.equal(stored[0]!.at, stored[2]!.at);
-    assert.match(String(stored[0]!.at), /^\d{4}-\d\d-\d\d \d\d:\d\d:\d\d$/);
+    assert.match(String(stored[0]!.at), /^\d{4}-\d\d-\d\d \d\d:\d\d:\d\d$/u);
     // One row: the same.
     const one = await built(root, url, "insert_account", "insert into accounts :a::row(name text not null, role? text not null) returning role");
     assert.deepEqual(plain(await one.run(db, { a: { name: "Mary" } })), [{ role: "member" }]);
@@ -152,10 +152,10 @@ test("a column list that does not read is the type check's error at its place, a
   new DatabaseSync(join(root, "app.db")).close();
   const url = "file:./app.db";
   const cases: [string, string, RegExp][] = [
-    ["insert into t :p::rows(a text not null default 'x')", "default", /never restates a default/],
-    ["insert into t :p::rows(a? text)", "a?", /may be left out already/],
-    ["select * from :p::rows(a? text not null)", "a?", /only where the rows are inserted/],
-    ["insert into t :p::row(a text, posts rows(title text))", "rows(title text)", /nested row or rows member is not built yet/],
+    ["insert into t :p::rows(a text not null default 'x')", "default", /never restates a default/u],
+    ["insert into t :p::rows(a? text)", "a?", /may be left out already/u],
+    ["select * from :p::rows(a? text not null)", "a?", /only where the rows are inserted/u],
+    ["insert into t :p::row(a text, posts rows(title text))", "rows(title text)", /nested row or rows member is not built yet/u],
   ];
   try {
     for (const [sql, at, message] of cases) {
@@ -182,12 +182,12 @@ test("SQLite: the column list is checked against the table its insert writes, an
   db.close();
   const url = "file:./app.db";
   const cases: [string, string, RegExp][] = [
-    ["insert into events :e::rows(id integer not null, ts text, status? text not null)", "ts text", /events\.ts is not null, and `ts` lets a row give null or leave the key out: write `ts text not null`/],
-    ["insert into events :e::rows(id integer not null, ts text not null, status text)", "status text", /write `status\? text not null`, which lets a row leave the key out so that the default applies/],
-    ["insert into events :e::rows(id integer not null, ts text not null, amount? real not null)", "amount", /`amount\?` lets a row leave the key out, but events\.amount has no default/],
-    ["insert into events :e::rows(id integer not null, status? text not null)", ":e::rows", /events\.ts is not null and has no default, and the column list leaves it out/],
-    ["insert into events :e::rows(id text not null, ts text not null)", "text", /events\.id is INTEGER, and the column list says text: their affinities differ \(TEXT and INTEGER\)/],
-    ["insert into events :e::rows(ts text not null, total real)", "total", /events\.total is a generated column/],
+    ["insert into events :e::rows(id integer not null, ts text, status? text not null)", "ts text", /events\.ts is not null, and `ts` lets a row give null or leave the key out: write `ts text not null`/u],
+    ["insert into events :e::rows(id integer not null, ts text not null, status text)", "status text", /write `status\? text not null`, which lets a row leave the key out so that the default applies/u],
+    ["insert into events :e::rows(id integer not null, ts text not null, amount? real not null)", "amount", /`amount\?` lets a row leave the key out, but events\.amount has no default/u],
+    ["insert into events :e::rows(id integer not null, status? text not null)", ":e::rows", /events\.ts is not null and has no default, and the column list leaves it out/u],
+    ["insert into events :e::rows(id text not null, ts text not null)", "text", /events\.id is INTEGER, and the column list says text: their affinities differ \(TEXT and INTEGER\)/u],
+    ["insert into events :e::rows(ts text not null, total real)", "total", /events\.total is a generated column/u],
   ];
   try {
     for (const [sql, at, message] of cases) {
@@ -273,20 +273,20 @@ select value ->> '$.title', value ->> '$.done' from json_each(:todos::json('{
     assert.deepEqual(p.type.kind === "json" && p.type.schema && (p.type.schema as { items: { required: string[] } }).items.required, ["title"]);
     const q = await built(root, url, "insert_todos", insert);
     assert.deepEqual(plain(await q.run(db, { todos: [{ title: "a" }, { title: "b", done: true }] })), [{ done: 0, id: 1, title: "a" }, { done: 1, id: 2, title: "b" }]);
-    await assert.rejects(q.run(db, { todos: [{ title: "" }] }), /Parameter "todos" at \/0\/title must be at least 1 characters long/);
-    await assert.rejects(q.run(db, { todos: [{ title: "a", extra: 1 }] }), /at \/0\/extra is a key the schema does not allow/);
-    await assert.rejects(q.run(db, { todos: [{ title: "a" }, { title: "b" }, { title: "c" }] }), /must have at most 2 items/);
+    await assert.rejects(q.run(db, { todos: [{ title: "" }] }), /Parameter "todos" at \/0\/title must be at least 1 characters long/u);
+    await assert.rejects(q.run(db, { todos: [{ title: "a", extra: 1 }] }), /at \/0\/extra is a key the schema does not allow/u);
+    await assert.rejects(q.run(db, { todos: [{ title: "a" }, { title: "b" }, { title: "c" }] }), /must have at most 2 items/u);
     // A parameter whose schema has a default at its root may be left out.
     const limited = await built(root, url, "limited", `select id from todos order by id limit :n::json('{ "type": "integer", "minimum": 1, "maximum": 200, "default": 1 }')`);
     assert.deepEqual(plain(await limited.run(db, {})), [{ id: 1 }]);
     assert.deepEqual(plain(await limited.run(db, { n: 2 })), [{ id: 1 }, { id: 2 }]);
-    await assert.rejects(limited.run(db, { n: 0 }), /Parameter "n" must be at least 1/);
+    await assert.rejects(limited.run(db, { n: 0 }), /Parameter "n" must be at least 1/u);
     assert.deepEqual(limited.inputSchema.required, []);
     // What the profile refuses is the type check's error at the schema, and fails the build.
     const bad = `select * from json_each(:p::json('{ "$ref": "#/$defs/x" }'))`;
     const d = (await analysis(root, url, bad)).diagnostics.find((x) => x.code === 20);
     assert.ok(d);
-    assert.match(d.message, /breaks the schema's locality/);
+    assert.match(d.message, /breaks the schema's locality/u);
     assert.equal(bad.slice(d.start, d.start + d.length), `'{ "$ref": "#/$defs/x" }'`);
   } finally {
     db.close();
@@ -302,7 +302,7 @@ test("SQLite: a JSON member of a column list is checked against its schema, its 
   try {
     const q = await built(root, "file:./app.db", "insert_events", `insert into events :events::rows(id integer not null, meta json('{"type": "object", "properties": {"source": {"type": "string", "default": "web"}, "n": {"type": "integer", "minimum": 0}}, "required": ["source"]}')) returning id, meta`);
     assert.deepEqual(plain(await q.run(db, { events: [{ id: 1, meta: {} }, { id: 2, meta: { source: "app", n: 3 } }] })), [{ id: 1, meta: `{"source":"web"}` }, { id: 2, meta: `{"source":"app","n":3}` }]);
-    await assert.rejects(q.run(db, { events: [{ id: 3, meta: { n: -1 } }] }), /row 1: "meta" at \/n must be at least 0/);
+    await assert.rejects(q.run(db, { events: [{ id: 3, meta: { n: -1 } }] }), /row 1: "meta" at \/n must be at least 0/u);
   } finally {
     db.close();
     await closeSessions();
@@ -323,7 +323,7 @@ test("binary data in a column list travels as hexadecimal text, which each reade
     same(row.data);
     const read = await built(root, "file:./app.db", "read_files", "select f.data from :files::rows(data blob not null) as f");
     same((await read.run(db, { files: [{ data: bytes }] }))[0].data);
-    await assert.rejects(insert.run(db, { files: [{ id: 2, data: "00ff" }] }), /"data" is blob, binary data, a Uint8Array; got "00ff"/);
+    await assert.rejects(insert.run(db, { files: [{ id: 2, data: "00ff" }] }), /"data" is blob, binary data, a Uint8Array; got "00ff"/u);
   } finally {
     db.close();
     await closeSessions();
@@ -344,10 +344,10 @@ test("an insert takes the table's alias before its rows, and refuses a column li
     const own = "insert into t (id, x) :p::rows(id integer not null, x text not null)";
     const d = (await analysis(root, url, own)).diagnostics.find((x) => x.code === 20);
     assert.ok(d);
-    assert.match(d.message, /writes the insert's column list itself/);
+    assert.match(d.message, /writes the insert's column list itself/u);
     assert.equal(own.slice(d.start, d.start + d.length), "(id, x)");
     await writeFile(join(root, "own.sql"), own);
-    await assert.rejects(sqlModule(join(root, "own.sql"), own), /writes the insert's column list itself/);
+    await assert.rejects(sqlModule(join(root, "own.sql"), own), /writes the insert's column list itself/u);
   } finally {
     db.close();
     await closeSessions();

@@ -45,7 +45,7 @@ test("the files a Postgres URL names are resolved from the working directory for
   assert.equal(params.get("sslcert"), resolve("/abs/c.pem"));
   assert.equal(params.get("sslkey"), resolve("k.pem"));
   // Every other parameter is passed on as written.
-  assert.match(url, /&application_name=a\+b$/);
+  assert.match(url, /&application_name=a\+b$/u);
   assert.equal((await hostUrl("postgres://u@h/d?sslrootcert=system")).url, "postgres://u@h/d?sslrootcert=system");
   assert.equal((await hostUrl("mysql://root@h/d?ssl=true")).url, "mysql://root@h/d?ssl=true");
 });
@@ -122,7 +122,7 @@ test("PGHOST names the socket's directory where the URL names no host, as libpq 
   // As on a system with Unix sockets: the bridge itself is a TCP server, which every system opens.
   const bridged = await hostUrl("postgres://u@/d", { PGHOST: "/var/run/postgresql", PGPORT: "5433" }, "linux");
   assert.ok(bridged.bridge);
-  assert.match(bridged.url, /^postgres:\/\/u@127\.0\.0\.1:\d+\/d$/);
+  assert.match(bridged.url, /^postgres:\/\/u@127\.0\.0\.1:\d+\/d$/u);
   bridged.close();
   // A host in the URL, or a TCP host in PGHOST, is no socket.
   assert.equal((await hostUrl("postgres://u@db/d", { PGHOST: "/var/run/postgresql" })).bridge, undefined);

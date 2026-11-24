@@ -227,7 +227,7 @@ const timestamp: Decoder = (x) => isoDate(x.replace(" ", "T"));
 // (wiki/driver-decoding/spike/postgres.md); and a Date holds milliseconds, not the server's
 // Microseconds. So Reylo moves the wall-clock time to UTC itself, in whole seconds on a day count,
 // And keeps the fraction as the server wrote it.
-const TSTZ = /^(\d{4,})-(\d\d)-(\d\d) (\d\d):(\d\d):(\d\d)(\.\d{1,6})?([+-])(\d\d)(?::(\d\d))?(?::(\d\d))?( BC)?$/;
+const TSTZ = /^(\d{4,})-(\d\d)-(\d\d) (\d\d):(\d\d):(\d\d)(\.\d{1,6})?([+-])(\d\d)(?::(\d\d))?(?::(\d\d))?( BC)?$/u;
 
 /** Days from 1970-01-01 to a date of the proleptic Gregorian calendar, year 0 being 1 BC (Howard Hinnant's days_from_civil). */
 const daysFromCivil = function (y: number, m: number, d: number): number {
@@ -309,7 +309,7 @@ export function instantOfDate(d: Date, column: string): string {
 // Interval in IntervalStyle postgres: `1 year 2 mons 3 days 04:05:06.789`. Postgres keeps three
 // Parts, each signed on its own: months (written as years and months), days, and a time that may
 // Pass 24 hours; a part after a negative one carries `+` (`-1 days +01:00:00`).
-const INTERVAL = /^(?:([+-]?\d+) years? ?)?(?:([+-]?\d+) mons? ?)?(?:([+-]?\d+) days? ?)?(?:([+-]?)(\d+):(\d\d):(\d\d)(?:\.(\d+))?)?$/;
+const INTERVAL = /^(?:([+-]?\d+) years? ?)?(?:([+-]?\d+) mons? ?)?(?:([+-]?\d+) days? ?)?(?:([+-]?)(\d+):(\d\d):(\d\d)(?:\.(\d+))?)?$/u;
 
 /**
  * An interval's text as an ISO 8601 duration, which `Temporal.Duration.from` reads: `1 year 2 mons
@@ -557,7 +557,7 @@ function outOfRange(value: string, column: string, rounded = false): DecodeError
   );
 }
 
-const INTEGER = /^[+-]?\d+$/;
+const INTEGER = /^[+-]?\d+$/u;
 
 /**
  * A 64-bit integer as a BigInt, from the driver's BigInt, its digits, or a number: a number past

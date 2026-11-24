@@ -366,7 +366,7 @@ function format(name: string, v: string): boolean {
     }
     case "uuid": { return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v); }
     case "email": { return email(v); }
-    case "ipv4": { return /^(?:(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)\.){3}(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)$/.test(v); }
+    case "ipv4": { return /^(?:(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)\.){3}(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)$/u.test(v); }
     case "ipv6": { return ipv6(v); }
     case "uri": { return uri(v); }
     case "hostname": { return hostname(v); }
@@ -386,8 +386,8 @@ function format(name: string, v: string): boolean {
 // Digit and hyphen labels or an address literal.
 const ATOM = "[A-Za-z0-9!#$%&'*+\\-/=?^_`{|}~]+";
 const DOT_STRING = new RegExp(`^${ATOM}(?:\\.${ATOM})*$`);
-const QUOTED = /^"(?:[\x20\x21\x23-\x5b\x5d-\x7e]|\\[\x20-\x7e])*"$/;
-const LABEL = /^[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?$/;
+const QUOTED = /^"(?:[\x20\x21\x23-\x5b\x5d-\x7e]|\\[\x20-\x7e])*"$/u;
+const LABEL = /^[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?$/u;
 
 function email(v: string): boolean {
   const at = v.lastIndexOf("@");
@@ -426,11 +426,11 @@ function uri(v: string): boolean {
     if (close < 0) {return false;}
     const literal = hostport.slice(1, close);
     const ok = /^v[0-9a-f]+\.[A-Za-z0-9\-._~!$&'()*+,;=:]+$/i.test(literal) || ipv6(literal);
-    return ok && /^(?::\d*)?$/.test(hostport.slice(close + 1));
+    return ok && /^(?::\d*)?$/u.test(hostport.slice(close + 1));
   }
   const colon = hostport.lastIndexOf(":");
   const host = colon >= 0 ? hostport.slice(0, colon) : hostport;
-  if (colon >= 0 && !/^\d*$/.test(hostport.slice(colon + 1))) {return false;}
+  if (colon >= 0 && !/^\d*$/u.test(hostport.slice(colon + 1))) {return false;}
   return REG_NAME.test(host);
 }
 
@@ -445,7 +445,7 @@ function uri(v: string): boolean {
 function hostname(v: string): boolean {
   if (v.length === 0 || v.length > 253) {return false;}
   return v.split(".").every((label) => {
-    if (label.length === 0 || label.length > 63 || !/^[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?$/.test(label)) {return false;}
+    if (label.length === 0 || label.length > 63 || !/^[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?$/u.test(label)) {return false;}
     if (label.slice(2, 4) !== "--") {return true;}
     if (label.slice(0, 2).toLowerCase() !== "xn") {return false;}
     const u = punycode(label.slice(4).toLowerCase());

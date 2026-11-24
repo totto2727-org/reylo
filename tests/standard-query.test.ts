@@ -61,11 +61,11 @@ test("postgres: decode gives each value its kind, and the output its cardinality
     { id: 1, at: "2026-10-22T12:46:00.123456Z", big: BigInt("9007199254740993") },
     { id: 2, at: "2026-10-22T00:00:00Z", big: null },
   ]);
-  assert.throws(() => q.decode([["1", "x"]]), /selects 3 columns, and a row has 2/);
+  assert.throws(() => q.decode([["1", "x"]]), /selects 3 columns, and a row has 2/u);
   const one = defineQuery<{}, { n: bigint }, "maybeOne", "postgres">({ dialect: "postgres", sql: "select count(*) as n from users", params: [], columns: [["n", "int8"]], cardinality: "maybeOne" });
   assert.deepEqual(one["~standard"].query.decode([["3"]]), { n: BigInt("3") });
   assert.equal(one["~standard"].query.decode([]), null);
-  assert.throws(() => one["~standard"].query.decode([["1"], ["2"]]), /Expected at most one row, got 2/);
+  assert.throws(() => one["~standard"].query.decode([["1"], ["2"]]), /Expected at most one row, got 2/u);
   const none = defineQuery<{}, never, "none", "postgres">({ dialect: "postgres", sql: "delete from users", params: [], columns: [], cardinality: "none" });
   assert.equal(none["~standard"].query.decode([]), undefined);
 });
@@ -125,9 +125,9 @@ test("mysql and sqlite: each value as a driver binds it, and decode takes every 
   });
   const lq = loose["~standard"].query;
   assert.deepEqual(lq.decode([[BigInt("1"), "a", BigInt("2")]]), [{ n: 1, s: "a", u: 2 }]);
-  assert.throws(() => lq.decode([["abc", "a", null]]), /Column "n" is typed number and holds the text "abc"/);
-  assert.throws(() => lq.decode([[1, new Uint8Array([1]), null]]), /Column "s" is typed string and holds a BLOB of 1 byte/);
-  assert.throws(() => lq.decode([[BigInt("2") ** BigInt("60"), "a", null]]), /"n"/);
+  assert.throws(() => lq.decode([["abc", "a", null]]), /Column "n" is typed number and holds the text "abc"/u);
+  assert.throws(() => lq.decode([[1, new Uint8Array([1]), null]]), /Column "s" is typed string and holds a BLOB of 1 byte/u);
+  assert.throws(() => lq.decode([[BigInt("2") ** BigInt("60"), "a", null]]), /"n"/u);
 });
 
 // oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
@@ -135,7 +135,7 @@ test("a query defined by hand without its columns cannot decode, and says so", (
   const bare = defineQuery<{ id: number }, { id: number }, "many", "postgres">({ dialect: "postgres", sql: "select :id::int as id", params: ["id"] });
   assert.equal(bare["~standard"].query.text, "select $1::int as id");
   assert.deepEqual(bare["~standard"].query.encode({ id: 1 }), ["1"]);
-  assert.throws(() => bare["~standard"].query.decode([["1"]]), /without its columns/);
+  assert.throws(() => bare["~standard"].query.decode([["1"]]), /without its columns/u);
 });
 
 // oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.

@@ -48,7 +48,7 @@ test("HCL sources accept only one local .hcl file", () => {
   assert.equal(hclPath("hcl:./schema.hcl", tmp), join(tmp, "schema.hcl"));
   assert.equal(hclPath("HCL:./schema.hcl", tmp), join(tmp, "schema.hcl"));
   assert.equal(hclPath("file:./app.db", tmp), undefined);
-  for (const source of ["hcl:", "hcl://remote/schema.hcl", "hcl:./app.db", "hcl:./schema.hcl?mode=rw", "hcl:./schema.hcl#fragment", "hcl:./bad\0schema.hcl"]) {assert.throws(() => hclPath(source, tmp), /one local \.hcl file/);}
+  for (const source of ["hcl:", "hcl://remote/schema.hcl", "hcl:./app.db", "hcl:./schema.hcl?mode=rw", "hcl:./schema.hcl#fragment", "hcl:./bad\0schema.hcl"]) {assert.throws(() => hclPath(source, tmp), /one local \.hcl file/u);}
 });
 
 // oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
@@ -59,8 +59,8 @@ test("HCL supplies only static schema rows and embedded function defaults to the
     const ddl = "select sql from sqlite_schema where sql is not null and type in ('table', 'view', 'index', 'trigger') order by rowid";
     assert.deepEqual(await catalog.query(ddl, []), [['CREATE TABLE "users" ("id" integer NOT NULL, "name" text NOT NULL, PRIMARY KEY ("id"))']]);
     assert.deepEqual(await catalog.query("select name, narg, type from pragma_function_list", []), []);
-    await assert.rejects(catalog.query(ddl, [1]), /do not accept parameters/);
-    await assert.rejects(catalog.query("create table unexpected (id text)", []), /Unsupported static HCL catalog request/);
+    await assert.rejects(catalog.query(ddl, [1]), /do not accept parameters/u);
+    await assert.rejects(catalog.query("create table unexpected (id text)", []), /Unsupported static HCL catalog request/u);
     const analyzed = await catalog.analyze("select upper(name), json_object('id', id) from users where id = :id");
     assert.deepEqual(analyzed.diagnostics, []);
   } finally {
@@ -75,7 +75,7 @@ test("invalid static declarations fail before the engine receives a catalog", as
   const wasm = await engine("sqlite");
   try {
     await writeFile(join(root, "schema.hcl"), schema().replace("type = text", "type = unknown_type"));
-    assert.throws(() => hclCatalog(join(root, "schema.hcl"), wasm), /Cannot evaluate HCL schema/);
+    assert.throws(() => hclCatalog(join(root, "schema.hcl"), wasm), /Cannot evaluate HCL schema/u);
     // SQL expressions remain input to the existing embedded SQL analyzer, not host execution.
     await writeFile(join(root, "schema.hcl"), schema().replace("  primary_key {", `  check { expr = ${JSON.stringify("name != ';' /* normal comment */")} }\n  primary_key {`));
     const catalog = hclCatalog(join(root, "schema.hcl"), wasm);
@@ -134,11 +134,11 @@ test("Atlas HCL feeds the real SQLite engine and invalidates warm caches immedia
     await writeFile(join(root, "schema.hcl"), "table \"broken\" {");
     const invalid = await session.analyze(SELECT);
     assert.ok(!invalid.ok);
-    assert.match(invalid.message, /Cannot evaluate HCL schema/);
+    assert.match(invalid.message, /Cannot evaluate HCL schema/u);
     await rm(join(root, "schema.hcl"));
     const missing = await session.analyze(SELECT);
     assert.ok(!missing.ok);
-    assert.match(missing.message, /Cannot read HCL schema/);
+    assert.match(missing.message, /Cannot read HCL schema/u);
     await writeFile(join(root, "schema.hcl"), schema());
     const restored = await session.analyze(SELECT);
     assert.ok(restored.ok, JSON.stringify(restored));
@@ -170,8 +170,8 @@ test("the mapper and runtime loader consume HCL directly without running migrati
     assert.equal((await identity()).configIdentity, opened.configIdentity);
     const declaration = await handlers.transform!({ projectHandle: handle, fileName: join(root, "get.sql"), content: SELECT }) as { text: string; diagnostics: unknown[] };
     assert.deepEqual(declaration.diagnostics, []);
-    assert.match(declaration.text, /export type Params = \{ id: number \}/);
-    assert.match(declaration.text, /export type Row = \{ id: number; name: string \}/);
+    assert.match(declaration.text, /export type Params = \{ id: number \}/u);
+    assert.match(declaration.text, /export type Row = \{ id: number; name: string \}/u);
     const built = await sqlModule(join(root, "get.sql"), SELECT);
     assert.ok(built.watched.includes(join(root, "schema.hcl")));
     const out = join(root, "get.mjs");
@@ -185,9 +185,9 @@ test("the mapper and runtime loader consume HCL directly without running migrati
     assert.notEqual((await identity()).configIdentity, opened.configIdentity);
     const updated = await handlers.transform!({ projectHandle: handle, fileName: join(root, "get.sql"), content: SELECT }) as { text: string; diagnostics: unknown[] };
     assert.deepEqual(updated.diagnostics, []);
-    assert.match(updated.text, /name: string \| null/);
+    assert.match(updated.text, /name: string \| null/u);
     await writeFile(join(root, "schema.hcl"), "invalid HCL");
-    await assert.rejects(sqlModule(join(root, "get.sql"), SELECT), /Cannot evaluate HCL schema/);
+    await assert.rejects(sqlModule(join(root, "get.sql"), SELECT), /Cannot evaluate HCL schema/u);
     assert.ok(!readdirSync(root).some((name) => /\.(db|sqlite)(-|$)/u.test(name)));
   } finally {
     db.close();

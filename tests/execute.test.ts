@@ -162,9 +162,9 @@ test("a typed JSON, structured or cast parameter is checked with the checks its 
   const cast: QueryModule<"sqlite"> = { dialect: "sqlite", sql: "select cast(:n as integer) as n", params: ["n"], inputs: { n: { type: { kind: "scalar", name: "integer" }, cast: "integer" } } };
   assert.throws(() => executeSync(db, cast, { n: 1 }), refusal("n"));
   // With them, a value the schema or the cast refuses is refused, and one they take is bound.
-  await assert.rejects(async () => execute(client, { ...json, checks }, { p: { n: "one" } }), /Parameter "p" at \/n/);
+  await assert.rejects(async () => execute(client, { ...json, checks }, { p: { n: "one" } }), /Parameter "p" at \/n/u);
   assert.deepEqual(await execute(client, { ...json, checks }, { p: { n: 1 } }), []);
-  assert.throws(() => executeSync(db, { ...cast, checks }, { n: "one" }), /Parameter "n"/);
+  assert.throws(() => executeSync(db, { ...cast, checks }, { n: "one" }), /Parameter "n"/u);
   assert.deepEqual(executeSync(db, { ...cast, checks }, { n: 1 }), [{ n: 1 }]);
 });
 
@@ -176,7 +176,7 @@ test("a parameter the statement takes no null for refuses null and refuses to be
   const q: QueryModule<"postgres"> = { dialect: "postgres", sql: "select :x::int + 1 as y, :email as email", params: ["x", "email"], inputs: { x: { type: int4, nullable: false }, email: { type: { kind: "scalar", name: "text" }, nullable: true } } };
   await assert.rejects(async () => execute(client, q, { x: null, email: "a" }), { name: "TypeError", message: `Parameter "x" is null, and the statement takes no null for it: pass a value.` });
   await assert.rejects(async () => execute(client, q, { email: "a" }), { name: "TypeError", message: `Parameter "x" is missing, and the statement takes no null for it: pass a value.` });
-  assert.throws(() => executeSync(new DatabaseSync(":memory:"), { ...q, dialect: "sqlite", sql: "select :x + 1 as y, :email as email" }, {}), /Parameter "x" is missing/);
+  assert.throws(() => executeSync(new DatabaseSync(":memory:"), { ...q, dialect: "sqlite", sql: "select :x + 1 as y, :email as email" }, {}), /Parameter "x" is missing/u);
   assert.equal(seen.length, 0);
   // One that takes null binds NULL, given or left out; so does one typed `unknown`, and one a
   // Query defined by hand leaves without `nullable`.
@@ -187,24 +187,24 @@ test("a parameter the statement takes no null for refuses null and refuses to be
   // Schema, the one it is written with or the one its type carries, refuses null; left out, it is
   // Refused, unless its schema has a default.
   const json = (schema: JsonSchema): QueryModule<"postgres"> => ({ dialect: "postgres", sql: "select :p::jsonb", params: ["p"], inputs: { p: { type: { kind: "json" }, schema, nullable: false } }, checks });
-  await assert.rejects(async () => execute(client, json({ type: "integer" }), { p: null }), /Parameter "p" is null/);
-  await assert.rejects(async () => execute(client, json({ type: "integer" }), {}), /Parameter "p" is missing/);
-  await assert.rejects(async () => execute(client, json({ type: ["integer", "null"] }), {}), /Parameter "p" is missing/);
+  await assert.rejects(async () => execute(client, json({ type: "integer" }), { p: null }), /Parameter "p" is null/u);
+  await assert.rejects(async () => execute(client, json({ type: "integer" }), {}), /Parameter "p" is missing/u);
+  await assert.rejects(async () => execute(client, json({ type: ["integer", "null"] }), {}), /Parameter "p" is missing/u);
   await execute(client, json({ type: ["integer", "null"] }), { p: null });
   await execute(client, json({ type: "integer", default: 3 }), {});
   assert.deepEqual(seen.slice(2), [["null"], ["3"]]);
   const untyped = (type: EngineType, nullable = false): QueryModule<"postgres"> => ({ dialect: "postgres", sql: "select :p::jsonb", params: ["p"], inputs: { p: { type, nullable } }, checks });
   await execute(client, untyped({ kind: "json" }), { p: null });
-  await assert.rejects(async () => execute(client, untyped({ kind: "json" }), {}), /Parameter "p" is missing/);
+  await assert.rejects(async () => execute(client, untyped({ kind: "json" }), {}), /Parameter "p" is missing/u);
   await execute(client, untyped({ kind: "json", schema: { type: ["integer", "null"] } }), { p: null });
-  await assert.rejects(async () => execute(client, untyped({ kind: "json", schema: { type: "integer" } }), { p: null }), /Parameter "p" is null/);
+  await assert.rejects(async () => execute(client, untyped({ kind: "json", schema: { type: "integer" } }), { p: null }), /Parameter "p" is null/u);
   // Where the statement takes SQL NULL, a JSON parameter's null is SQL NULL, given or left out.
   await execute(client, untyped({ kind: "json" }, true), { p: null });
   await execute(client, untyped({ kind: "json" }, true), {});
   assert.deepEqual(seen.slice(4), [["null"], ["null"], [null], [null]]);
   // A structured parameter keeps its own message, which says what to pass.
   const rows: QueryModule<"postgres"> = { dialect: "postgres", sql: "select 1", params: ["r"], inputs: { r: { type: { kind: "rows", one: true, fields: [] }, nullable: false } }, checks };
-  await assert.rejects(async () => execute(client, rows, { r: null }), /pass one object/);
+  await assert.rejects(async () => execute(client, rows, { r: null }), /pass one object/u);
 });
 
 // oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
@@ -239,21 +239,21 @@ test("a Date for any date or time parameter, and a string without its zone for a
   await execute(client, q, ok);
   assert.equal(seen.length, 1);
   const refused = async (values: Record<string, unknown>, message: RegExp) => assert.rejects(Promise.resolve().then(() => execute(client, q, { ...ok, ...values })), (e: Error) => e instanceof TypeError && message.test(e.message));
-  await refused({ at: new Date() }, /^Parameter "at" is a timestamp without a time zone, so it takes the wall-clock text/);
-  await refused({ day: new Date() }, /^Parameter "day" is a date without a time zone/);
-  await refused({ days: [[new Date()]] }, /^Parameter "days" is a date/);
+  await refused({ at: new Date() }, /^Parameter "at" is a timestamp without a time zone, so it takes the wall-clock text/u);
+  await refused({ day: new Date() }, /^Parameter "day" is a date without a time zone/u);
+  await refused({ days: [[new Date()]] }, /^Parameter "days" is a date/u);
   // A timestamptz takes the string `.run()` returns for one, and a Date nowhere.
-  await refused({ tz: new Date(0) }, /^Parameter "tz" is a timestamptz, which takes the instant as a string that names its zone, as `\.run\(\)` returns one, not a Date: pass date\.toISOString\(\)/);
+  await refused({ tz: new Date(0) }, /^Parameter "tz" is a timestamptz, which takes the instant as a string that names its zone, as `\.run\(\)` returns one, not a Date: pass date\.toISOString\(\)/u);
   await refused({ tzs: ["2026-10-12T00:00:00Z", new Date(0)] }, /^Parameter "tzs" is a timestamptz, .*not a Date/);
-  for (const tz of ["2026-10-12 19:06:48", "2026-10-12T19:06:48.282", "2026-10-12"]) {await refused({ tz }, /^Parameter "tz" is a timestamptz, an instant, so a string for it names its zone/);}
-  await refused({ tzs: ["2026-10-12T00:00:00Z", "2026-10-12 19:06"] }, /^Parameter "tzs" is a timestamptz/);
+  for (const tz of ["2026-10-12 19:06:48", "2026-10-12T19:06:48.282", "2026-10-12"]) {await refused({ tz }, /^Parameter "tz" is a timestamptz, an instant, so a string for it names its zone/u);}
+  await refused({ tzs: ["2026-10-12T00:00:00Z", "2026-10-12 19:06"] }, /^Parameter "tzs" is a timestamptz/u);
   // An array parameter takes no null element, as its type says, in any dimension.
-  await refused({ tzs: ["2026-10-12T00:00:00Z", null] }, /^Parameter "tzs" is an array whose elements may not be null, and the element at \[1\] is/);
-  await refused({ days: [["2026-10-12", undefined]] }, /^Parameter "days" is an array whose elements may not be null, and the element at \[0\]\[1\] is/);
+  await refused({ tzs: ["2026-10-12T00:00:00Z", null] }, /^Parameter "tzs" is an array whose elements may not be null, and the element at \[1\] is/u);
+  await refused({ days: [["2026-10-12", undefined]] }, /^Parameter "days" is an array whose elements may not be null, and the element at \[0\]\[1\] is/u);
   assert.equal(seen.length, 1);
   // MySQL's DATETIME and TIMESTAMP are the engine's timestamp, and a placeholder compared with both is either.
   const my: QueryModule<"mysql"> = { dialect: "mysql", sql: "select :at", params: ["at"], inputs: { at: time("date|timestamp") } };
-  await assert.rejects(Promise.resolve().then(() => execute({ query: async () => [[], []] as [unknown, unknown], execute: async () => [[], []] as [unknown, unknown] }, my, { at: new Date() })), /^TypeError: Parameter "at" is a timestamp without a time zone/);
+  await assert.rejects(Promise.resolve().then(() => execute({ query: async () => [[], []] as [unknown, unknown], execute: async () => [[], []] as [unknown, unknown] }, my, { at: new Date() })), /^TypeError: Parameter "at" is a timestamp without a time zone/u);
 });
 
 // oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
@@ -351,10 +351,10 @@ test("postgres: a pgvector vector parameter takes an array of finite numbers, wr
   await execute(client as never, nearest, { q: "[1,2]", qs: [], h: null });
   assert.deepEqual(seen.at(-1), ["[1,2]", "{}", null]);
   // JSON would write NaN and ±Infinity as null, and pgvector refuses them and an empty vector.
-  for (const [q, why] of [[[1, NaN], /pgvector vector, an array of finite numbers, and the element at \[1\] is NaN/], [[Infinity], /element at \[0\] is Infinity/], [["1"], /element at \[0\] is "1"/], [[], /one dimension at least; got an empty array/]] as const) {
+  for (const [q, why] of [[[1, NaN], /pgvector vector, an array of finite numbers, and the element at \[1\] is NaN/u], [[Infinity], /element at \[0\] is Infinity/u], [["1"], /element at \[0\] is "1"/u], [[], /one dimension at least; got an empty array/u]] as const) {
     await assert.rejects(execute(client as never, nearest, { q, qs: [], h: null }) as Promise<unknown>, why);
   }
-  await assert.rejects(execute(client as never, nearest, { q: [1], qs: [[1], [NaN]], h: null }) as Promise<unknown>, /element at \[0\] is NaN/);
+  await assert.rejects(execute(client as never, nearest, { q: [1], qs: [[1], [NaN]], h: null }) as Promise<unknown>, /element at \[0\] is NaN/u);
 });
 
 // oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
@@ -373,8 +373,8 @@ test("postgres: an hstore parameter takes an object of its keys, written as the 
   // Its text passes as it is.
   await execute(client as never, save, { prefs: '"a"=>"1"', history: [] });
   assert.deepEqual(seen.at(-1), ['"a"=>"1"', "{}"]);
-  await assert.rejects(execute(client as never, save, { prefs: { n: 1 }, history: [] }) as Promise<unknown>, /Parameter "prefs" is an hstore, whose values are strings or null, and its key "n" holds 1/);
-  await assert.rejects(execute(client as never, save, { prefs: ["a"], history: [] }) as Promise<unknown>, /Parameter "prefs" is an hstore, an object of its keys/);
+  await assert.rejects(execute(client as never, save, { prefs: { n: 1 }, history: [] }) as Promise<unknown>, /Parameter "prefs" is an hstore, whose values are strings or null, and its key "n" holds 1/u);
+  await assert.rejects(execute(client as never, save, { prefs: ["a"], history: [] }) as Promise<unknown>, /Parameter "prefs" is an hstore, an object of its keys/u);
 });
 
 // oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
@@ -518,15 +518,15 @@ test("a binary parameter takes binary data alone, so base64 text is refused befo
   await execute(client, q, { b: null, bs: null });
   assert.equal(seen.length, 2);
   const refused = async (run: () => unknown, message: RegExp) => assert.rejects(Promise.resolve().then(run), (e: Error) => e instanceof TypeError && message.test(e.message));
-  await refused(() => execute(client, q, { b: "AQL/", bs: [] }), /^Parameter "b" is binary data, so it takes a Uint8Array \(a Buffer is one\), as `\.run\(\)` returns one; got "AQL\/"\. Decode base64 or hex text into one first\.$/);
+  await refused(() => execute(client, q, { b: "AQL/", bs: [] }), /^Parameter "b" is binary data, so it takes a Uint8Array \(a Buffer is one\), as `\.run\(\)` returns one; got "AQL\/"\. Decode base64 or hex text into one first\.$/u);
   await refused(() => execute(client, q, { b: plain, bs: [plain, "\\x01"] }), /^Parameter "bs" is binary data, .*got "\\\\x01"/);
   await refused(() => execute(client, q, { b: plain.buffer, bs: [] }), /^Parameter "b" is binary data, .*got an object\. Wrap an ArrayBuffer in one: new Uint8Array\(buffer\)\.$/);
   assert.equal(seen.length, 2);
   // MySQL's BINARY, VARBINARY and BLOB are the engine's bytea; SQLite's BLOB is blob.
   const my: QueryModule<"mysql"> = { dialect: "mysql", sql: "select :b", params: ["b"], inputs: { b: bytes("bytea") } };
-  await refused(() => execute({ query: async () => [[], []] as [unknown, unknown], execute: async () => [[], []] as [unknown, unknown] }, my, { b: "AQL/" }), /^Parameter "b" is binary data/);
+  await refused(() => execute({ query: async () => [[], []] as [unknown, unknown], execute: async () => [[], []] as [unknown, unknown] }, my, { b: "AQL/" }), /^Parameter "b" is binary data/u);
   const lite: QueryModule<"sqlite"> = { dialect: "sqlite", sql: "select :b", params: ["b"], inputs: { b: bytes("blob") } };
-  await refused(() => execute({ prepare: () => ({ all: () => [] }) }, lite, { b: "AQL/" }), /^Parameter "b" is binary data/);
+  await refused(() => execute({ prepare: () => ({ all: () => [] }) }, lite, { b: "AQL/" }), /^Parameter "b" is binary data/u);
 });
 
 // oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
@@ -675,7 +675,7 @@ test("sqlite: sqlite3 and the sqlite package, which bind a BigInt as NULL, get o
   await execute(sqlite3, lite, { id: BigInt(7), name: "ada" });
   await execute(sqlite, lite, { id: BigInt(-7), name: "ada" });
   assert.deepEqual([...seen], [[7, "ada", 7], [-7, "ada", -7]]);
-  for (const client of [sqlite3, sqlite]) {await assert.rejects(Promise.resolve().then(() => execute(client, lite, { id: BigInt("9007199254740993"), name: "ada" })), /^TypeError: sqlite3 binds a BigInt as NULL, and 9007199254740993 is past 2\^53 - 1/);}
+  for (const client of [sqlite3, sqlite]) {await assert.rejects(Promise.resolve().then(() => execute(client, lite, { id: BigInt("9007199254740993"), name: "ada" })), /^TypeError: sqlite3 binds a BigInt as NULL, and 9007199254740993 is past 2\^53 - 1/u);}
   assert.equal(seen.length, 2);
   // A BIGINT column's parameter (the engine's int8), whose INTEGER affinity reads the digits as that integer.
   const big: QueryModule<"sqlite"> = { ...lite, inputs: { id: { type: { kind: "scalar", name: "int8" } }, name: { type: { kind: "scalar", name: "text" } } } };
@@ -708,7 +708,7 @@ test("the driver's own error comes through unchanged", async () => {
   const duplicate = Object.assign(new Error("duplicate key value violates unique constraint"), { code: "23505" });
   await assert.rejects(() => execute({ query: async () => Promise.reject(duplicate) }, pg, { id: 1 }) as Promise<unknown>, (e) => e === duplicate);
   const db = new DatabaseSync(":memory:");
-  assert.throws(() => execute(db, { dialect: "sqlite", sql: "selec 1", params: [] }), /syntax error/);
+  assert.throws(() => execute(db, { dialect: "sqlite", sql: "selec 1", params: [] }), /syntax error/u);
 });
 
 // oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
@@ -719,18 +719,18 @@ test("an unsupported client rejects, naming what it has and what reylo takes", a
   // Kysely and Prisma decode their values themselves, so each is told to pass the driver's client.
   class Kysely { public selectFrom() {} public executeQuery() {} public transaction() {} }
   await assert.rejects(() => execute(new Kysely() as never, pg) as Promise<unknown>, /object with selectFrom, executeQuery, transaction\. .* Kysely decodes the values of its queries itself: pass the pool or database its dialect was made with\.$/);
-  await assert.rejects(() => execute({ $queryRawUnsafe() {}, $transaction() {} } as never, my) as Promise<unknown>, / Prisma decodes the values of its queries itself: pass a client of your database's driver, such as the pool its driver adapter was made with\.$/);
+  await assert.rejects(() => execute({ $queryRawUnsafe() {}, $transaction() {} } as never, my) as Promise<unknown>, / Prisma decodes the values of its queries itself: pass a client of your database's driver, such as the pool its driver adapter was made with\.$/u);
   // Inside their transactions, neither hands out the connection.
-  await assert.rejects(() => execute(Object.assign(new Kysely(), { isTransaction: true }) as never, pg) as Promise<unknown>, / Kysely decodes the values of its queries itself and does not hand out its transaction's connection: take the transaction from the driver's client instead\.$/);
-  await assert.rejects(() => execute({ $queryRawUnsafe() {} } as never, lite) as Promise<unknown>, / Prisma decodes the values of its queries itself and does not hand out its transaction's connection/);
+  await assert.rejects(() => execute(Object.assign(new Kysely(), { isTransaction: true }) as never, pg) as Promise<unknown>, / Kysely decodes the values of its queries itself and does not hand out its transaction's connection: take the transaction from the driver's client instead\.$/u);
+  await assert.rejects(() => execute({ $queryRawUnsafe() {} } as never, lite) as Promise<unknown>, / Prisma decodes the values of its queries itself and does not hand out its transaction's connection/u);
   // Node:sqlite's tag store has all() for templates; it is not sqlite3's database.
   const store = new DatabaseSync(":memory:").createTagStore();
   await assert.rejects(() => execute(store as never, lite, { id: 1, name: "ada" }) as Promise<unknown>, /sqlite statement on an object with .*pass its database, store\.db/);
-  await assert.rejects(() => execute(null as never, my) as Promise<unknown>, /mysql statement on null/);
+  await assert.rejects(() => execute(null as never, my) as Promise<unknown>, /mysql statement on null/u);
   // The refusal names every client a MySQL statement runs on, mariadb's among them.
-  await assert.rejects(() => execute({} as never, my) as Promise<unknown>, /query\(text, values\) as on mariadb's pool or connection, from its promise or callback API/);
+  await assert.rejects(() => execute({} as never, my) as Promise<unknown>, /query\(text, values\) as on mariadb's pool or connection, from its promise or callback API/u);
   // A pg pool handed to a SQLite statement matches no SQLite shape.
-  await assert.rejects(() => execute({ query: async () => ({ rows: [] }) } as never, lite) as Promise<unknown>, /sqlite statement on an object with query/);
+  await assert.rejects(() => execute({ query: async () => ({ rows: [] }) } as never, lite) as Promise<unknown>, /sqlite statement on an object with query/u);
 });
 
 // oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
@@ -757,7 +757,7 @@ test("a Drizzle database or transaction runs on the driver client its session ke
   // A MySQL client whose execute() answers without PlanetScale's rows, as TiDB Cloud's transaction inside
   // Drizzle-orm/tidb-serverless answers with the rows themselves, is refused rather than read as no rows.
   const tidb = { $client: {}, select() {}, rollback() {}, session: { dialect: {}, client: { execute: async () => [row] } } };
-  await assert.rejects(() => execute(tidb as never, my, { id: 1, name: "ada" }) as Promise<unknown>, /^TypeError: reylo ran this statement through execute\(\), as on PlanetScale's @planetscale\/database, and the client answered with an array rather than a result with rows\./);
+  await assert.rejects(() => execute(tidb as never, my, { id: 1, name: "ada" }) as Promise<unknown>, /^TypeError: reylo ran this statement through execute\(\), as on PlanetScale's @planetscale\/database, and the client answered with an array rather than a result with rows\./u);
 });
 
 // oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
@@ -787,19 +787,19 @@ test("positional placeholders take an object keyed by number, bound by number on
 test("an array of parameters is refused before anything runs, with a TypeError that says to pass an object", async () => {
   const calls: unknown[] = [];
   const client = { unsafe: async (...args: unknown[]) => (calls.push(args), []) };
-  const named = /^TypeError: The parameters must be an object keyed by parameter name, or by number for positional placeholders \(\{ 1: \.\.\., 2: \.\.\. \}\); got an array\. This statement takes \{ id: \.\.\., name: \.\.\. \}\.$/;
+  const named = /^TypeError: The parameters must be an object keyed by parameter name, or by number for positional placeholders \(\{ 1: \.\.\., 2: \.\.\. \}\); got an array\. This statement takes \{ id: \.\.\., name: \.\.\. \}\.$/u;
   const refused = (re: RegExp) => (e: Error) => e instanceof TypeError && re.test(String(e));
   // A freshness check would be a round trip: the array is refused before it too.
   await assert.rejects(() => execute(client, { ...pg, fresh: { query: "select 1", rows: [], inserts: [] } }, [1, "ada"] as never) as Promise<unknown>, refused(named));
   const positional: QueryModule<"postgres"> = { dialect: "postgres", sql: "select $1::int, $2::text", params: ["1", "2"] };
-  await assert.rejects(() => execute(client, positional, [1, "ada"] as never) as Promise<unknown>, refused(/got an array\. This statement takes \{ 1: \.\.\., 2: \.\.\. \}\.$/));
-  await assert.rejects(() => execute(client, pg, "ada" as never) as Promise<unknown>, refused(/positional placeholders \(\{ 1: \.\.\., 2: \.\.\. \}\); got ada\. This statement takes \{ id: \.\.\., name: \.\.\. \}\.$/));
-  await assert.rejects(() => execute(client, pg, null as never) as Promise<unknown>, refused(/got null\./));
+  await assert.rejects(() => execute(client, positional, [1, "ada"] as never) as Promise<unknown>, refused(/got an array\. This statement takes \{ 1: \.\.\., 2: \.\.\. \}\.$/u));
+  await assert.rejects(() => execute(client, pg, "ada" as never) as Promise<unknown>, refused(/positional placeholders \(\{ 1: \.\.\., 2: \.\.\. \}\); got ada\. This statement takes \{ id: \.\.\., name: \.\.\. \}\.$/u));
+  await assert.rejects(() => execute(client, pg, null as never) as Promise<unknown>, refused(/got null\./u));
   assert.deepEqual(calls, []);
   // On a synchronous SQLite client the TypeError is thrown.
   const db = new DatabaseSync(":memory:");
   assert.throws(() => execute(db, lite, [1, "ada"] as never), refused(named));
-  assert.throws(() => execute(db, { dialect: "sqlite", sql: "select 1", params: [] }, [] as never), refused(/got an array\. This statement takes none: leave them out\.$/));
+  assert.throws(() => execute(db, { dialect: "sqlite", sql: "select 1", params: [] }, [] as never), refused(/got an array\. This statement takes none: leave them out\.$/u));
   // Through the query object: run and with reject, runSync throws, and the types refuse it too.
   const q = defineQuery<{ id: number; name: string }, { id: number; name: string; again: number }, "one", "sqlite">({ dialect: "sqlite", sql: lite.sql, params: lite.params, cardinality: "one" });
   // @ts-expect-error the parameters are an object, never an array
@@ -813,7 +813,7 @@ test("an array of parameters is refused before anything runs, with a TypeError t
   assert.deepEqual({ ...(q.runSync(db, { id: 1, name: "ada" }) as object) }, row);
   const p = defineQuery<{ 1: number; 2: string }, { id: number }, "one", "postgres">({ dialect: "postgres", sql: positional.sql, params: positional.params, cardinality: "one" });
   // @ts-expect-error positional placeholders take an object keyed by number
-  await assert.rejects(() => p.run(client, [1, "ada"]), refused(/This statement takes \{ 1: \.\.\., 2: \.\.\. \}\./));
+  await assert.rejects(() => p.run(client, [1, "ada"]), refused(/This statement takes \{ 1: \.\.\., 2: \.\.\. \}\./u));
   db.close();
 });
 
@@ -842,11 +842,11 @@ test("runSync: on a synchronous client the value comes back at once and an error
     insert.runSync(db, { email: "bo@example.com" });
     // oxlint-disable-next-line rules/no-effect-runtime-run -- This test exercises Reylo's native synchronous query API, which does not run Effect.
     insert.runSync(db, { email: "ada@example.com" }); // The unique constraint fails here
-  }), /UNIQUE constraint failed/);
+  }), /UNIQUE constraint failed/u);
   // oxlint-disable-next-line rules/no-effect-runtime-run -- This test exercises Reylo's native synchronous query API, which does not run Effect.
   assert.equal(count.runSync(db).n, 1, "the transaction's first insert was rolled back");
   // oxlint-disable-next-line rules/no-effect-runtime-run -- This test exercises Reylo's native synchronous query API, which does not run Effect.
-  assert.throws(() => defineQuery<{}, unknown, "one", "sqlite">({ dialect: "sqlite", sql: "select 1 where 0", params: [], cardinality: "one" }).runSync(db), /Expected exactly one row, got 0/);
+  assert.throws(() => defineQuery<{}, unknown, "one", "sqlite">({ dialect: "sqlite", sql: "select 1 where 0", params: [], cardinality: "one" }).runSync(db), /Expected exactly one row, got 0/u);
 });
 
 // oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
@@ -860,7 +860,7 @@ test("run: on a synchronous client the statement runs at once, and its rows and 
   assert.equal((await pending).id, 1);
   let duplicate: unknown;
   assert.doesNotThrow(() => void (duplicate = insert.run(db, { email: "ada@example.com" })));
-  await assert.rejects(duplicate as Promise<unknown>, /UNIQUE constraint failed/);
+  await assert.rejects(duplicate as Promise<unknown>, /UNIQUE constraint failed/u);
 });
 
 // oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
@@ -872,7 +872,7 @@ test("runSync: a client that answers through a promise, or a Postgres or MySQL s
   assert.throws(() => lite.runSync(libsql as never), /runSync takes a synchronous SQLite client .*answers through a promise\. run takes every client/);
   const pgq = defineQuery<{}, unknown, "many", "postgres">({ dialect: "postgres", sql: "select 1", params: [] });
   // oxlint-disable-next-line rules/no-effect-runtime-run -- This test exercises Reylo's native synchronous query API, which does not run Effect.
-  assert.throws(() => pgq.runSync({ query: async () => ((called = true), { rows: [] }) } as never), /a postgres statement has none/);
+  assert.throws(() => pgq.runSync({ query: async () => ((called = true), { rows: [] }) } as never), /a postgres statement has none/u);
   assert.equal(called, false);
 });
 
@@ -882,7 +882,7 @@ test("run: on an asynchronous client every failure is a rejection, never a throw
   const two = { query: async () => ({ rows: [{ id: 1 }, { id: 2 }] }) };
   let returned: unknown;
   assert.doesNotThrow(() => void (returned = q.run(two, { id: 1 })));
-  await assert.rejects(returned as Promise<unknown>, /Expected at most one row, got 2/);
+  await assert.rejects(returned as Promise<unknown>, /Expected at most one row, got 2/u);
   await assert.rejects(q.run({} as never, { id: 1 }), TypeError);
   assert.deepEqual(await q.with({ query: async () => ({ rows: [] }) })({ id: 1 }), null);
 });
@@ -894,16 +894,16 @@ test("a query's source names its file, and Reylo's own errors about the query st
   const one = defineQuery<{}, unknown, "one", "sqlite">({ dialect: "sqlite", sql: "select 1 where 0", params: [], cardinality: "one", source: "queries/none.sql" });
   assert.equal(one.source, "queries/none.sql");
   // oxlint-disable-next-line rules/no-effect-runtime-run -- This test exercises Reylo's native synchronous query API, which does not run Effect.
-  assert.throws(() => one.runSync(db), /^Error: queries\/none\.sql: Expected exactly one row, got 0$/m);
+  assert.throws(() => one.runSync(db), /^Error: queries\/none\.sql: Expected exactly one row, got 0$/mu);
   await assert.rejects(one.run(db), { message: "queries/none.sql: Expected exactly one row, got 0" });
   // A parameter's value: thrown in runSync, rejected by run, the stack's first line named too.
   const at = defineQuery<{ at: string }, unknown, "many", "postgres">({ dialect: "postgres", sql: "select :at::timestamptz as at", params: ["at"], inputs: { at: { type: { kind: "scalar", name: "timestamptz" } } }, source: "at.sql" });
   const rejected = await at.run({ query: async () => ({ rows: [] }) }, { at: "2026-10-12 19:06:48" }).then(() => undefined, (e: Error) => e);
   assert.ok(rejected instanceof TypeError);
-  assert.match(rejected.message, /^at\.sql: Parameter "at" is a timestamptz/);
-  assert.match(rejected.stack!, /^TypeError: at\.sql: Parameter "at"/);
+  assert.match(rejected.message, /^at\.sql: Parameter "at" is a timestamptz/u);
+  assert.match(rejected.stack!, /^TypeError: at\.sql: Parameter "at"/u);
   const viaWith = await at.with({ query: async () => ({ rows: [] }) })({ at: new Date() as never }).then(() => undefined, (e: Error) => e);
-  assert.match(viaWith!.stack!, /^TypeError: at\.sql: Parameter "at" is a timestamptz, which takes the instant as a string/);
+  assert.match(viaWith!.stack!, /^TypeError: at\.sql: Parameter "at" is a timestamptz, which takes the instant as a string/u);
   // A column's value Reylo cannot give its kind.
   const truth = defineQuery<{}, unknown, "many", "sqlite">({ dialect: "sqlite", sql: "select 2 as b", params: [], columns: [["b", "bool"]], source: "truth.sql" });
   // oxlint-disable-next-line rules/no-effect-runtime-run -- This test exercises Reylo's native synchronous query API, which does not run Effect.
@@ -970,14 +970,14 @@ test("a Durable Object's ctx.storage.sql: runSync and run take it, its values gi
   assert.deepEqual({ ...db.prepare("select n, cast(big as text) as big, typeof(big) as t, flag from items").get() }, { big: "9007199254740993", flag: 1, n: 5, t: "integer" });
   // Read back, that BIGINT comes as a rounded number, which Reylo refuses rather than return.
   // oxlint-disable-next-line rules/no-effect-runtime-run -- This test exercises Reylo's native synchronous query API, which does not run Effect.
-  assert.throws(() => select.runSync(sql, { id }), /Column "big" is a 64-bit integer, and the driver already rounded its value/);
+  assert.throws(() => select.runSync(sql, { id }), /Column "big" is a 64-bit integer, and the driver already rounded its value/u);
   const second = await insert.run(sql, { n: BigInt("6"), big: BigInt("7"), data: new Uint8Array([3]), flag: false, doc: "[]" });
   assert.deepEqual(await select.run(sql, second), { n: 6, big: BigInt("7"), data: new Uint8Array([3]), flag: false, doc: [] });
   // oxlint-disable-next-line rules/no-effect-runtime-run -- This test exercises Reylo's native synchronous query API, which does not run Effect.
   assert.deepEqual(select.runSync(sql, second), { n: 6, big: BigInt("7"), data: new Uint8Array([3]), flag: false, doc: [] });
   // A BigInt past 2^53 anywhere else is refused before it reaches exec().
   // oxlint-disable-next-line rules/no-effect-runtime-run -- This test exercises Reylo's native synchronous query API, which does not run Effect.
-  assert.throws(() => insert.runSync(sql, { n: BigInt("2") ** BigInt("53"), big: BigInt("1"), data: new Uint8Array(), flag: true, doc: "1" }), /^TypeError: A Durable Object's SQL storage binds no BigInt, and 9007199254740992 is past 2\^53 - 1/);
+  assert.throws(() => insert.runSync(sql, { n: BigInt("2") ** BigInt("53"), big: BigInt("1"), data: new Uint8Array(), flag: true, doc: "1" }), /^TypeError: A Durable Object's SQL storage binds no BigInt, and 9007199254740992 is past 2\^53 - 1/u);
   // A write without returning gives no rows.
   const touch = defineQuery<{}, unknown, "none", "sqlite">({ dialect: "sqlite", sql: "update items set n = n + 1", params: [], cardinality: "none" });
   // oxlint-disable-next-line rules/no-effect-runtime-run -- This test exercises Reylo's native synchronous query API, which does not run Effect.
@@ -996,7 +996,7 @@ test("a Durable Object's ctx.storage.sql: the catalog facts are read again throu
   // oxlint-disable-next-line rules/no-effect-runtime-run -- This test exercises Reylo's native synchronous query API, which does not run Effect.
   assert.deepEqual(built(["users", "email", "TEXT", "1", "0"]).runSync(sql), []);
   // oxlint-disable-next-line rules/no-effect-runtime-run -- This test exercises Reylo's native synchronous query API, which does not run Effect.
-  assert.throws(() => built(["users", "email", "TEXT", "0", "0"]).runSync(sql), /^Error: The database changed after users\.sql was built: users\.email was/);
+  assert.throws(() => built(["users", "email", "TEXT", "0", "0"]).runSync(sql), /^Error: The database changed after users\.sql was built: users\.email was/u);
   // Run takes the same synchronous path: the check and the statement run before it returns.
   const ran: string[] = [];
   const counted = { ...sql, exec: (text: string, ...bindings: unknown[]) => (ran.push(text), sql.exec(text, ...bindings)), databaseSize: 4096 };

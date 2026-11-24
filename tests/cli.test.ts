@@ -100,7 +100,7 @@ test("reylo generate analyzes every .sql file of the project, and prints each fi
   assert.match(offline.out, /^  src\/queries\/user\.sql  ✓$/m);
   const forced = await reylo(root, "generate", "--force", "src/queries/user.sql");
   assert.equal(forced.status, 1);
-  assert.match(forced.out, /^src\/queries\/user\.sql: --force needs the database, which cannot be reached$/m);
+  assert.match(forced.out, /^src\/queries\/user\.sql: --force needs the database, which cannot be reached$/mu);
 
   assert.equal((await reylo(root, "generate", "--watch")).status, 2);
   assert.equal((await reylo(root, "generate", "package.json")).status, 2);
@@ -166,14 +166,14 @@ test("reylo generate says once that the type check does not read url, and names 
   // Without DATABASE_URL there is no connection, and the one error says why url is not one.
   const none = await runChild(process.execPath, [CLI, "generate", "--force"], { cwd: root, env: { PATH: process.env.PATH } });
   assert.equal(none.status, 1, none.stderr);
-  assert.match(none.stdout, /^No database URL: \.reylo\.yaml sets url, which Reylo does not read; set direct_url there, or DATABASE_URL in the environment, \.env\.local or \.env\.$/m);
-  assert.doesNotMatch(none.stdout, /it uses DATABASE_URL meanwhile/);
+  assert.match(none.stdout, /^No database URL: \.reylo\.yaml sets url, which Reylo does not read; set direct_url there, or DATABASE_URL in the environment, \.env\.local or \.env\.$/mu);
+  assert.doesNotMatch(none.stdout, /it uses DATABASE_URL meanwhile/u);
   // Direct_url beside url names Reylo's connection: the run reads direct_url and says nothing more.
   await writeFile(join(root, ".reylo.yaml"), "url: postgres://prod-pooler/app\ndirect_url: file:./app.db\n");
   const both = await reylo(root, "generate");
   assert.equal(both.status, 0, both.err);
   assert.match(both.out, /^sqlite at .*app\.db \("direct_url" in \.reylo\.yaml\)\n  a\.sql  ✓\n/);
-  assert.doesNotMatch(both.out, /does not read url/);
+  assert.doesNotMatch(both.out, /does not read url/u);
 });
 
 // oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
@@ -192,6 +192,6 @@ test("a program run under the @totto2727/reylo/register preload prints nothing o
   const r = await runChild(process.execPath, ["--import", pathToFileURL(REGISTER).href, "main.ts"], { cwd: root, env: { PATH: process.env.PATH, DATABASE_URL: "file:./app.db" } });
   assert.equal(r.status, 0, r.stderr);
   assert.equal(r.stdout, `{"id":1,"name":"ada"}\n`);
-  assert.doesNotMatch(r.stderr, /ExperimentalWarning/);
+  assert.doesNotMatch(r.stderr, /ExperimentalWarning/u);
   assert.equal(r.stderr, "");
 });

@@ -204,7 +204,7 @@ class DatabaseError extends Error {
 }
 Object.defineProperty(DatabaseError.prototype, "name", { value: "QueryError", writable: true, configurable: true });
 
-const SQLSTATE = /^[0-9A-Z]{5}$/;
+const SQLSTATE = /^[0-9A-Z]{5}$/u;
 const text = (v: unknown) => (matchesString(v) && v !== "" ? v : undefined);
 const record = (e: unknown): Record<string, unknown> | undefined => (hasObjectType(e) && !matchesNull(e) ? (e as Record<string, unknown>) : undefined);
 
@@ -214,7 +214,7 @@ export async function readQueryError(dialect: Dialect, error: unknown): Promise<
   if (dialect === "duckdb") {
     // A plain Error, its message opening with the kind of error: Reylo's own errors are of classes of their own.
     const e = record(error);
-    const kind = error instanceof Error && Object.getPrototypeOf(error) === Error.prototype && matchesString(e?.message) ? /^([A-Za-z ]+?) Error: /.exec(e.message)?.[1] : undefined;
+    const kind = error instanceof Error && Object.getPrototypeOf(error) === Error.prototype && matchesString(e?.message) ? /^([A-Za-z ]+?) Error: /u.exec(e.message)?.[1] : undefined;
     if (matchesUndefined(kind)) {return undefined;}
     return new DatabaseError(e!.message as string, error, { code: (DUCKDB_CODES as Record<string, DuckdbCode>)[kind] }) as DuckdbQueryError;
   }
@@ -328,7 +328,7 @@ function mysqlNames(errno: number, message: string) {
 }
 
 const SQLITE_NAMES = new Map<number, SqliteCode>(Object.entries(SQLITE_CODES).map(([name, code]) => [code, name as SqliteCode]));
-const SQLITE_NAME = /^SQLITE_[A-Z_]+$/;
+const SQLITE_NAME = /^SQLITE_[A-Z_]+$/u;
 
 function sqliteError(error: unknown) {
   const e = record(error);

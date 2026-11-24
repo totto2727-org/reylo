@@ -149,7 +149,7 @@ test("Effect retains all query cardinalities and row-count failures", (testConte
   const error = failure(Effect.provide(run(one), layer));
   assert.ok(error instanceof QueryDecodeError);
   assert.ok(error.cause instanceof Error);
-  assert.match(error.cause.message, /Expected exactly one row, got 2/);
+  assert.match(error.cause.message, /Expected exactly one row, got 2/u);
   // oxlint-disable-next-line rules/no-effect-runtime-run -- This test independently checks the no-result statement.
   assert.equal(Effect.runSync(Effect.provide(run(none), layer)), undefined);
   // oxlint-disable-next-line rules/no-effect-runtime-run -- This test independently checks the missing optional row.
@@ -184,7 +184,7 @@ test("Effect classifies encoding, decoding, and database failures with original 
   const executed = failure(Effect.provide(run(lookup, { id: 7, active: true }), layer));
   assert.ok(executed instanceof QueryExecutionError);
   assert.ok(executed.cause instanceof Error);
-  assert.match(executed.cause.message, /no such table/);
+  assert.match(executed.cause.message, /no such table/u);
 });
 
 // oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.

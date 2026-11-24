@@ -59,7 +59,7 @@ test("a query defined by hand: `raw` is its statement as written and `sql` the o
   // A placeholder its params miss fails where `sql` is read, as `run` does.
   const missing = defineQuery({ dialect: "postgres", sql: "select :id, :other", params: ["id"] });
   assert.equal(missing.raw, "select :id, :other");
-  assert.throws(() => missing.sql, /The statement's placeholder :other is parameter "other", which the query's params \(\["id"\]\) do not list/);
+  assert.throws(() => missing.sql, /The statement's placeholder :other is parameter "other", which the query's params \(\["id"\]\) do not list/u);
 });
 
 // oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
@@ -100,7 +100,7 @@ test("SQLite: `sql` is the compiled statement and `raw` the file, at run time an
     const lines = declared["get_user.sql"]!.split("\n");
     assert.ok(lines.includes("export type Params = { id: number };"), declared["get_user.sql"]!);
     assert.ok(!lines.some((line) => line.startsWith("export type Values")), declared["get_user.sql"]!);
-    assert.match(lines.find((line) => line.startsWith("declare const query:"))!, /^declare const query: Query<\{ id: number \}, \{ id: number; name: string; email: string \| null \}, "maybeOne", "sqlite", QueryError> & /);
+    assert.match(lines.find((line) => line.startsWith("declare const query:"))!, /^declare const query: Query<\{ id: number \}, \{ id: number; name: string; email: string \| null \}, "maybeOne", "sqlite", QueryError> & /u);
     assert.deepEqual(texts(declared["doc.sql"]!).slice(0, 2), [`export declare const sql: ${JSON.stringify(json.default.sql)};`, `export declare const raw: ${JSON.stringify(doc)};`]);
   } finally {
     db.close();

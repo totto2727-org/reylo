@@ -425,7 +425,7 @@ async function executeAsync(c: AnyClient | null | undefined, query: QueryModule,
 // (wiki/design.md §9), so the call says which key each value binds.
 function checkParams(query: QueryModule, input: unknown): asserts input is Record<string, unknown> {
   if (!matchesNull(input) && hasObjectType(input) && !Array.isArray(input)) {return;}
-  const keys = query.params.map((name) => `${/^(?:[A-Za-z_$][\w$]*|\d+)$/.test(name) ? name : JSON.stringify(name)}: ...`);
+  const keys = query.params.map((name) => `${/^(?:[A-Za-z_$][\w$]*|\d+)$/u.test(name) ? name : JSON.stringify(name)}: ...`);
   const takes = keys.length ? `This statement takes { ${keys.join(", ")} }.` : "This statement takes none: leave them out.";
   throw new ParameterError(`The parameters must be an object keyed by parameter name, or by number for positional placeholders ({ 1: ..., 2: ... }); got ${Array.isArray(input) ? "an array" : String(input)}. ${takes}`);
 }

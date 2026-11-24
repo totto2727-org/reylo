@@ -140,7 +140,7 @@ const place = function (text: string, offset: number): string {
  * its type itself, one representation per SQL type on every driver (src/values.ts), so nothing
  * is left to set. The engine still reads the key, so the loader refuses it first.
  */
-const TYPES_KEY = /^types[ \t]*:/m;
+const TYPES_KEY = /^types[ \t]*:/mu;
 
 /** How long a `$(command)` in `direct_url` may run: long enough to answer a password manager's prompt. */
 const COMMAND_TIMEOUT_MS = 120_000;
@@ -367,7 +367,7 @@ export function duckdbPath(url: string, baseDir: string): string {
   let raw = url.replace(/^duckdb:(\/\/)?/i, "");
   if (raw === "" || raw === ":memory:") {return ":memory:";}
   // On Windows, `duckdb:///C:/app.duckdb` names the drive, as a file URL does.
-  if (process.platform === "win32") {raw = raw.replace(/^\/(?=[A-Za-z]:[\\/])/, "");}
+  if (process.platform === "win32") {raw = raw.replace(/^\/(?=[A-Za-z]:[\\/])/u, "");}
   return isAbsolute(raw) ? raw : resolve(baseDir, raw);
 }
 

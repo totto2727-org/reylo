@@ -59,7 +59,7 @@ test("go-to-definition on a query, its import's path, its Row and a column opens
       if (i) {await new Promise((resolve) => setTimeout(resolve, 200));}
       hover = (await lsp.request("textDocument/hover", { textDocument: { uri }, position: at("query = posts", 0) }))?.contents?.value ?? "";
     }
-    assert.match(hover, /title: string;\s+body: string \| null;/);
+    assert.match(hover, /title: string;\s+body: string \| null;/u);
 
     // The hover over the import shows the comment at the top of the file as prose, then the
     // Statement as written; the one over its `.sql` the compiled statement, once, as its type,
@@ -70,7 +70,7 @@ test("go-to-definition on a query, its import's path, its Row and a column opens
     const imported = await hoverAt(at("posts from", 0));
     assert.ok(imported.endsWith(`\nevery post after one\n\n${statementBlock}`), imported);
     const sent = await hoverAt(at("posts.sql;", 7));
-    assert.match(sent, /^\(property\) sql: "\\n-- every post after one\\nselect id, title, body\\nfrom posts\\nwhere id > \?"$/m);
+    assert.match(sent, /^\(property\) sql: "\\n-- every post after one\\nselect id, title, body\\nfrom posts\\nwhere id > \?"$/mu);
     assert.ok(!sent.includes("```sql"), sent);
     // A line of the statement that starts with `@` stays in the code block, not a tag after it.
     let added = "";

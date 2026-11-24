@@ -70,12 +70,12 @@ test("SQLite: one row on every driver, whatever its integer setting; an integer 
   // A table that is not STRICT stores the text 'abc' in an INTEGER column and a BLOB in a TEXT one.
   const looseN = await built(root, "file:./app.db", "loose_n", "select n from loose");
   const looseS = await built(root, "file:./app.db", "loose_s", "select s from loose");
-  const textInN = /Column "n" is typed number and holds the text "abc"/;
-  const blobInS = /Column "s" is typed string and holds a BLOB of 2 bytes/;
+  const textInN = /Column "n" is typed number and holds the text "abc"/u;
+  const blobInS = /Column "s" is typed string and holds a BLOB of 2 bytes/u;
   // A value that is one of several kinds is typed unknown, so nothing is refused over a STRICT table.
   const mixed = await built(root, "file:./app.db", "mixed", "select n as v from tight union all select 'x'");
   // LibSQL's intMode "string" hands the 2 over as its digits.
-  const refused = /Column "ok" is a boolean, stored as 0 or 1, and holds "?2"?, which is neither/;
+  const refused = /Column "ok" is a boolean, stored as 0 or 1, and holds "?2"?, which is neither/u;
   const rows = [
     { id: 1, n: 5, r: 1.5, s: "hi", b: { bytes: [1, 2, 255] }, flag: true, x: 7, z: 2.5, more: false },
     { id: 2, n: 6, r: null, s: null, b: null, flag: false, x: { bytes: [1] }, z: "abc", more: true },
@@ -194,9 +194,9 @@ test("SQLite: libSQL's intMode \"string\" changes no value Reylo types a number 
       `libSQL with intMode ${intMode}`,
     );
     // One past 2^53 - 1: libSQL's intMode "number" refuses it itself; the others hand it over exact, and Reylo refuses it.
-    const refused = intMode === "number" ? RangeError : /Column "edge" holds 9007199254740992, an integer past/;
+    const refused = intMode === "number" ? RangeError : /Column "edge" holds 9007199254740992, an integer past/u;
     await assert.rejects(over.run(client), refused, `libSQL with intMode ${intMode}: a REAL's expression past 2^53 - 1`);
-    await assert.rejects(past.run(client), intMode === "number" ? RangeError : /Column "z" holds 9007199254740992, an integer past/, `libSQL with intMode ${intMode}: a NUMERIC past 2^53 - 1`);
+    await assert.rejects(past.run(client), intMode === "number" ? RangeError : /Column "z" holds 9007199254740992, an integer past/u, `libSQL with intMode ${intMode}: a NUMERIC past 2^53 - 1`);
     client.close();
   }
 });
@@ -220,10 +220,10 @@ test("SQLite: a column declared BIGINT or INT8 is a BigInt on every driver, exac
     { id: 2, n: 6, v: BigInt("5"), w: null, most: BigInt("5"), plus: 5 },
   ];
   // `v + 0` is an integer SQLite computes, a number, so row 1's is refused; the rest of the columns read alone.
-  const plusError = /Column "plus" holds 9007199254740993, an integer past/;
+  const plusError = /Column "plus" holds 9007199254740993, an integer past/u;
   const exact = await built(root, "file:./app.db", "acct_exact", "select id, n, v, w, max(v, 0) as most from acct order by id");
   const exactRows = rows.map(({ plus: _, ...r }) => r);
-  const rounded = /Column "v" is a 64-bit integer, and the driver already rounded its value to 9007199254740992/;
+  const rounded = /Column "v" is a 64-bit integer, and the driver already rounded its value to 9007199254740992/u;
   // Better-sqlite3 at its default, every integer a number: Reylo's statement reads the BIGINT
   // Column exact, and the INTEGER column as a number, whatever the database says.
   for (const safe of [false, true]) {

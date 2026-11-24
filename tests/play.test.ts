@@ -48,7 +48,7 @@ test("reylo play analyzes each statement against the project's database, without
     // An error is placed as an editor counts: by line and column.
     const bad = await get(q("select id,\n  nope\nfrom users"));
     assert.equal(bad.body.diagnostics.length, 1);
-    assert.match(bad.body.diagnostics[0].message, /no such column: nope/);
+    assert.match(bad.body.diagnostics[0].message, /no such column: nope/u);
     assert.deepEqual({ line: bad.body.diagnostics[0].line, column: bad.body.diagnostics[0].column }, { column: 3, line: 2 });
 
     // The same as JSON in a POST, with the types broken over lines past `width`.
@@ -98,8 +98,8 @@ test("reylo play says, as reylo generate does, that a project file's url alone i
   new DatabaseSync(join(root, "app.db")).close();
   const play = await startPlay({ cwd: root, port: 0, env: { DATABASE_URL: "file:./app.db" } });
   try {
-    assert.match(play.label, /app\.db \(DATABASE_URL in the environment\)$/);
-    assert.match(play.notice ?? "", /Reylo does not read url; set direct_url/);
+    assert.match(play.label, /app\.db \(DATABASE_URL in the environment\)$/u);
+    assert.match(play.notice ?? "", /Reylo does not read url; set direct_url/u);
   } finally {
     await play.close();
   }

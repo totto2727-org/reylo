@@ -31,7 +31,7 @@ const CASTS = {
   "casts.sql": "select :a::int as a, :b::bigint unsigned as b, :c::numeric(10,2) as c, :d::double precision as d, :e::date as e, :f::time as f, :g::datetime as g, :h::varbinary(4) as h, :i::varchar(5) as i, :j::uuid as j from users limit :n::int\n",
   "where.sql": "select name from users where id = :id::bigint and name like concat(:prefix::text, '%')\n",
 };
-const CAST_TYPES = /export type Params = \{ a: number; b: number; c: string; d: number; e: string; f: string; g: string; h: Uint8Array; i: string; j: string; n: number \}/;
+const CAST_TYPES = /export type Params = \{ a: number; b: number; c: string; d: number; e: string; f: string; g: string; h: Uint8Array; i: string; j: string; n: number \}/u;
 
 /** A JSON cast without a schema types its parameter as JSON, which is no `unknown`, so it is never flagged; the TypeScript type of any JSON value is `unknown` all the same. */
 const jsonCast = async function (url: string, json: string, driver?: string) {
@@ -64,7 +64,7 @@ test("SQLite: a parameter nothing types is an error by default, and strict_param
   // `strict_params: false` keeps such a parameter `unknown`, with no error.
   const loose = await transform(project(url, "strict_params: false\n"), sql);
   assert.deepEqual(loose["bare.sql"]!.diagnostics, []);
-  assert.match(loose["bare.sql"]!.text, /export type Params = \{ x: unknown; y: unknown \}/);
+  assert.match(loose["bare.sql"]!.text, /export type Params = \{ x: unknown; y: unknown \}/u);
   // A statement the engine refused keeps its own error alone: a parameter written twice is untyped
   // Because the analysis stopped there.
   const repeated = await transform(project(url, undefined), { "repeated.sql": "select :q as a, :q as b\n" });
@@ -87,11 +87,11 @@ test("SQLite: a parameter as a whole sort or group key is error reylo17 at the p
   const out = await transform(project(url, undefined), { "sorted.sql": sorted, "grouped.sql": grouped, "chosen.sql": chosen });
   const why = "since a parameter is a value and not a column's name; choose the column with";
   assert.deepEqual(out["sorted.sql"]!.diagnostics, [{ messageText: `order by :sort sorts every row by the same value, ${why} case :sort when 'name' then name end`, start: sorted.indexOf(":sort"), length: ":sort::text".length, code: 17 }]);
-  assert.match(out["sorted.sql"]!.text, /export type Params = \{ sort: string \}/);
-  assert.match(out["sorted.sql"]!.text, /export type Row = \{ id: number; name: string \}/);
+  assert.match(out["sorted.sql"]!.text, /export type Params = \{ sort: string \}/u);
+  assert.match(out["sorted.sql"]!.text, /export type Row = \{ id: number; name: string \}/u);
   // A parameter nothing else types stays unknown with no second error: the key is the one to fix.
   assert.deepEqual(out["grouped.sql"]!.diagnostics.map((d) => [d.code, d.start, d.messageText]), [[17, grouped.indexOf(":g"), `group by :g puts every row in one group, ${why} case :g when 'name' then name end`]]);
-  assert.match(out["grouped.sql"]!.text, /export type Row = \{ n: number \}/);
+  assert.match(out["grouped.sql"]!.text, /export type Row = \{ n: number \}/u);
   // The case the message suggests chooses the column with the parameter.
   assert.deepEqual(out["chosen.sql"]!.diagnostics, []);
 });

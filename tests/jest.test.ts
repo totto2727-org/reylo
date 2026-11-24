@@ -46,28 +46,28 @@ test("setup", { skip }, async () => {
 test("Jest's runtime never asks Node's loader: the @totto2727/reylo/register preload leaves a .sql file to Jest, which reads it as JavaScript", { skip }, async () => {
   const r = await jest(["--config", JSON.stringify({ watchman: false, testPathIgnorePatterns: ["/node_modules/", "/probe/"], extensionsToTreatAsEsm: [".sql"] })], "--experimental-vm-modules --import @totto2727/reylo/register");
   assert.equal(r.status, 1, r.output);
-  assert.match(r.output, /SyntaxError: Unexpected identifier 'id'/);
+  assert.match(r.output, /SyntaxError: Unexpected identifier 'id'/u);
 });
 
 // oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
 test("@totto2727/reylo/jest: a CommonJS run, with reylo's runtime compiled to CommonJS by babel-jest", { skip }, async () => {
   const r = await jest(["-c", "jest.cjs.config.cjs", "query.test.cjs"]);
   assert.equal(r.status, 0, r.output);
-  assert.match(r.output, /Tests:\s+1 passed, 1 total/);
+  assert.match(r.output, /Tests:\s+1 passed, 1 total/u);
 });
 
 // oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
 test("@totto2727/reylo/jest: an ESM run (--experimental-vm-modules), a CommonJS and an ESM test", { skip }, async () => {
   const r = await jest(["-c", "jest.esm.config.cjs"], "--experimental-vm-modules");
   assert.equal(r.status, 0, r.output);
-  assert.match(r.output, /Tests:\s+2 passed, 2 total/);
+  assert.match(r.output, /Tests:\s+2 passed, 2 total/u);
 });
 
 // oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
 test("Vitest needs nothing beyond @totto2727/reylo/vite", { skip }, async () => {
   const r = await run("vitest/vitest.mjs", ["run"]);
   assert.equal(r.status, 0, r.output);
-  assert.match(r.output, /Tests\s+1 passed/);
+  assert.match(r.output, /Tests\s+1 passed/u);
 });
 
 // A project outside the repository on lab/jest's Vitest, with Vitest's module cache on (its default

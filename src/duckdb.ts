@@ -130,7 +130,7 @@ const opened: (error: unknown) => never = (e) => {
 };
 
 /** DuckDB's refusal of a file another process holds. */
-const LOCKED = /Could not set lock on file/;
+const LOCKED = /Could not set lock on file/u;
 
 /**
  * DuckDB's refusal on Windows of a file another process holds, and that process. There DuckDB opens

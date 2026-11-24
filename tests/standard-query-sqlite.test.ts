@@ -113,7 +113,7 @@ test("sqlite: Standard Query applies every result cardinality", () => {
     if (cardinality === "one" || cardinality === "maybeOne") {
       assert.deepEqual(query.decode([[1]]), { id: 1 });
       assert.throws(() => query.decode([[1], [2]]), /queries\/one.sql: Expected .* row, got 2/);
-      if (cardinality === "one") {assert.throws(() => query.decode([]), /Expected exactly one row, got 0/);}
+      if (cardinality === "one") {assert.throws(() => query.decode([]), /Expected exactly one row, got 0/u);}
       else {assert.equal(query.decode([]), null);}
     }
   }
@@ -155,7 +155,7 @@ test("sqlite: a later native constraint failure can roll back every Standard Que
   const statement = db.prepare(insert["~standard"].query.text);
   const parameters = [encode(insert, { id: 1, name: "Ada" }), encode(insert, { id: 1, name: "Lin" })];
   db.exec("begin");
-  assert.throws(() => parameters.forEach((values) => statement.run(...values)), /UNIQUE constraint failed/);
+  assert.throws(() => parameters.forEach((values) => statement.run(...values)), /UNIQUE constraint failed/u);
   db.exec("rollback");
   assert.deepEqual(db.prepare("select * from users").all(), []);
 });

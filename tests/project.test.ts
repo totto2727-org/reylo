@@ -109,17 +109,17 @@ test("a types section, removed on 2026-10-20, is refused where it stands, whatev
 test("a key the library does not know, and a variable nothing sets, are errors that say where", async () => {
   const e = await engine("sqlite");
   const typo = tree({ "package.json": "{}", ".reylo.yaml": "direct_url: postgres://x/db\n\nstirct: true\n" });
-  assert.match(resolveProject(e, typo, {}).error!, /^\.reylo\.yaml:3:1: unknown field `stirct`/);
+  assert.match(resolveProject(e, typo, {}).error!, /^\.reylo\.yaml:3:1: unknown field `stirct`/u);
   // `strict` was renamed `strict_params` on 2026-10-20, with no alias: the old key is unknown, and its error names the new one.
   const renamed = tree({ "package.json": "{}", ".reylo.yaml": "direct_url: postgres://x/db\nstrict: true\n" });
   assert.equal(resolveProject(e, renamed, {}).error, ".reylo.yaml:2:1: unknown field `strict`: the key is `strict_params` since 2026-10-20");
   const unset = tree({ "package.json": "{}", ".reylo.yaml": "direct_url: ${NOPE}\n" });
   const r = resolveProject(e, unset, {});
   assert.equal(r.url, undefined);
-  assert.match(r.error!, /^\.reylo\.yaml: "direct_url" names \$\{NOPE\}, which neither the environment nor/);
+  assert.match(r.error!, /^\.reylo\.yaml: "direct_url" names \$\{NOPE\}, which neither the environment nor/u);
   // A scheme reylo does not read names no dialect.
   const odd = tree({ "package.json": "{}", ".reylo.yaml": "direct_url: ./dev.db\n" });
-  assert.match(resolveProject(e, odd, {}).error!, /^Cannot tell the database from the URL \("direct_url" in \.reylo\.yaml\)/);
+  assert.match(resolveProject(e, odd, {}).error!, /^Cannot tell the database from the URL \("direct_url" in \.reylo\.yaml\)/u);
 });
 
 // oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
@@ -178,7 +178,7 @@ test("a command that fails, prints nothing or is left open is an error that name
   assert.equal(resolveProject(e, open, {}).error, '.reylo.yaml: "direct_url" opens $( at column 16 and never closes it.');
   // A variable nothing sets is said first, and the command, which may ask for a password, never runs.
   const unset = tree({ "package.json": "{}", ".reylo.yaml": "direct_url: postgres://${NOPE}:$(touch ran; printf x)@h/app\n" });
-  assert.match(resolveProject(e, unset, {}).error!, /names \$\{NOPE\}/);
+  assert.match(resolveProject(e, unset, {}).error!, /names \$\{NOPE\}/u);
   assert.equal(existsSync(join(unset, "ran")), false);
 });
 

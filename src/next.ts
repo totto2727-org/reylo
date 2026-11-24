@@ -44,7 +44,7 @@ export function withReylo<Config extends NextConfig>(config: Config = {} as Conf
     },
     webpack(webpackConfig: any, context: any) {
       const out = webpack ? webpack(webpackConfig, context) : webpackConfig;
-      if (context.isServer) {out.module.rules.push({ test: /\.sql$/, use: "@totto2727/reylo/webpack" });}
+      if (context.isServer) {out.module.rules.push({ test: /\.sql$/u, use: "@totto2727/reylo/webpack" });}
       return out;
     },
     ...(check && {

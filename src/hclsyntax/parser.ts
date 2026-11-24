@@ -241,7 +241,7 @@ export class Parser extends Peeker {
 
   private numberLiteral(token: Token): Literal | Expression {
     const numberText = text(token);
-    if (!/^[0-9]+(?:\.[0-9]+)?(?:[eE][+-]?[0-9]+)?$/.test(numberText)) {
+    if (!/^[0-9]+(?:\.[0-9]+)?(?:[eE][+-]?[0-9]+)?$/u.test(numberText)) {
       this.diag('Invalid number literal', 'Failed to recognize the value of this number literal.', token.range);
       return dynamic(token.range);
     }

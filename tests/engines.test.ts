@@ -45,7 +45,7 @@ test("native packages cover supported platforms at the exact upstream engine ver
   });
   const { key, pkg } = platformPackage();
   assert.equal(pkg, PLATFORM_PACKAGES[key]);
-  assert.match(key, /^(darwin|linux|win32)-(arm64|x64)(-musl)?$/);
+  assert.match(key, /^(darwin|linux|win32)-(arm64|x64)(-musl)?$/u);
 });
 
 // oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
@@ -59,7 +59,7 @@ test("REYLO_ENGINE_PATH takes precedence and a missing override is actionable", 
     assert.ok(reader instanceof MissingEngine);
     const root = join(path, "..");
     await writeFile(join(root, ".reylo.yaml"), "direct_url: file:./app.db\n");
-    assert.match(resolveProject(reader, root, {}).error!, /^\.reylo\.yaml: REYLO_ENGINE_PATH names /);
+    assert.match(resolveProject(reader, root, {}).error!, /^\.reylo\.yaml: REYLO_ENGINE_PATH names /u);
   });
 });
 

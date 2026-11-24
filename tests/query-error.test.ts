@@ -208,9 +208,9 @@ test("try resolves to the value or to the database's error, and rejects with eve
   assert.ok(!("value" in failed));
   // A refused connection, and a row count the analysis got wrong, are not the database's.
   await assert.rejects(many.try(failing(refused), { id: 1 }), (e) => e === refused);
-  await assert.rejects(one.try(answering([]), { id: 1 }), /^Error: get_user\.sql: Expected exactly one row, got 0$/);
+  await assert.rejects(one.try(answering([]), { id: 1 }), /^Error: get_user\.sql: Expected exactly one row, got 0$/u);
   // A value Reylo refuses rejects with Reylo's own error, and never reaches the client.
-  await assert.rejects(many.try(answering([]), 1 as never), /The parameters must be an object/);
+  await assert.rejects(many.try(answering([]), 1 as never), /The parameters must be an object/u);
 });
 
 // oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
@@ -226,11 +226,11 @@ test("trySync returns the value or the database's error on a synchronous SQLite 
     assert.deepEqual(fields(unique.error), { message: "UNIQUE constraint failed: users.email", code: "SQLITE_CONSTRAINT_UNIQUE", errcode: 2067, table: "users", columns: ["email"], constraint: undefined });
     assert.equal(insert.trySync(db, { email: null }).error?.code, "SQLITE_CONSTRAINT_NOTNULL");
     assert.deepEqual(get.trySync(db, { id: 1 }), { value: { id: 1 } });
-    assert.throws(() => get.trySync(db, { id: 2 }), /^Error: Expected exactly one row, got 0$/);
+    assert.throws(() => get.trySync(db, { id: 2 }), /^Error: Expected exactly one row, got 0$/u);
     // A closed database is the driver's own error.
     db.close();
     const fresh = defineQuery<{}, { n: number }, "one", "sqlite">({ dialect: "sqlite", sql: "select 1 as n", params: [], cardinality: "one" });
-    assert.throws(() => fresh.trySync(db), /database is not open/);
+    assert.throws(() => fresh.trySync(db), /database is not open/u);
   } finally {
     if (db.isOpen) {db.close();}
   }

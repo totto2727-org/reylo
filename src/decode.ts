@@ -374,7 +374,7 @@ export async function postgresJs(c: AnyClient, text: string, params: unknown[], 
  * a BIGINT's digits, and its BIT(1) as a boolean; and an interval as Postgres's text, which Reylo writes as
  * an ISO 8601 duration.
  */
-const BUN_KINDS = /^(bool|int8|date|timestamp|timestamptz|interval|bytes|vector|hstore)$|\[\]$|\|/;
+const BUN_KINDS = /^(bool|int8|date|timestamp|timestamptz|interval|bytes|vector|hstore)$|\[\]$|\|/u;
 
 export function bunRows(rows: unknown[], columns: Columns | undefined): unknown[] {
   if (!Array.isArray(rows) || !rows.length) {return Array.isArray(rows) ? rows : [];}
@@ -429,7 +429,7 @@ const SLONIK_TEXT = [
 ];
 
 /** Kinds whose value must reach Reylo as text: anything else is one a driver already converted, and may have rounded. */
-const SLONIK_STRICT = /^(decimal|date|timestamp|timestamptz|interval)(\[\])*$/;
+const SLONIK_STRICT = /^(decimal|date|timestamp|timestamptz|interval)(\[\])*$/u;
 
 let slonikModule: SlonikModule | undefined;
 const slonikTags = new Map<string, SlonikTag>();

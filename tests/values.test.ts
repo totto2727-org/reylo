@@ -241,7 +241,7 @@ test("SQLite: a BIGINT column on node:sqlite exact past 2^53 beside an INTEGER r
     // ReadBigInts refuses the value with an error that names no column.
     const own = () => ({ ...(db.prepare("select n, big from t where id = 1").get() as object) });
     if (readBigInts) {assert.deepEqual(own(), { n: BigInt("5"), big: BigInt("9007199254740993") });}
-    else {assert.throws(own, /^RangeError: Value is too large to be represented as a JavaScript number: 9007199254740993/);}
+    else {assert.throws(own, /^RangeError: Value is too large to be represented as a JavaScript number: 9007199254740993/u);}
     db.close();
   }
   const q: QueryModule<"sqlite"> = { dialect: "sqlite", sql: "select n, big from t", params: [], columns: [["n", "int"], ["big", "int8"]] };
@@ -255,7 +255,7 @@ test("SQLite: a BIGINT column on node:sqlite exact past 2^53 beside an INTEGER r
   // Bun.sql's SQLite, with safeIntegers or without.
   const bun = (rows: unknown[]) => ({ unsafe: async () => rows, commitDistributed: async () => {} });
   assert.deepEqual(await execute(bun([{ n: 5, big: BigInt("9007199254740993") }]), q), [{ n: 5, big: BigInt("9007199254740993") }]);
-  await assert.rejects(execute(bun([{ n: 5, big: 9_007_199_254_740_992 }]), q) as Promise<unknown>, /Column "big" is a 64-bit integer, and the driver already rounded/);
+  await assert.rejects(execute(bun([{ n: 5, big: 9_007_199_254_740_992 }]), q) as Promise<unknown>, /Column "big" is a 64-bit integer, and the driver already rounded/u);
 });
 
 // oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
@@ -338,7 +338,7 @@ test("SQLite: Reylo's own statement per database and text, with integers read as
   assert.deepEqual(db.prepare("select n from t where id = 1").get(), [BigInt("5")]);
   assert.throws(() => execute(db, q, { id: 2 }), (e: Error) => e instanceof DecodeError && e instanceof TypeError && /^Column "n" holds 9007199254740993/u.test(e.message));
   // A boolean column holding 2, which SQLite lets in: refused, naming it.
-  assert.throws(() => execute(db, q, { id: 3 }), /^TypeError: Column "flag" is a boolean, stored as 0 or 1, and holds 2/);
+  assert.throws(() => execute(db, q, { id: 3 }), /^TypeError: Column "flag" is a boolean, stored as 0 or 1, and holds 2/u);
   // A query defined by hand: integers exact, nothing else known.
   const [bare] = execute(db, { dialect: "sqlite", sql: "select n, doc from t where id = 1", params: [] }) as Record<string, unknown>[];
   assert.deepEqual(bare, { doc: '{"a":1}', n: 5 });
@@ -367,26 +367,26 @@ test("SQLite: a value its column's type does not allow, which a table that is no
   assert.deepEqual(execute(db, q, { id: 1 }), [{ n: 1.5, r: 2, s: "hi", b: Uint8Array.of(1), big: BigInt("9007199254740993"), z: "abc", x: Uint8Array.of(2) }]);
   const refusals: [number, RegExp][] = [
     [2, /^TypeError: Column "n" is typed number and holds the text "abc": outside a STRICT table SQLite stores a value of any type in any column.* Replace the value, or read what the column holds with cast\(n as text\)\.$/],
-    [3, /^TypeError: Column "n" is typed number and holds a BLOB of 2 bytes/],
-    [4, /^TypeError: Column "r" is typed number and holds the text "xyz"/],
-    [5, /^TypeError: Column "s" is typed string and holds a BLOB of 2 bytes/],
-    [6, /^TypeError: Column "b" is typed Uint8Array and holds the text "plain"/],
-    [7, /^TypeError: Column "b" is typed Uint8Array and holds the number 5/],
+    [3, /^TypeError: Column "n" is typed number and holds a BLOB of 2 bytes/u],
+    [4, /^TypeError: Column "r" is typed number and holds the text "xyz"/u],
+    [5, /^TypeError: Column "s" is typed string and holds a BLOB of 2 bytes/u],
+    [6, /^TypeError: Column "b" is typed Uint8Array and holds the text "plain"/u],
+    [7, /^TypeError: Column "b" is typed Uint8Array and holds the number 5/u],
     [8, /^TypeError: Column "big" is typed bigint and holds the number 1.5: .* Replace the value, or read what the column holds with cast\(big as text\)\.$/],
-    [9, /^TypeError: Column "big" is typed bigint and holds the text "x"/],
-    [10, /^TypeError: Column "z" is typed number \| string and holds a BLOB of 1 byte:/],
+    [9, /^TypeError: Column "big" is typed bigint and holds the text "x"/u],
+    [10, /^TypeError: Column "z" is typed number \| string and holds a BLOB of 1 byte:/u],
   ];
   for (const [id, refused] of refusals) {assert.throws(() => execute(db, q, { id }), (e: Error) => e instanceof DecodeError && refused.test(String(e)), `row ${id}`);}
   // The drivers that read integers as numbers or strings: libSQL's digits are its INTEGER, any other text in a number's column is refused, and so is D1's BLOB in a string's.
   const libsql = (rows: unknown[]) => ({ execute: async () => ({ rows }), executeMultiple: async () => {} });
   const ints: QueryModule<"sqlite"> = { dialect: "sqlite", sql: "select n, big, b from loose", params: [], columns: [["n", "int"], ["big", "int8"], ["b", "bytes"]] };
   assert.deepEqual(await execute(libsql([{ n: "5", big: "9007199254740993", b: null }]), ints), [{ n: 5, big: BigInt("9007199254740993"), b: null }], "intMode: string");
-  await assert.rejects(execute(libsql([{ n: "abc", big: null, b: null }]), ints) as Promise<unknown>, /Column "n" is typed number and holds the text "abc"/);
+  await assert.rejects(execute(libsql([{ n: "abc", big: null, b: null }]), ints) as Promise<unknown>, /Column "n" is typed number and holds the text "abc"/u);
   await assert.rejects(execute(libsql([{ n: 5, big: 1.5, b: null }]), ints) as Promise<unknown>, /Column "big" is typed bigint and holds the number 1.5/);
-  await assert.rejects(execute(libsql([{ n: Uint8Array.of(1).buffer, big: null, b: null }]), ints) as Promise<unknown>, /Column "n" is typed number and holds a BLOB of 1 byte/);
-  await assert.rejects(execute(libsql([{ n: null, big: null, b: "5" }]), ints) as Promise<unknown>, /Column "b" is typed Uint8Array and holds the text "5"/);
+  await assert.rejects(execute(libsql([{ n: Uint8Array.of(1).buffer, big: null, b: null }]), ints) as Promise<unknown>, /Column "n" is typed number and holds a BLOB of 1 byte/u);
+  await assert.rejects(execute(libsql([{ n: null, big: null, b: "5" }]), ints) as Promise<unknown>, /Column "b" is typed Uint8Array and holds the text "5"/u);
   const d1 = { batch: async () => [], prepare: () => ({ first: async () => null, bind: () => ({ all: async () => ({ results: [{ s: [1, 2] }] }) }) }) };
-  await assert.rejects(execute(d1, { dialect: "sqlite", sql: "select s from loose", params: [], columns: [["s", "text"]] }) as Promise<unknown>, /Column "s" is typed string and holds a BLOB of 2 bytes/);
+  await assert.rejects(execute(d1, { dialect: "sqlite", sql: "select s from loose", params: [], columns: [["s", "text"]] }) as Promise<unknown>, /Column "s" is typed string and holds a BLOB of 2 bytes/u);
 });
 
 // oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
@@ -464,7 +464,7 @@ test("runSync refuses a client whose prepared statement answers through a promis
   const q: QueryModule<"sqlite"> = { dialect: "sqlite", sql: "select 1 as n", params: [], columns: [["n", "int"]] };
   assert.deepEqual(await execute(db as never, q), [{ n: 1 }]);
   const { executeSync } = await import("../src/execute.ts");
-  assert.throws(() => executeSync(db as never, { ...q, sql: "select 2 as n" }), /answered with a promise/);
+  assert.throws(() => executeSync(db as never, { ...q, sql: "select 2 as n" }), /answered with a promise/u);
 });
 
 // oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
@@ -493,13 +493,13 @@ test("MySQL: a truth value is a boolean on every driver, whatever form it gives 
   const fields = [["done", 1], ["same", 8], ["one_bit", 16], ["n", 8], ["widened", 3], ["either", 5]].map(([name, columnType]) => ({ name, columnType, decimals: 0 }));
   const mysql2 = (done: unknown) => ({ query: async () => [[], []], execute: async () => [[mysql2Row(done)], fields] });
   assert.deepEqual(await execute(mysql2(1) as never, q), expected);
-  await assert.rejects(execute(mysql2(2) as never, q) as Promise<unknown>, /^TypeError: Column "done" is a boolean, stored as 0 or 1, and holds 2, which is neither/);
+  await assert.rejects(execute(mysql2(2) as never, q) as Promise<unknown>, /^TypeError: Column "done" is a boolean, stored as 0 or 1, and holds 2, which is neither/u);
   // A query defined by hand: a BIGINT by the result's own type, a TINYINT(1) as it is.
   assert.deepEqual(await execute(mysql2(2) as never, { ...q, columns: undefined }), [{ ...mysql2Row(2), same: BigInt("0"), n: BigInt("9007199254740993") }]);
   // Mariadb: a BIGINT its own BigInt, a BIT(1) a Buffer (bitOneIsBoolean off).
   const mariadb = (done: unknown) => ({ batch: async () => ({}), query: async () => [{ done, same: BigInt("0"), one_bit: Buffer.of(1), n: BigInt("9007199254740993"), widened: 7, either: 2.5 }] });
   assert.deepEqual([...((await execute(mariadb(1) as never, q)) as unknown[])], expected);
-  await assert.rejects(execute(mariadb(-1) as never, q) as Promise<unknown>, /Column "done" is a boolean, stored as 0 or 1, and holds -1/);
+  await assert.rejects(execute(mariadb(-1) as never, q) as Promise<unknown>, /Column "done" is a boolean, stored as 0 or 1, and holds -1/u);
   // PlanetScale: Reylo's cast, then the kinds.
   const planetscale = (done: string) => ({
     execute: async (_: string, __: unknown, options: { cast: (f: { type: string; charset?: number }, v: string | null) => unknown }) => ({
@@ -508,11 +508,11 @@ test("MySQL: a truth value is a boolean on every driver, whatever form it gives 
     }),
   });
   assert.deepEqual(await execute(planetscale("1") as never, q), expected);
-  await assert.rejects(execute(planetscale("2") as never, q) as Promise<unknown>, /Column "done" is a boolean/);
+  await assert.rejects(execute(planetscale("2") as never, q) as Promise<unknown>, /Column "done" is a boolean/u);
   // Bun.sql: a BIT(1) a boolean, a BIGINT its digits.
   const bun = (done: unknown) => ({ unsafe: async () => [{ done, same: "0", one_bit: true, n: "9007199254740993", widened: 7, either: 2.5 }], commitDistributed: async () => {} });
   assert.deepEqual(await execute(bun(1) as never, q), expected);
-  await assert.rejects(execute(bun(5) as never, q) as Promise<unknown>, /Column "done" is a boolean, stored as 0 or 1, and holds 5/);
+  await assert.rejects(execute(bun(5) as never, q) as Promise<unknown>, /Column "done" is a boolean, stored as 0 or 1, and holds 5/u);
 });
 
 // oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
@@ -555,10 +555,10 @@ test("MySQL: a VECTOR is an array of its floats on every driver that reads one, 
   await execute({ batch: async () => ({}), query: async (_: string, v: unknown) => (seen.push(v as unknown[]), []) } as never, w, { v: null });
   assert.deepEqual(seen, [...Array(4).fill(["[1,2.5,-3,0.10000000149011612]"]), [null]]);
   const fake = { query: async () => [[], []], execute: async () => [[], []] } as never;
-  await assert.rejects(execute(fake, w, { v: [1, "2"] }) as Promise<unknown>, /^TypeError: Parameter "v" is a VECTOR, an array of finite numbers, and the element at \[1\] is "2"\.$/);
-  await assert.rejects(execute(fake, w, { v: [1, NaN] }) as Promise<unknown>, /the element at \[1\] is NaN/);
-  await assert.rejects(execute(fake, w, { v: [Infinity] }) as Promise<unknown>, /the element at \[0\] is Infinity/);
-  await assert.rejects(execute(fake, w, { v: [1, null] }) as Promise<unknown>, /^TypeError: Parameter "v" is an array whose elements may not be null, and the element at \[1\] is/);
+  await assert.rejects(execute(fake, w, { v: [1, "2"] }) as Promise<unknown>, /^TypeError: Parameter "v" is a VECTOR, an array of finite numbers, and the element at \[1\] is "2"\.$/u);
+  await assert.rejects(execute(fake, w, { v: [1, NaN] }) as Promise<unknown>, /the element at \[1\] is NaN/u);
+  await assert.rejects(execute(fake, w, { v: [Infinity] }) as Promise<unknown>, /the element at \[0\] is Infinity/u);
+  await assert.rejects(execute(fake, w, { v: [1, null] }) as Promise<unknown>, /^TypeError: Parameter "v" is an array whose elements may not be null, and the element at \[1\] is/u);
 });
 
 // oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
@@ -582,10 +582,10 @@ test("an hstore's text is an object of its keys, and an object goes back in as t
   assert.equal(hstoreText(value, fail), String.raw`""=>"empty", ","=>"comma,", "a"=>"1", "b c"=>"sp ace", "x=>y"=>NULL, "q\"uote"=>"v\"", "back\\slash"=>"\\"`);
   assert.deepEqual(hstore(hstoreText(value, fail)), value);
   assert.equal(hstoreText({ a: undefined, b: "2" }, fail), String.raw`"b"=>"2"`);
-  assert.throws(() => hstoreText({ n: 1 }, fail), /its key "n" holds 1/);
-  assert.throws(() => hstoreText(["a"], fail), /an object of its keys whose values are strings or null; got an array/);
+  assert.throws(() => hstoreText({ n: 1 }, fail), /its key "n" holds 1/u);
+  assert.throws(() => hstoreText(["a"], fail), /an object of its keys whose values are strings or null; got an array/u);
   // Only a plain object's keys are an hstore's: a Map or a class instance is refused, not written empty.
-  assert.throws(() => hstoreText(new Map([["a", "1"]]), fail), /got a Map\./);
-  assert.throws(() => hstoreText(new (class Prefs {})(), fail), /got a Prefs\./);
+  assert.throws(() => hstoreText(new Map([["a", "1"]]), fail), /got a Map\./u);
+  assert.throws(() => hstoreText(new (class Prefs {})(), fail), /got a Prefs\./u);
   assert.equal(hstoreText(Object.assign(Object.create(null), { a: "1" }), fail), String.raw`"a"=>"1"`);
 });

@@ -185,7 +185,7 @@ function scalar(name: string, written: string, v: unknown, dialect: Dialect, fai
     case "name":
     case "citext": {
       if (!matchesString(v)) {return fail(`is ${written}, a string; got ${describe(v)}.`);}
-      const n = /\(\s*(\d+)\s*\)/.exec(written)?.[1];
+      const n = /\(\s*(\d+)\s*\)/u.exec(written)?.[1];
       // A length counts characters (code points), as Postgres and MySQL count them.
       if (!matchesUndefined(n) && [...v].length > Number(n)) {fail(`is ${written}, at most ${n} characters; got ${[...v].length}, which the database would refuse or cut.`);}
       return v;
@@ -223,7 +223,7 @@ function scalar(name: string, written: string, v: unknown, dialect: Dialect, fai
       // Binary data travels as hexadecimal text: Postgres's own `\x` form, and bare digits that
       // MySQL's and SQLite's readers decode with unhex().
       if (!(v instanceof Uint8Array)) {return fail(`is ${written}, binary data, a Uint8Array; got ${describe(v)}.`);}
-      const n = /\(\s*(\d+)\s*\)/.exec(written)?.[1];
+      const n = /\(\s*(\d+)\s*\)/u.exec(written)?.[1];
       if (!matchesUndefined(n) && v.length > Number(n)) {fail(`is ${written}, at most ${n} bytes; got ${v.length}, which the database would refuse or cut.`);}
       let hex = dialect === "postgres" ? "\\x" : "";
       for (const byte of v) {hex += (byte < 16 ? "0" : "") + byte.toString(16);}
@@ -315,11 +315,11 @@ function wallClock(base: string, written: string, v: unknown, fail: (message: st
   const example = base === "date" ? `"2026-10-12"` : base === "time" ? `"19:06:48"` : `"2026-10-12 19:06:48.282"`;
   if (!matchesString(v)) {return void fail(`is ${written}, which takes its text (${example}), not ${describe(v)}${v instanceof Date ? ": drivers write a Date's time in different zones" : ""}.`);}
   const s = v.trim();
-  const keeps = Number(/\(\s*(\d+)\s*\)/.exec(written)?.[1] ?? (base === "time" ? 0 : 6));
+  const keeps = Number(/\(\s*(\d+)\s*\)/u.exec(written)?.[1] ?? (base === "time" ? 0 : 6));
   const m =
     base === "time"
-      ? /^(-?)(\d{1,3}):(\d{2})(?::(\d{2})(?:\.(\d+))?)?$/.exec(s)
-      : /^(\d{4})-(\d{2})-(\d{2})(?:(?:[T ])(\d{2}):(\d{2})(?::(\d{2})(?:\.(\d+))?)?)?$/.exec(s);
+      ? /^(-?)(\d{1,3}):(\d{2})(?::(\d{2})(?:\.(\d+))?)?$/u.exec(s)
+      : /^(\d{4})-(\d{2})-(\d{2})(?:(?:[T ])(\d{2}):(\d{2})(?::(\d{2})(?:\.(\d+))?)?)?$/u.exec(s);
   const ok = (() => {
     if (!m) {return false;}
     if (base === "time") {return Number(m[2]) <= 838 && Number(m[3]) < 60 && Number(m[4] ?? 0) < 60 && (m[5] ?? "").length <= keeps;}
@@ -347,7 +347,7 @@ function decimal(written: string, v: unknown, fail: (message: string) => never):
   else {return fail(`is ${written}, a decimal: a number or a string of its digits; got ${describe(v)}.`);}
   const regexMatch = /^([+-]?)(\d*)(?:\.(\d*))?(?:e([+-]?\d+))?$/i.exec(text);
   if (!regexMatch || (regexMatch[2] === "" && (regexMatch[3] ?? "") === "")) {return fail(`is ${written}, a decimal: a number or a string of its digits; got ${describe(v)}.`);}
-  const mod = /\(\s*(\d+)\s*(?:,\s*(-?\d+)\s*)?\)/.exec(written);
+  const mod = /\(\s*(\d+)\s*(?:,\s*(-?\d+)\s*)?\)/u.exec(written);
   if (mod) {
     const precision = Number(mod[1]);
     const scale = Number(mod[2] ?? 0);

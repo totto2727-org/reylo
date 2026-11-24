@@ -52,7 +52,7 @@ const paramType = function (q: Analysis["params"][number], rendered: string): st
  */
 export function reyloImport(...types: string[]): string {
   const text = types.join("\n").replace(/"(?:[^"\\]|\\.)*"|\/\*[\s\S]*?\*\//g, (m) => (m.startsWith('"') ? '""' : ""));
-  return `import type { ${/(?<![\w$])Json(?![\w$]|\s*\??:)/.test(text) ? "Json, " : ""}Query } from "@totto2727/reylo";`;
+  return `import type { ${/(?<![\w$])Json(?![\w$]|\s*\??:)/u.test(text) ? "Json, " : ""}Query } from "@totto2727/reylo";`;
 }
 
 /**

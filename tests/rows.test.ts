@@ -39,28 +39,28 @@ test("a value is checked against its column list, and written as the JSON the st
   // MySQL and SQLite take the JSON text, with the integer a bare number.
   assert.equal(prepareRows("events", events, [row], "mysql", true).value, `[{"id":9007199254740993,"ts":"2026-10-20T10:00:00.000Z","status":"done","amount":"1.50","tags":["a"],"meta":{"source":"x"}}]`);
   const refused: [unknown, RegExp][] = [
-    [{ ts: "2026-10-20T10:00:00Z" }, /row 1: "id" is int8 not null, and the row leaves it out/],
-    [{ id: 1, ts: "2026-10-20T10:00:00Z", status: null }, /"status" is text not null, and the row gives null; leave the key out for the column's default/],
-    [{ id: 1, ts: "2026-10-20T10:00:00Z", stauts: "x" }, /the column list names no key "stauts"/],
-    [{ id: 2 ** 53, ts: "2026-10-20T10:00:00Z" }, /past 2\^53 - 1/],
-    [{ id: BigInt("2") ** BigInt("63"), ts: "2026-10-20T10:00:00Z" }, /from -9223372036854775808 to 9223372036854775807/],
+    [{ ts: "2026-10-20T10:00:00Z" }, /row 1: "id" is int8 not null, and the row leaves it out/u],
+    [{ id: 1, ts: "2026-10-20T10:00:00Z", status: null }, /"status" is text not null, and the row gives null; leave the key out for the column's default/u],
+    [{ id: 1, ts: "2026-10-20T10:00:00Z", stauts: "x" }, /the column list names no key "stauts"/u],
+    [{ id: 2 ** 53, ts: "2026-10-20T10:00:00Z" }, /past 2\^53 - 1/u],
+    [{ id: BigInt("2") ** BigInt("63"), ts: "2026-10-20T10:00:00Z" }, /from -9223372036854775808 to 9223372036854775807/u],
     [{ id: 1.5, ts: "2026-10-20T10:00:00Z" }, /"id" is int8, an integer; got 1.5/],
-    [{ id: 1, ts: "2026-10-20 10:00" }, /names its zone/],
+    [{ id: 1, ts: "2026-10-20 10:00" }, /names its zone/u],
     [{ id: 1, ts: new Date() }, /not a Date: pass date.toISOString\(\)/],
     [{ id: 1, ts: "2026-10-20T10:00:00Z", amount: "1.234" }, /keeps 2 digits after the point, so 1.234 would be rounded/],
-    [{ id: 1, ts: "2026-10-20T10:00:00Z", amount: "12345678901" }, /at most 10 digits before the point/],
-    [{ id: 1, ts: "2026-10-20T10:00:00Z", tags: ["a", 1] }, /"tags" element 2 is text, a string; got 1/],
-    [{ id: 1, ts: "2026-10-20T10:00:00Z", meta: { n: BigInt("1") } }, /holds a JSON value/],
+    [{ id: 1, ts: "2026-10-20T10:00:00Z", amount: "12345678901" }, /at most 10 digits before the point/u],
+    [{ id: 1, ts: "2026-10-20T10:00:00Z", tags: ["a", 1] }, /"tags" element 2 is text, a string; got 1/u],
+    [{ id: 1, ts: "2026-10-20T10:00:00Z", meta: { n: BigInt("1") } }, /holds a JSON value/u],
   ];
   for (const [value, message] of refused) {assert.throws(() => prepareRows("events", events, [value], "postgres", true), message, JSON.stringify(value, (_, v) => (typeof v === "bigint" ? `${v}n` : v)));}
-  assert.throws(() => prepareRows("events", events, { id: 1 }, "postgres", true), /pass an array of objects, one per row; got an object/);
-  assert.throws(() => prepareRows("user", { ...events, one: true }, [], "postgres", true), /each row is an object/);
+  assert.throws(() => prepareRows("events", events, { id: 1 }, "postgres", true), /pass an array of objects, one per row; got an object/u);
+  assert.throws(() => prepareRows("user", { ...events, one: true }, [], "postgres", true), /each row is an object/u);
 });
 
 // oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
 test("the rows an insert writes carry the same keys, and its lists name only those", () => {
   const a = { id: 1, ts: "2026-10-20T10:00:00Z" };
-  assert.throws(() => prepareRows("events", events, [a, { ...a, status: "x" }], "postgres", true), /row 2 gives "status", which row 1 leaves out/);
+  assert.throws(() => prepareRows("events", events, [a, { ...a, status: "x" }], "postgres", true), /row 2 gives "status", which row 1 leaves out/u);
   // Elsewhere a key left out reads as NULL, so the rows may differ.
   assert.doesNotThrow(() => prepareRows("events", { ...events, fields: events.fields.filter((f) => f.name !== "status") }, [a, { ...a, amount: 1 }], "postgres", false));
   const { present } = prepareRows("events", events, [a, a], "postgres", true);
@@ -72,7 +72,7 @@ test("the rows an insert writes carry the same keys, and its lists name only tho
   };
   const structured = { name: "events", lists: [list(entries("")), list(entries("e."))] };
   assert.equal(variant(text, structured, events.fields, present), `insert into events ("id", "ts") SELECT e."id", e."ts" FROM x`);
-  assert.throws(() => prepareRows("p", { kind: "rows", one: true, fields: [{ ...events.fields[2]! }] }, {}, "postgres", true), /every key is left out/);
+  assert.throws(() => prepareRows("p", { kind: "rows", one: true, fields: [{ ...events.fields[2]! }] }, {}, "postgres", true), /every key is left out/u);
 });
 
 // oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.

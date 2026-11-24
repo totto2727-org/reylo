@@ -50,8 +50,8 @@ test("static Atlas declarations preserve SQLite constraints, defaults, indexes a
     assert.deepEqual(terms.map((row) => [row.name, row.desc]), [["title", 1], ["part", 0]]);
     db.prepare('insert into items (id, part) values (?, ?)').run("a", 1);
     assert.equal(db.prepare("select title from items").get()!.title, "can't");
-    assert.throws(() => db.prepare('insert into items (id, part) values (?, ?)').run("b", 0), /CHECK constraint failed/);
-    assert.throws(() => db.prepare('insert into items (id, part) values (?, ?)').run("c", 1), /UNIQUE constraint failed/);
+    assert.throws(() => db.prepare('insert into items (id, part) values (?, ?)').run("b", 0), /CHECK constraint failed/u);
+    assert.throws(() => db.prepare('insert into items (id, part) values (?, ?)').run("c", 1), /UNIQUE constraint failed/u);
   } finally { db.close(); }
 });
 
@@ -69,33 +69,33 @@ test("static Atlas references support composite foreign keys and validate all ta
     const keys = db.prepare('pragma foreign_key_list("items")').all();
     assert.deepEqual(keys.map((row) => [row.table, row.from, row.to, row.on_update, row.on_delete]), [["parents", "parent", "key", "CASCADE", "SET NULL"], ["parents", "part", "part", "CASCADE", "SET NULL"]]);
   } finally { db.close(); }
-  assert.throws(() => sqliteSchemaFromHcl(schema(parent + child.replace("table.parents.column.part", "table.parents.column.missing"))), /undeclared table or column/);
-  assert.throws(() => sqliteSchemaFromHcl(schema(parent + child.replace("CASCADE", "UNKNOWN"))), /Unsupported foreign-key action/);
+  assert.throws(() => sqliteSchemaFromHcl(schema(parent + child.replace("table.parents.column.part", "table.parents.column.missing"))), /undeclared table or column/u);
+  assert.throws(() => sqliteSchemaFromHcl(schema(parent + child.replace("CASCADE", "UNKNOWN"))), /Unsupported foreign-key action/u);
 });
 
 // oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
 test("Atlas semantic boundary rejects unsupported expressions and declarations instead of ignoring them", () => {
   const valid = table(`${column("id")  }primary_key { columns = [column.id] }`);
   const cases: [string, RegExp][] = [
-    [schema(valid).replace("type = text", "type = dynamic_type"), /Unsupported Atlas SQLite column type/],
-    [schema(valid).replace("type = text", "type = var.type"), /Unsupported Atlas SQLite column type/],
-    [schema(valid).replace("null = true", "null = var.nullable"), /literal HCL boolean/],
-    [schema(valid).replace("null = true", "null = true\n generated = true"), /Unsupported Atlas SQLite attribute generated/],
-    [schema(valid).replace("columns = [column.id]", "columns = [column.missing]"), /declared column/],
-    [schema(valid).replace("columns = [column.id]", "columns = []"), /nonempty/],
-    [schema(valid).replace("columns = [column.id]", "columns = [column.id, column.id]"), /duplicates/],
+    [schema(valid).replace("type = text", "type = dynamic_type"), /Unsupported Atlas SQLite column type/u],
+    [schema(valid).replace("type = text", "type = var.type"), /Unsupported Atlas SQLite column type/u],
+    [schema(valid).replace("null = true", "null = var.nullable"), /literal HCL boolean/u],
+    [schema(valid).replace("null = true", "null = true\n generated = true"), /Unsupported Atlas SQLite attribute generated/u],
+    [schema(valid).replace("columns = [column.id]", "columns = [column.missing]"), /declared column/u],
+    [schema(valid).replace("columns = [column.id]", "columns = []"), /nonempty/u],
+    [schema(valid).replace("columns = [column.id]", "columns = [column.id, column.id]"), /duplicates/u],
     [schema(valid).replace("schema.main", "schema.other"), /schema.main/],
-    [schema(valid + valid), /Duplicate table/],
-    [schema(table(column("id") + column("id"))), /Duplicate column/],
-    [`${schema(valid)  }view "ignored" {}\n`, /Unsupported Atlas SQLite block view/],
-    [schema(valid).replace("null = true", 'null = true\n default = env("SECRET")'), /Only sql/],
-    [schema(valid).replace("null = true", 'null = true\n default = "${var.secret}"'), /static HCL string|Unsupported Atlas SQLite default/],
-    [schema(valid).replace("null = true", "null = true\n default = [1, 2]"), /Unsupported Atlas SQLite default/],
-    [schema(table(`${column("id")  }index "bad" {\n columns = [column.id]\n on { column = column.id }\n}`)), /either columns or on/],
-    [schema(table(`${column("id")  }index "sqlite_autoindex_bad" { columns = [column.id] }`)), /implicit SQLite autoindex/],
-    [schema(table(`${column("id")  }check { expr = var.check }`)), /static HCL string/],
-    ['schema "other" {}\n', /schema "main"/],
-    [schema(valid).replace("type = text", "type = varchar(-1)"), /nonnegative integer/],
+    [schema(valid + valid), /Duplicate table/u],
+    [schema(table(column("id") + column("id"))), /Duplicate column/u],
+    [`${schema(valid)  }view "ignored" {}\n`, /Unsupported Atlas SQLite block view/u],
+    [schema(valid).replace("null = true", 'null = true\n default = env("SECRET")'), /Only sql/u],
+    [schema(valid).replace("null = true", 'null = true\n default = "${var.secret}"'), /static HCL string|Unsupported Atlas SQLite default/u],
+    [schema(valid).replace("null = true", "null = true\n default = [1, 2]"), /Unsupported Atlas SQLite default/u],
+    [schema(table(`${column("id")  }index "bad" {\n columns = [column.id]\n on { column = column.id }\n}`)), /either columns or on/u],
+    [schema(table(`${column("id")  }index "sqlite_autoindex_bad" { columns = [column.id] }`)), /implicit SQLite autoindex/u],
+    [schema(table(`${column("id")  }check { expr = var.check }`)), /static HCL string/u],
+    ['schema "other" {}\n', /schema "main"/u],
+    [schema(valid).replace("type = text", "type = varchar(-1)"), /nonnegative integer/u],
   ];
   for (const [source, expected] of cases) {assert.throws(() => sqliteSchemaFromHcl(source, "invalid.hcl"), expected, source);}
 });

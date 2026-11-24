@@ -44,7 +44,7 @@ test("a statement is analyzed against the database once, and read from .reylo/ b
   assert.ok(first.entry.startsWith(join(root, ".reylo", "queries")));
   assert.ok(existsSync(first.entry));
   // The directory keeps itself out of git.
-  assert.match(readFileSync(join(root, ".reylo", ".gitignore"), "utf8"), /^\*$/m);
+  assert.match(readFileSync(join(root, ".reylo", ".gitignore"), "utf8"), /^\*$/mu);
   const second = await analyze(root, env, SELECT);
   assert.ok(second.ok);
   assert.deepEqual([second.source, second.entry, second.analysis], ["cache", first.entry, first.analysis]);
@@ -213,7 +213,7 @@ test("a build fails on a statement the database refuses, at its line and column 
     const sql = "select 'é' as e,\n  nmae from users";
     const file = join(root, "bad.sql");
     await writeFile(file, sql);
-    await assert.rejects(sqlModule(file, sql), /bad\.sql:2:3: no such column: nmae$/);
+    await assert.rejects(sqlModule(file, sql), /bad\.sql:2:3: no such column: nmae$/u);
   } finally {
     for (const session of Session.opened()) {await session.close();}
   }
@@ -234,7 +234,7 @@ test("a parameter written twice is an error at each later use, which the type ch
     assert.equal(outcome.analysis.diagnostics[0]!.message, "The parameter :q appears more than once; use each parameter once, and select it in a with to read it twice, cast to its type, as in: with input as (select :q::<type> as q) select … from input");
     const file = join(root, "search.sql");
     await writeFile(file, twice);
-    await assert.rejects(sqlModule(file, twice), /search\.sql: The parameter :q appears more than once/);
+    await assert.rejects(sqlModule(file, twice), /search\.sql: The parameter :q appears more than once/u);
     // SQLite's own forms and its numbered placeholder are names too; a bare ? never repeats.
     for (const sql of ["select id from users where name = @q or name = @q", "select id from users where id = ?1 or id = ?1", "select id from users where id = ? or id = ?1"]) {
       const refused = await session.analyze(sql);
@@ -253,7 +253,7 @@ test("a parameter written twice is an error at each later use, which the type ch
     assert.deepEqual(read.analysis.params.map((p) => [p.name, p.nullable]), [["q", true]]);
     await writeFile(file, once);
     const { code } = await sqlModule(file, once);
-    assert.match(code, /export const params = \["q"\];/);
+    assert.match(code, /export const params = \["q"\];/u);
   } finally {
     for (const session of Session.opened()) {await session.close();}
   }
@@ -274,7 +274,7 @@ test("a parameter as a whole sort key is an error the type check places, and a b
     const file = join(root, "sorted.sql");
     await writeFile(file, sql);
     const { code } = await sqlModule(file, sql);
-    assert.match(code, /export const params = \["sort"\];/);
+    assert.match(code, /export const params = \["sort"\];/u);
   } finally {
     for (const session of Session.opened()) {await session.close();}
   }

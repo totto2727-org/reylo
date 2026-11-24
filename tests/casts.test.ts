@@ -49,8 +49,8 @@ test("SQLite: a cast is SQLite's own, a date's to TEXT, JSON's through json(), a
     assert.deepEqual(plain(await page.query.run(db, { n: 2 })), [{ id: 1 }, { id: 2 }]);
     // SQLite's CAST reads 'abc' as 0 and '1.9' as 1.
     assert.deepEqual({ ...(db.prepare("select cast('abc' as integer) as a, cast('1.9' as integer) as b").get() as object) }, { a: 0, b: 1 });
-    await assert.rejects(page.query.run(db, { n: "abc" }), /Parameter "n" is int, an integer; got "abc"/);
-    await assert.rejects(page.query.run(db, { n: 1.9 }), /Parameter "n" is int, an integer; got 1\.9/);
+    await assert.rejects(page.query.run(db, { n: "abc" }), /Parameter "n" is int, an integer; got "abc"/u);
+    await assert.rejects(page.query.run(db, { n: 1.9 }), /Parameter "n" is int, an integer; got 1\.9/u);
     // Its CAST to `date` reads a date as the number before its first dash, so a date is cast to TEXT.
     assert.deepEqual({ ...(db.prepare("select cast('1900-01-01' as date) as d").get() as object) }, { d: 1900 });
     const born = await built(root, url, "born", "select name from users where born > :since::date order by born");
@@ -60,13 +60,13 @@ test("SQLite: a cast is SQLite's own, a date's to TEXT, JSON's through json(), a
     // String; the object json_object builds comes back parsed.
     const doc = await built(root, url, "doc", "select json_extract(:doc::json, '$.a') as a, json_object('d', :inner::json, 's', :text) as d");
     assert.equal(doc.text, "select json_extract(json(?), '$.a') as a, json_object('d', json(?), 's', ?) as d");
-    assert.match(doc.code, /"doc":\{"type":\{"kind":"json"/);
+    assert.match(doc.code, /"doc":\{"type":\{"kind":"json"/u);
     assert.deepEqual({ ...(await doc.query.run(db, { doc: { a: 5 }, inner: [1], text: "[1]" })) }, { a: 5, d: { d: [1], s: "[1]" } });
     const short = await built(root, url, "short", "select :s::varchar(3) as s, :x::real * 2 as x");
-    await assert.rejects(short.query.run(db, { s: "abcd", x: 1 }), /Parameter "s" is varchar\(3\), at most 3 characters; got 4/);
-    await assert.rejects(short.query.run(db, { s: "abc", x: "2" }), /Parameter "x" is real, a finite number; got "2"/);
+    await assert.rejects(short.query.run(db, { s: "abcd", x: 1 }), /Parameter "s" is varchar\(3\), at most 3 characters; got 4/u);
+    await assert.rejects(short.query.run(db, { s: "abc", x: "2" }), /Parameter "x" is real, a finite number; got "2"/u);
     assert.deepEqual({ ...(await short.query.run(db, { s: "abc", x: 1.25 })) }, { s: "abc", x: 2.5 });
-    await assert.rejects(built(root, url, "flag", "select :b::boolean as b"), /SQLite has no boolean type/);
+    await assert.rejects(built(root, url, "flag", "select :b::boolean as b"), /SQLite has no boolean type/u);
   } finally {
     db.close();
     await closeSessions();

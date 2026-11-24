@@ -160,7 +160,7 @@ type Plan = {
 };
 
 /** An integer's digits, as libSQL under intMode "string" hands one over. */
-const DIGITS = /^[+-]?\d+$/;
+const DIGITS = /^[+-]?\d+$/u;
 
 /**
  * What each column's values need, worked out once per call rather than per value. SQLite holds a

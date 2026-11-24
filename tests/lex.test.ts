@@ -110,6 +110,6 @@ test("with binds a client; the parameters may be left out when the statement tak
 test("a hand-built query whose params miss a placeholder is refused", async () => {
   const { calls, client } = capture();
   const q = defineQuery<{ id: number }, {}, "one", "postgres">({ dialect: "postgres", sql: "select $1", params: ["id"], cardinality: "one" });
-  await assert.rejects(q.run(client, { id: 1 }), /placeholder \$1 is parameter "1"/);
+  await assert.rejects(q.run(client, { id: 1 }), /placeholder \$1 is parameter "1"/u);
   assert.equal(calls.length, 0);
 });

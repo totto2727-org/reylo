@@ -128,7 +128,7 @@ test("SQLite on Turso's engine: a query built on node:sqlite runs, whose types T
     assert.deepEqual(await insert.run(db, { a: [{ name: "Ada" }, { name: "Grace", role: "admin", tok: "t", n: null }] }), [{ id: 1, n: -7, role: "member" }, { id: 2, n: null, role: "admin" }]);
     const read2 = await built(root, url, "read2", "select id, email from users order by id");
     await db.exec("alter table users rename column email to mail");
-    await assert.rejects(read2.run(db), /The database changed after read2\.sql was built: users\.email was TEXT not null and no longer exists\. Build it again/);
+    await assert.rejects(read2.run(db), /The database changed after read2\.sql was built: users\.email was TEXT not null and no longer exists\. Build it again/u);
   } finally {
     await db.close();
     await closeSessions();
@@ -153,11 +153,11 @@ test("SQLite: a query whose columns changed fails, naming them; one whose table 
     // A column it names, renamed: the call fails before the statement runs, synchronously too.
     const read3 = await built(root, url, "read3", "select id, email from users order by id");
     db.exec("alter table users rename column email to mail");
-    await assert.rejects(read3.run(db), /The database changed after read3\.sql was built: users\.email was TEXT not null and no longer exists\. Build it again/);
+    await assert.rejects(read3.run(db), /The database changed after read3\.sql was built: users\.email was TEXT not null and no longer exists\. Build it again/u);
     const read4 = await built(root, url, "read4", "select id, name from users order by id");
     db.exec("alter table users rename column name to full_name");
     // oxlint-disable-next-line rules/no-effect-runtime-run -- This test exercises Reylo's native synchronous query API, which does not run Effect.
-    assert.throws(() => read4.runSync(db), /users\.name was TEXT and no longer exists/);
+    assert.throws(() => read4.runSync(db), /users\.name was TEXT and no longer exists/u);
     // An insert's table that gains a column it must fill.
     const insert = await built(root, url, "insert", "insert into users (mail) values (:mail)");
     db.exec("alter table users add column tenant integer not null default 0");
@@ -182,7 +182,7 @@ test("SQLite: a default a structured insert copied, changed after the build, fai
     const stale = await built(root, url, "insert_accounts2", insert);
     db.exec(`create table accounts_new (id integer primary key, name text not null, role text not null default 'guest');
       insert into accounts_new select * from accounts; drop table accounts; alter table accounts_new rename to accounts`);
-    await assert.rejects(stale.run(db, { a: [{ name: "Linus" }] }), /The database changed after insert_accounts2\.sql was built: accounts\.role had the default 'member', which the insert writes for a row that leaves its key out, and now has the default 'guest'\. Build it again/);
+    await assert.rejects(stale.run(db, { a: [{ name: "Linus" }] }), /The database changed after insert_accounts2\.sql was built: accounts\.role had the default 'member', which the insert writes for a row that leaves its key out, and now has the default 'guest'\. Build it again/u);
     assert.equal((db.prepare("select count(*) as n from accounts").get() as { n: number }).n, 2);
     // A query that does not copy the default runs on.
     const read = await built(root, url, "read", "select name, role from accounts order by id");

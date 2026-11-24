@@ -37,7 +37,7 @@ test("withReylo adds the loader on the server for Turbopack and webpack, and kee
     "*.sql": { as: "*.js", condition: { not: "browser" }, loaders: ["@totto2727/reylo/turbopack"] },
   });
   const server = config.webpack({ module: { rules: [] } }, { isServer: true });
-  assert.deepEqual(server.module.rules, [{ test: /\.sql$/, use: "@totto2727/reylo/webpack" }]);
+  assert.deepEqual(server.module.rules, [{ test: /\.sql$/u, use: "@totto2727/reylo/webpack" }]);
   const client = config.webpack({ module: { rules: [] } }, { isServer: false });
   assert.deepEqual(client.module.rules, []);
   assert.deepEqual(seen, ["server", "client"]);
@@ -111,9 +111,9 @@ test("the type check runs the content mapper after the project's own hook, and f
   assert.equal(printed.mock.callCount(), 0);
 
   const bad = app(`${ROW}export const id: User["id"] = "one";\n`);
-  await assert.rejects(hook({ projectDir: bad, distDir: join(bad, ".next") }), /Failed to type check/);
+  await assert.rejects(hook({ projectDir: bad, distDir: join(bad, ".next") }), /Failed to type check/u);
   const output = printed.mock.calls.map((call) => String(call.arguments[0])).join("\n");
-  assert.match(output, /main\.ts\(3,14\): error TS2322: Type 'string' is not assignable to type 'number'\./);
+  assert.match(output, /main\.ts\(3,14\): error TS2322: Type 'string' is not assignable to type 'number'\./u);
 });
 
 // oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
@@ -140,7 +140,7 @@ test("the type check refuses a TypeScript older than 7.1, which has no content m
   await writeFile(join(root, "node_modules", "typescript", "package.json"), `{ "name": "typescript", "version": "6.0.3" }`);
   await assert.rejects(
     afterCompile({})({ projectDir: root, distDir: join(root, ".next") }),
-    /needs TypeScript 7\.1 or later, whose content mappers type \.sql imports; the project has TypeScript 6\.0\.3/,
+    /needs TypeScript 7\.1 or later, whose content mappers type \.sql imports; the project has TypeScript 6\.0\.3/u,
   );
   assert.equal(existsSync(join(root, "next-env.d.ts")), false);
 });
