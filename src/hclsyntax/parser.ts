@@ -54,6 +54,33 @@ export function parseTemplate(source: string | Uint8Array, filename = '', start:
   return { expression, diagnostics: [...result.diagnostics, ...parser.diagnostics] };
 }
 
+function relativeTraversal(expression: Expression, step: TraversalStep): Expression {
+  if (expression.kind === 'traversal' || expression.kind === 'relativeTraversal') {
+    expression.steps.push(step);
+    if (expression.kind === 'traversal') {
+      // Parts is the ergonomic adapter view. steps retains non-string/number
+      // Index keys and unknown placeholders without discarding AST information.
+      if (typeof step.value === 'string' || typeof step.value === 'number') {expression.parts.push(step.value);}
+    }
+    expression.range = between(expression.range, step.range); return expression;
+  }
+  return { kind: 'relativeTraversal', source: expression, steps: [step], range: between(expression.range, step.range) };
+}
+function nameSuggestion(given: string, suggestions: string[]): string {
+  const chars = [...given];
+  for (const suggestion of suggestions) {
+    const candidate = [...suggestion];
+    let row = candidate.map((_, i) => i + 1); row.unshift(0);
+    for (let i = 0; i < chars.length; i++) {
+      const next = [i + 1];
+      for (let j = 0; j < candidate.length; j++) {next.push(Math.min(next[j]! + 1, row[j + 1]! + 1, row[j]! + (chars[i] === candidate[j] ? 0 : 1)));}
+      row = next;
+    }
+    if (row[candidate.length]! < 3) {return suggestion;}
+  }
+  return '';
+}
+
 /** Stateful translation of the upstream recursive-descent parser. */
 export class Parser extends Peeker {
   public recovery = false;
@@ -717,19 +744,6 @@ export class Parser extends Peeker {
   }
 }
 
-function relativeTraversal(expression: Expression, step: TraversalStep): Expression {
-  if (expression.kind === 'traversal' || expression.kind === 'relativeTraversal') {
-    expression.steps.push(step);
-    if (expression.kind === 'traversal') {
-      // Parts is the ergonomic adapter view. steps retains non-string/number
-      // Index keys and unknown placeholders without discarding AST information.
-      if (typeof step.value === 'string' || typeof step.value === 'number') {expression.parts.push(step.value);}
-    }
-    expression.range = between(expression.range, step.range); return expression;
-  }
-  return { kind: 'relativeTraversal', source: expression, steps: [step], range: between(expression.range, step.range) };
-}
-
 // Unicode White_Space as used by Go unicode.IsSpace. JavaScript's \s differs
 // For FEFF and NEL, so do not use String.trim() here.
 const spaceLeft = /^[\u0009-\u000d\u0020\u0085\u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000]+/u;
@@ -861,20 +875,6 @@ function meldConsecutiveStringLiterals(parts: TemplateParts): void {
       previous.value += current.value; previous.range.end = { ...current.range.end }; parts.tokens.splice(i, 1);
     } else {i++;}
   }
-}
-function nameSuggestion(given: string, suggestions: string[]): string {
-  const chars = [...given];
-  for (const suggestion of suggestions) {
-    const candidate = [...suggestion];
-    let row = candidate.map((_, i) => i + 1); row.unshift(0);
-    for (let i = 0; i < chars.length; i++) {
-      const next = [i + 1];
-      for (let j = 0; j < candidate.length; j++) {next.push(Math.min(next[j]! + 1, row[j + 1]! + 1, row[j]! + (chars[i] === candidate[j] ? 0 : 1)));}
-      row = next;
-    }
-    if (row[candidate.length]! < 3) {return suggestion;}
-  }
-  return '';
 }
 
 /** Resolve the scanner's literal slices, retaining byte/grapheme diagnostic ranges. */

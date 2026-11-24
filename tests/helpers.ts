@@ -12,6 +12,11 @@ export const DRIVERS = join(ROOT, "lab", "drivers", "node_modules");
 export const MAPPER = join(ROOT, "src", "mapper.ts");
 export const INDEX = pathToFileURL(join(ROOT, "src", "index.ts")).href;
 
+/** Construct the same native date shape that driver and application inputs provide. */
+export const nativeDriverDate = (value?: string | number): Date =>
+  // oxlint-disable-next-line rules/no-js-date -- These fixtures exercise the JavaScript Date type, including deliberately invalid dates.
+  matchesUndefined(value) ? new Date() : new Date(value);
+
 /**
  * @param implementation - The synchronous implementation of the test double.
  * @returns A driver method that fulfills or rejects the same way as an asynchronous database driver.

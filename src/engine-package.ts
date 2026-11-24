@@ -72,25 +72,6 @@ const exportedTooling = (module: unknown): Tooling => {
 
 let loaded: Promise<Tooling> | undefined = undefined;
 
-/** The build-time half, as the project of the directory `from` finds it, or reylo's own install. */
-export function tooling(from: string = process.cwd()): Promise<Tooling> {
-  if (!loaded) {
-    const loading = load(from);
-    // A failure is not kept: an engine may be installed while the process runs.
-    loading.catch(() => {
-      if (loaded === loading) {loaded = undefined;}
-    });
-    loaded = loading;
-  }
-  return loaded;
-}
-
-/** Closes the build steps' connections, where a build step has opened any. */
-export async function releaseConnections(): Promise<void> {
-  const loading = loaded;
-  if (loading) {await (await loading.catch(() => undefined))?.releaseConnections();}
-}
-
 async function load(from: string): Promise<Tooling> {
   let other: { name: string; version: string | undefined; dir: string } | undefined;
   for (const base of [path.join(from, "package.json"), import.meta.url]) {
@@ -119,4 +100,23 @@ async function load(from: string): Promise<Tooling> {
   }
   if (other) {throw new Error(`reylo ${VERSION} runs with ${other.name} ${VERSION}, and the one installed is ${other.version ?? "of no version"} (${other.dir}): npm install -D ${other.name}@${VERSION}`);}
   throw new Error(`reylo's SQLite/HCL build steps are not installed: npm install -D @totto2727/reylo-sqlite`);
+}
+
+/** The build-time half, as the project of the directory `from` finds it, or reylo's own install. */
+export function tooling(from: string = process.cwd()): Promise<Tooling> {
+  if (!loaded) {
+    const loading = load(from);
+    // A failure is not kept: an engine may be installed while the process runs.
+    loading.catch(() => {
+      if (loaded === loading) {loaded = undefined;}
+    });
+    loaded = loading;
+  }
+  return loaded;
+}
+
+/** Closes the build steps' connections, where a build step has opened any. */
+export async function releaseConnections(): Promise<void> {
+  const loading = loaded;
+  if (loading) {await (await loading.catch(() => undefined))?.releaseConnections();}
 }

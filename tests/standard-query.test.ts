@@ -138,6 +138,17 @@ test("a query defined by hand without its columns cannot decode, and says so", (
   assert.throws(() => bare["~standard"].query.decode([["1"]]), /without its columns/u);
 });
 
+
+/** A module built for `sql` in `root` and imported. */
+async function built(root: string, name: string, sql: string) {
+  const file = join(root, `${name}.sql`);
+  await writeFile(file, sql);
+  const { code } = await sqlModule(file, sql);
+  const out = join(root, `${name}.mjs`);
+  await writeFile(out, code.replace(`from "@totto2727/reylo"`, `from ${JSON.stringify(INDEX)}`));
+  return (await import(`${pathToFileURL(out).href}?${Math.random()}`)).default;
+}
+
 // oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
 test("sqlite: node:sqlite runs a built import as a Standard Query, with its own conversions off, to .run()'s output", async () => {
   const root = await mkdtemp(join(tmpdir(), "reylo-standard-"));
@@ -167,14 +178,3 @@ test("sqlite: node:sqlite runs a built import as a Standard Query, with its own 
     for (const session of Session.opened()) {await session.close();}
   }
 });
-
-
-/** A module built for `sql` in `root` and imported. */
-async function built(root: string, name: string, sql: string) {
-  const file = join(root, `${name}.sql`);
-  await writeFile(file, sql);
-  const { code } = await sqlModule(file, sql);
-  const out = join(root, `${name}.mjs`);
-  await writeFile(out, code.replace(`from "@totto2727/reylo"`, `from ${JSON.stringify(INDEX)}`));
-  return (await import(`${pathToFileURL(out).href}?${Math.random()}`)).default;
-}

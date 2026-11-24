@@ -30,6 +30,31 @@ const nullable = function (schema: Schema | JsonSchema): Schema | JsonSchema {
 /** A PostGIS geometry inside a document, which its cast to JSON writes as GeoJSON. */
 const GEOJSON: Schema = { type: "object", properties: { type: { type: "string" } }, required: ["type"], description: "a GeoJSON geometry" };
 
+/** The JSON form of a value of `kind` as `run` returns it, once JSON: each kind's one representation (src/values.ts). */
+function kindSchema(kind: ScalarKind, name: string, dialect: Dialect): Schema {
+  switch (kind) {
+    case "bool": { return { type: "boolean" }; }
+    // A SQLite INTEGER is 64 bits wide, and so is an oid's range past int4's.
+    case "int": { return name === "oid" || dialect === "sqlite" || name === "uinteger" ? { type: "integer", format: "int64" } : { type: "integer", format: "int32" }; }
+    case "float": { return name === "float4" || (dialect === "duckdb" && name === "float") ? { type: "number", format: "float" } : { type: "number", format: "double" }; }
+    // A BigInt, as the JSON integer it is.
+    case "int8": { return { type: "integer", format: "int64" }; }
+    case "decimal": { return { type: "string", format: "decimal" }; }
+    case "timestamptz": { return { type: "string", format: "date-time" }; }
+    // RFC 3339's duration, which JSON Schema's `duration` format names, has no sign and no fraction.
+    case "interval": { return { type: "string", description: "an ISO 8601 duration with its sign in front (P1Y2M3DT4H5M6.789S, -P1D); one whose parts differ in sign signs each part (P1M-1D)" }; }
+    case "date": { return { type: "string", format: "date" }; }
+    // A date and a time with no zone, which RFC 3339's date-time does not admit.
+    case "timestamp": { return { type: "string", description: "a date and time without a time zone, as the database wrote it (2026-10-20T10:00:00.123456)" }; }
+    case "bytes": { return { type: "string", format: "byte", contentEncoding: "base64" }; }
+    case "vector": { return { type: "array", items: { type: "number", format: "float" } }; }
+    case "hstore": { return { type: "object", additionalProperties: { type: ["string", "null"] } }; }
+    case "text": { return { type: "string" }; }
+    case "json": { return {}; }
+    case "unknown": { return {}; }
+  }
+}
+
 /** A base type by its catalog name, standing where `inJson` says: inside a JSON document, as a parameter the caller passes, or as `run` returns it. */
 const scalar = function (name: string, dialect: Dialect, inJson: boolean, input: boolean): Schema {
   if (name.includes("|")) {return { anyOf: name.split("|").map((part) => scalar(part, dialect, inJson, input)) };}
@@ -105,31 +130,6 @@ const scalar = function (name: string, dialect: Dialect, inJson: boolean, input:
     default: { return { type: "string", description: `${dialect === "mysql" ? "MySQL" : dialect === "duckdb" ? "DuckDB" : "pg"} type ${name}` }; }
   }
 };
-
-/** The JSON form of a value of `kind` as `run` returns it, once JSON: each kind's one representation (src/values.ts). */
-function kindSchema(kind: ScalarKind, name: string, dialect: Dialect): Schema {
-  switch (kind) {
-    case "bool": { return { type: "boolean" }; }
-    // A SQLite INTEGER is 64 bits wide, and so is an oid's range past int4's.
-    case "int": { return name === "oid" || dialect === "sqlite" || name === "uinteger" ? { type: "integer", format: "int64" } : { type: "integer", format: "int32" }; }
-    case "float": { return name === "float4" || (dialect === "duckdb" && name === "float") ? { type: "number", format: "float" } : { type: "number", format: "double" }; }
-    // A BigInt, as the JSON integer it is.
-    case "int8": { return { type: "integer", format: "int64" }; }
-    case "decimal": { return { type: "string", format: "decimal" }; }
-    case "timestamptz": { return { type: "string", format: "date-time" }; }
-    // RFC 3339's duration, which JSON Schema's `duration` format names, has no sign and no fraction.
-    case "interval": { return { type: "string", description: "an ISO 8601 duration with its sign in front (P1Y2M3DT4H5M6.789S, -P1D); one whose parts differ in sign signs each part (P1M-1D)" }; }
-    case "date": { return { type: "string", format: "date" }; }
-    // A date and a time with no zone, which RFC 3339's date-time does not admit.
-    case "timestamp": { return { type: "string", description: "a date and time without a time zone, as the database wrote it (2026-10-20T10:00:00.123456)" }; }
-    case "bytes": { return { type: "string", format: "byte", contentEncoding: "base64" }; }
-    case "vector": { return { type: "array", items: { type: "number", format: "float" } }; }
-    case "hstore": { return { type: "object", additionalProperties: { type: ["string", "null"] } }; }
-    case "text": { return { type: "string" }; }
-    case "json": { return {}; }
-    case "unknown": { return {}; }
-  }
-}
 
 /** An object of `fields`, each spelled by `field`, every key required unless `optional` says otherwise. */
 const object = function (fields: Readonly<{ name: string }[]>, field: (f: number) => Schema | JsonSchema, optional: (f: number) => boolean = () => false, closed = false): Schema {

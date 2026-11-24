@@ -29,6 +29,31 @@ const carriageReturn = 13;
 const lfLength = 1;
 const crlfLength = 2;
 
+function equalBytes(a: Uint8Array, b: Uint8Array): boolean {
+  return a.length === b.length && a.every((v, i) => v === b[i]);
+}
+// Bytes.TrimSpace uses Unicode White_Space, which deliberately excludes BOM.
+function trimSpace(data: Uint8Array): Uint8Array {
+  const ws = (n: number) => (n >= 9 && n <= 13) || n === 32 || n === 0x85 || n === 0xA0 || n === 0x16_80 || (n >= 0x20_00 && n <= 0x20_0A) || n === 0x20_28 || n === 0x20_29 || n === 0x20_2F || n === 0x20_5F || n === 0x30_00;
+  // The heredoc candidate is already UTF-8 tokenized. Trimming via code points is
+  // Safe here and preserves the original bytes by calculating UTF-8 widths.
+  let from = 0;
+  let to = data.length;
+  const decoded = new TextDecoder('utf-8', { ignoreBOM: true }).decode(data);
+  let leading = true;
+  let trailing = 0;
+  for (const ch of decoded) {
+    const n = ch.codePointAt(0)!;
+    const width = n <= 0x7F ? 1 : n <= 0x7_FF ? 2 : n <= 0xFF_FF ? 3 : 4;
+    if (ws(n)) {
+      if (leading) {from += width;}
+      else {trailing += width;}
+    } else { leading = false; trailing = 0; }
+  }
+  to -= trailing;
+  return data.subarray(from, to);
+}
+
 // Token accumulation deliberately segments each token separately, as token.go does.
 // Whitespace between tokens is ASCII, so the skipped byte count is a column count.
 const scanTokens = function (input: Uint8Array, filename: string, start: Pos, mode: 'normal' | 'template' | 'ident'): Token[] {
@@ -223,31 +248,6 @@ const scanTokens = function (input: Uint8Array, filename: string, start: Pos, mo
   emit('TokenEOF', data.length, data.length);
   return tokens;
 };
-
-function equalBytes(a: Uint8Array, b: Uint8Array): boolean {
-  return a.length === b.length && a.every((v, i) => v === b[i]);
-}
-// Bytes.TrimSpace uses Unicode White_Space, which deliberately excludes BOM.
-function trimSpace(data: Uint8Array): Uint8Array {
-  const ws = (n: number) => (n >= 9 && n <= 13) || n === 32 || n === 0x85 || n === 0xA0 || n === 0x16_80 || (n >= 0x20_00 && n <= 0x20_0A) || n === 0x20_28 || n === 0x20_29 || n === 0x20_2F || n === 0x20_5F || n === 0x30_00;
-  // The heredoc candidate is already UTF-8 tokenized. Trimming via code points is
-  // Safe here and preserves the original bytes by calculating UTF-8 widths.
-  let from = 0;
-  let to = data.length;
-  const decoded = new TextDecoder('utf-8', { ignoreBOM: true }).decode(data);
-  let leading = true;
-  let trailing = 0;
-  for (const ch of decoded) {
-    const n = ch.codePointAt(0)!;
-    const width = n <= 0x7F ? 1 : n <= 0x7_FF ? 2 : n <= 0xFF_FF ? 3 : 4;
-    if (ws(n)) {
-      if (leading) {from += width;}
-      else {trailing += width;}
-    } else { leading = false; trailing = 0; }
-  }
-  to -= trailing;
-  return data.subarray(from, to);
-}
 
 export function lexConfig(input: Uint8Array, filename: string, start: Pos = { line: 1, column: 1, byte: 0 }): { tokens: Token[]; diagnostics: Diagnostic[] } {
   const tokens = scanTokens(input, filename, start, 'normal');

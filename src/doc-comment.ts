@@ -134,6 +134,18 @@ export function statementAfter(sql: string, leading: Leading): string {
   return sql.slice(leading.end).trim();
 }
 
+/** The fence a Markdown text opens and never closes, which would take in what follows it. */
+function openFence(text: string): string | undefined {
+  let open: string | undefined;
+  for (const line of text.split("\n")) {
+    const regexMatch = /^ {0,3}(`{3,}|~{3,})/u.exec(line);
+    if (!regexMatch) {continue;}
+    if (!open) {open = regexMatch[1];}
+    else if (regexMatch[1]![0] === open[0] && regexMatch[1]!.length >= open.length && !line.slice(regexMatch[0].length).trim()) {open = undefined;}
+  }
+  return open;
+}
+
 /**
  * A JSDoc comment, indented by `indent`: the prose, then `sql` in a fenced `sql` block, then
  * `note`, each a paragraph where it is given. A star before a slash would end the comment, so a
@@ -155,16 +167,4 @@ export function docComment(prose: string, sql: string | undefined, note = "", in
   if (!parts.length) {return "";}
   const body = parts.join("\n\n").replaceAll("*/", "*\\/").split("\n");
   return [`${indent}/**`, ...body.map((l) => (l ? `${indent} * ${l}` : `${indent} *`)), `${indent} */`, ""].join("\n");
-}
-
-/** The fence a Markdown text opens and never closes, which would take in what follows it. */
-function openFence(text: string): string | undefined {
-  let open: string | undefined;
-  for (const line of text.split("\n")) {
-    const regexMatch = /^ {0,3}(`{3,}|~{3,})/u.exec(line);
-    if (!regexMatch) {continue;}
-    if (!open) {open = regexMatch[1];}
-    else if (regexMatch[1]![0] === open[0] && regexMatch[1]!.length >= open.length && !line.slice(regexMatch[0].length).trim()) {open = undefined;}
-  }
-  return open;
 }

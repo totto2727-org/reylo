@@ -101,6 +101,19 @@ export function differences(fresh: Fresh, rows: Readonly<unknown[]>, dialect?: "
   return out;
 }
 
+/** Where the parenthesis that opens `s` closes, its strings skipped. */
+function closes(s: string): number {
+  let depth = 0;
+  for (let i = 0; i < s.length; i++) {
+    if (s[i] === "'") {
+      i++;
+      while (i < s.length && !(s[i] === "'" && s[i + 1] !== "'")) {i += s[i] === "'" ? 2 : 1;}
+    } else if (s[i] === "(") {depth++;}
+    else if (s[i] === ")" && --depth === 0) {return i;}
+  }
+  return -1;
+}
+
 /**
  * A SQLite default's text in one spelling, since engines that read the same schema write it
  * differently: `pragma_table_xinfo` gives the text as written on SQLite (`member`,
@@ -132,19 +145,6 @@ export function sqliteDefault(text: string): string {
   // Parentheses around the whole text, as many as there are.
   while (out.startsWith("(") && out.endsWith(")") && closes(out) === out.length - 1) {out = out.slice(1, -1);}
   return out;
-}
-
-/** Where the parenthesis that opens `s` closes, its strings skipped. */
-function closes(s: string): number {
-  let depth = 0;
-  for (let i = 0; i < s.length; i++) {
-    if (s[i] === "'") {
-      i++;
-      while (i < s.length && !(s[i] === "'" && s[i + 1] !== "'")) {i += s[i] === "'" ? 2 : 1;}
-    } else if (s[i] === "(") {depth++;}
-    else if (s[i] === ")" && --depth === 0) {return i;}
-  }
-  return -1;
 }
 
 const asciiUpper = (s: string) => s.replace(/[a-z]+/gu, (m) => m.toUpperCase());

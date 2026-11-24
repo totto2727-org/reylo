@@ -23,12 +23,6 @@ const getCacheKey = function (_source: string, path: string, options: Options): 
   return createHash("sha256").update(code).update(String(options.supportsStaticESM)).update(options.configString).digest("hex");
 };
 
-const transform = function (_source: string, path: string, options: Options): { code: string } {
-  const code = built.get(path) ?? sqlModuleSync(path);
-  built.delete(path);
-  return { code: options.supportsStaticESM ? code : commonJs(path, code) };
-};
-
 // The loader's module has one import, two named exports and a default (`src/loader.ts`); each is
 // One line, since the values are JSON.
 function commonJs(path: string, code: string): string {
@@ -39,5 +33,11 @@ function commonJs(path: string, code: string): string {
   if (/^(?:import|export) /mu.test(out)) {throw new Error(`${path}: reylo's module has a shape reylo/jest cannot make CommonJS.`);}
   return `Object.defineProperty(exports, "__esModule", { value: true });\n${out}`;
 }
+
+const transform = function (_source: string, path: string, options: Options): { code: string } {
+  const code = built.get(path) ?? sqlModuleSync(path);
+  built.delete(path);
+  return { code: options.supportsStaticESM ? code : commonJs(path, code) };
+};
 
 export default { getCacheKey, process: transform };

@@ -200,6 +200,12 @@ type AnyClient = Record<string, any> & ((...args: any[]) => any);
  */
 export type ParamsInput = Record<string, unknown>;
 
+// A SQLite-backed Durable Object's `ctx.storage.sql`: exec() and databaseSize, and no prepare().
+// Sqlite3's Database has exec() too, beside all().
+function isDurableObjectSql(c: AnyClient | null | undefined): boolean {
+  return !matchesNullish(c) && hasFunctionType(c.exec) && !hasFunctionType(c.prepare) && !hasFunctionType(c.all) && "databaseSize" in c;
+}
+
 /**
  * Runs the statement and returns its rows (an empty array for a statement that returns none).
  * On a synchronous SQLite client the rows come back at once and an error is thrown; on every
@@ -259,12 +265,6 @@ function executeSyncSqlite(c: AnyClient, query: QueryModule, params: ParamsInput
   return runSyncSqlite(c, text, values, query.columns);
 }
 
-// A SQLite-backed Durable Object's `ctx.storage.sql`: exec() and databaseSize, and no prepare().
-// Sqlite3's Database has exec() too, beside all().
-function isDurableObjectSql(c: AnyClient | null | undefined): boolean {
-  return !matchesNullish(c) && hasFunctionType(c.exec) && !hasFunctionType(c.prepare) && !hasFunctionType(c.all) && "databaseSize" in c;
-}
-
 // A Durable Object's exec() refuses a BigInt ("Cannot convert a BigInt value to a number").
 function durableObjectValues(query: QueryModule, names: Readonly<string[]>, values: unknown[]): unknown[] {
   return values.map((v, i) => numberOrDigits(v, query.inputs?.[names[i]!]?.type, "durable-object"));
@@ -302,6 +302,13 @@ function isTurso(c: AnyClient): boolean {
 const isSlonik = function (c: AnyClient): boolean {
   return hasFunctionType(c.maybeOneFirst) && hasFunctionType(c.anyFirst);
 };
+
+function asByteaHex(v: unknown) {
+  if (!(v instanceof Uint8Array)) {return v;}
+  let hex = "\\x";
+  for (const byte of v) {hex += (byte < 16 ? "0" : "") + byte.toString(16);}
+  return hex;
+}
 
 // A value as Slonik's sql tag takes it, which is a string, a number, a boolean, a BigInt or null:
 // The rest as pg would write them, binary data as `\x` and its hex, an array as its literal, a
@@ -717,13 +724,6 @@ function numberOrDigits(v: unknown, type: EngineType | undefined, driver: "sqlit
   throw new ParameterError(`sqlite3 binds a BigInt as NULL, and ${v} is past 2^53 - 1, where a number stops being exact: ${digits}, or run the statement on better-sqlite3, node:sqlite or libSQL, which bind a BigInt.`);
 }
 
-function asByteaHex(v: unknown) {
-  if (!(v instanceof Uint8Array)) {return v;}
-  let hex = "\\x";
-  for (const byte of v) {hex += (byte < 16 ? "0" : "") + byte.toString(16);}
-  return hex;
-}
-
 /**
  * A Postgres array literal, written as pg writes one (`arrayString` in pg/lib/utils.js): a nested
  * array in braces, null and undefined as NULL, binary data as `\\x` and its hex, and every other
@@ -753,6 +753,13 @@ function dateText(d: Date): string {
   return `${pad(year < 1 ? 1 - year : year, 4)}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}.${pad(d.getMilliseconds(), 3)}${offset < 0 ? "-" : "+"}${pad(Math.floor(abs / 60))}:${pad(abs % 60)}${year < 1 ? " BC" : ""}`;
 }
 
+function indexOf(query: QueryModule, p: { name: string; start: number; end: number }) {
+  const index = query.params.indexOf(p.name);
+  // A hand-built query whose `params` misses a placeholder would bind `$0`.
+  if (index === -1) {throw new Error(`The statement's placeholder ${query.sql.slice(p.start, p.end)} is parameter "${p.name}", which the query's params (${JSON.stringify(query.params)}) do not list.`);}
+  return index;
+}
+
 /**
  * The statement as Reylo sends it to the database, and the parameter each placeholder binds: the
  * engine's compiled text where a build step wrote one into the module. Without it (a query
@@ -777,13 +784,6 @@ export function compile(query: QueryModule): { text: string; order: Readonly<str
     last = p.end;
   }
   return { text: text + query.sql.slice(last), order: numbered ? query.params : order };
-}
-
-function indexOf(query: QueryModule, p: { name: string; start: number; end: number }) {
-  const index = query.params.indexOf(p.name);
-  // A hand-built query whose `params` misses a placeholder would bind `$0`.
-  if (index === -1) {throw new Error(`The statement's placeholder ${query.sql.slice(p.start, p.end)} is parameter "${p.name}", which the query's params (${JSON.stringify(query.params)}) do not list.`);}
-  return index;
 }
 
 const accepted: Record<Dialect, string> = {

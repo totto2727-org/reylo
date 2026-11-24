@@ -83,6 +83,25 @@ export type Response =
 /** An engine's request function: one JSON request in, its answer out. */
 export type EngineCall = (request: string) => string;
 
+async function fulfil(need: Need, io: EngineIo): Promise<Answer> {
+  try {
+    if (need.kind === "describe") {
+      const d = await io.describe(need.sql);
+      if ("kind" in d && d.kind === "duckdb") {return { describe: { statement: d.statement, params: d.params, columns: d.columns } };}
+      if ("kind" in d) {return { mysql: { columns: d.columns, params: d.params } };}
+      return { describe: { params: d.params.map((p) => p.oid), columns: d.columns } };
+    }
+    return { rows: await io.query(need.sql, need.params) };
+  } catch (e) {
+    if (e instanceof Unreachable) {throw e;}
+    const err = e as Error & { code?: string; position?: string | number };
+    const error: DbError = { message: err.message };
+    if (err.code) {error.code = err.code;}
+    if (!matchesUndefined(err.position)) {error.position = Number(err.position);}
+    return { error };
+  }
+}
+
 /**
  * An engine's core: its requests that need no database, and the analysis of a statement whose
  * needs a host answers itself (`analyze` with an `EngineIo`), as the HCL catalog does.
@@ -120,25 +139,6 @@ export class EngineCore {
       await Promise.all(r.needs.map(async (need) => { answers[need.id] = await cache.get(need, () => fulfil(need, io)); }));
     }
     throw new Error("the analysis engine did not converge");
-  }
-}
-
-async function fulfil(need: Need, io: EngineIo): Promise<Answer> {
-  try {
-    if (need.kind === "describe") {
-      const d = await io.describe(need.sql);
-      if ("kind" in d && d.kind === "duckdb") {return { describe: { statement: d.statement, params: d.params, columns: d.columns } };}
-      if ("kind" in d) {return { mysql: { columns: d.columns, params: d.params } };}
-      return { describe: { params: d.params.map((p) => p.oid), columns: d.columns } };
-    }
-    return { rows: await io.query(need.sql, need.params) };
-  } catch (e) {
-    if (e instanceof Unreachable) {throw e;}
-    const err = e as Error & { code?: string; position?: string | number };
-    const error: DbError = { message: err.message };
-    if (err.code) {error.code = err.code;}
-    if (!matchesUndefined(err.position)) {error.position = Number(err.position);}
-    return { error };
   }
 }
 

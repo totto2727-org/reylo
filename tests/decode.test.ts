@@ -6,7 +6,7 @@ import { execute } from '../src/execute.ts';
 import type { QueryModule } from '../src/execute.ts';
 import { parseArray } from "../src/decode.ts";
 import type { Columns } from "../src/values.ts";
-import { promiseDriverStub } from "./helpers.ts";
+import { nativeDriverDate, promiseDriverStub } from "./helpers.ts";
 
 // Fakes of the Postgres drivers that decode as the real ones do (checked against
 // Lab/drivers/node_modules and wiki/driver-decoding/spike/postgres.md): a result asks a types
@@ -328,7 +328,7 @@ const pglite = function (db: Db, instance: Record<number, Parser> | undefined) {
 test("PGlite: per-query parsers that name the statement's oids, every oid the instance parses on a first run; a transaction too", async () => {
   const db = database();
   // The instance's table: the app's parsers, and PGlite's array parsers built at start.
-  const instance: Record<number, Parser> = { ...appTable, 1082: (x) => new Date(x), 1184: (x) => new Date(x), [POSINT_ARR]: (x) => parseArray(x, String), [ROLE]: (x) => x.toUpperCase() };
+  const instance: Record<number, Parser> = { ...appTable, 1082: (x) => nativeDriverDate(x), 1184: (x) => nativeDriverDate(x), [POSINT_ARR]: (x) => parseArray(x, String), [ROLE]: (x) => x.toUpperCase() };
   const lite = pglite(db, instance);
   const q = { ...built, sql: "select * from probe where id = :id -- pglite" };
   const [row] = (await execute(lite as never, q, { id: 1 })) as Record<string, unknown>[];
@@ -391,16 +391,16 @@ test("postgres.js: .raw() and Reylo's text parsers, the rows built with the modu
 test("Bun.sql: its values are given their kinds after the fact", async () => {
   const bunRow = {
     big: BigInt("9007199254740993"),
-    day: new Date("2024-01-15T00:00:00Z"),
-    wall: new Date("2024-01-15T10:30:00.120Z"),
-    old: new Date("-000043-03-15T12:00:00Z"),
-    far: new Date("+012345-06-01T12:00:00Z"),
+    day: nativeDriverDate("2024-01-15T00:00:00Z"),
+    wall: nativeDriverDate("2024-01-15T10:30:00.120Z"),
+    old: nativeDriverDate("-000043-03-15T12:00:00Z"),
+    far: nativeDriverDate("+012345-06-01T12:00:00Z"),
     ints: Int32Array.of(1, 2),
     roles: "{admin,member}",
     shapes: "{0101:0102}",
     embedding: "[1,2.5]",
     prefs: '"a"=>"1"',
-    at: new Date("2024-01-15T08:30:00Z"),
+    at: nativeDriverDate("2024-01-15T08:30:00Z"),
     forever: Infinity,
   };
   const bun = { unsafe: async () => [{ ...bunRow }], commitDistributed: async () => {} };
@@ -409,7 +409,7 @@ test("Bun.sql: its values are given their kinds after the fact", async () => {
   assert.ok(bunRow.at instanceof Date);
   assert.deepEqual(await execute(bun, q, { id: 1 }), [{ big: BigInt("9007199254740993"), day: "2024-01-15", wall: "2024-01-15T10:30:00.12", old: "-000043-03-15T12:00:00", far: "+012345-06-01T12:00:00", ints: [1, 2], roles: ["admin", "member"], shapes: ["0101", "0102"], embedding: [1, 2.5], prefs: { a: "1" }, at: "2024-01-15T08:30:00Z", forever: "infinity" }]);
   // Without bigint: true, Bun's int8 is its text.
-  const plain = { unsafe: async () => [{ big: "9007199254740993", at: new Date("2024-01-15T08:30:00.5Z") }], commitDistributed: async () => {} };
+  const plain = { unsafe: async () => [{ big: "9007199254740993", at: nativeDriverDate("2024-01-15T08:30:00.5Z") }], commitDistributed: async () => {} };
   assert.deepEqual(await execute(plain, { ...probe, columns: [["big", "int8"], ["at", "timestamptz"]] }, { id: 1 }), [{ big: BigInt("9007199254740993"), at: "2024-01-15T08:30:00.5Z" }]);
   // A query defined by hand: a typed array an array, and a Date, which no value is, the instant's text.
   assert.deepEqual(await execute(bun, probe, { id: 1 }), [{ ...bunRow, day: "2024-01-15T00:00:00Z", wall: "2024-01-15T10:30:00.12Z", old: "-000043-03-15T12:00:00Z", far: "+012345-06-01T12:00:00Z", at: "2024-01-15T08:30:00Z", ints: [1, 2] }]);

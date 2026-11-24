@@ -62,6 +62,35 @@ const openProject = async function (dir: string, env: Record<string, string | un
   return { project, engine: own };
 };
 
+function readEntry(file: string): Entry | undefined {
+  if (!existsSync(file)) {return undefined;}
+  try {
+    const entry = JSON.parse(readFileSync(file, "utf8")) as Entry;
+    return entry.version === ENTRY_VERSION ? entry : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+// Several processes write `.reylo/` at once (an editor's type check, a dev server, a build), so an
+// Entry is written to a file of its own and renamed into place: a reader sees a whole entry or
+// None. `.reylo/.gitignore` keeps the directory out of git, as pytest's and ruff's caches do. The
+// Cache is only for speed, so a directory that cannot be written (a read-only checkout) is not an
+// Error.
+function writeEntry(root: string, file: string, entry: Entry): void {
+  const dir = join(root, ".reylo");
+  const tmp = `${file}.${process.pid}.${Math.random().toString(36).slice(2)}.tmp`;
+  try {
+    mkdirSync(join(dir, "queries"), { recursive: true });
+    const ignore = join(dir, ".gitignore");
+    if (!existsSync(ignore)) {writeFileSync(ignore, "# reylo's cache: written by the type check, the build steps and reylo generate; never committed.\n*\n");}
+    writeFileSync(tmp, `${JSON.stringify(entry)  }\n`);
+    renameSync(tmp, file);
+  } catch {
+    rmSync(tmp, { force: true });
+  }
+}
+
 export class Session {
   /** The project as resolved when the session opened, or again once a failed `direct_url` command succeeds (`#reread`). */
   public project!: ResolvedProject;
@@ -511,35 +540,6 @@ export async function releaseConnections(): Promise<void> {
 }
 
 const sha256 = (text: string) => createHash("sha256").update(text).digest("hex");
-
-function readEntry(file: string): Entry | undefined {
-  if (!existsSync(file)) {return undefined;}
-  try {
-    const entry = JSON.parse(readFileSync(file, "utf8")) as Entry;
-    return entry.version === ENTRY_VERSION ? entry : undefined;
-  } catch {
-    return undefined;
-  }
-}
-
-// Several processes write `.reylo/` at once (an editor's type check, a dev server, a build), so an
-// Entry is written to a file of its own and renamed into place: a reader sees a whole entry or
-// None. `.reylo/.gitignore` keeps the directory out of git, as pytest's and ruff's caches do. The
-// Cache is only for speed, so a directory that cannot be written (a read-only checkout) is not an
-// Error.
-function writeEntry(root: string, file: string, entry: Entry): void {
-  const dir = join(root, ".reylo");
-  const tmp = `${file}.${process.pid}.${Math.random().toString(36).slice(2)}.tmp`;
-  try {
-    mkdirSync(join(dir, "queries"), { recursive: true });
-    const ignore = join(dir, ".gitignore");
-    if (!existsSync(ignore)) {writeFileSync(ignore, "# reylo's cache: written by the type check, the build steps and reylo generate; never committed.\n*\n");}
-    writeFileSync(tmp, `${JSON.stringify(entry)  }\n`);
-    renameSync(tmp, file);
-  } catch {
-    rmSync(tmp, { force: true });
-  }
-}
 
 /**
  * One query per dialect whose rows change when anything an analysis reads changes: relations and

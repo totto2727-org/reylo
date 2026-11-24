@@ -73,6 +73,12 @@ const statementFor = function (db: AnyClient, text: string, typed: boolean): Kep
   return entry;
 };
 
+// Every column typed: a number past 2^53 in one can be told as rounded (src/values.ts). A column
+// Read as a BigInt (`int8`) needs the statement's integers exact.
+function everyColumnTyped(columns: Columns | undefined): boolean {
+  return !matchesUndefined(columns) && columns.length > 0 && !columns.some(([, kind]) => kind === "unknown" || kind.split("|").includes("int8"));
+}
+
 /**
  * Runs `text` on a synchronous SQLite database (better-sqlite3, node:sqlite, bun:sqlite, Turso's
  * compat Database) and returns its normalized rows; a statement that answers through a promise (no
@@ -115,12 +121,6 @@ function reader(st: Statement): boolean | undefined {
   }
 }
 
-// Every column typed: a number past 2^53 in one can be told as rounded (src/values.ts). A column
-// Read as a BigInt (`int8`) needs the statement's integers exact.
-function everyColumnTyped(columns: Columns | undefined): boolean {
-  return !matchesUndefined(columns) && columns.length > 0 && !columns.some(([, kind]) => kind === "unknown" || kind.split("|").includes("int8"));
-}
-
 /**
  * Runs `text` on Turso's promise API (a Database from `connect()`, or the Transaction
  * `transactionAsync()` hands its callback) and returns its normalized rows. Its prepare() returns
@@ -161,6 +161,11 @@ type Plan = {
 
 /** An integer's digits, as libSQL under intMode "string" hands one over. */
 const DIGITS = /^[+-]?\d+$/u;
+
+/** A REAL's, an INTEGER's or a NUMERIC's column (`int|float|text`, the one kind a NUMERIC has), where integer digits can only be an INTEGER's. */
+function numericOnly(kinds: string[]): boolean {
+  return kinds.every((k) => k === "int" || k === "float") || (kinds.length === 3 && kinds.includes("int") && kinds.includes("float") && kinds.includes("text"));
+}
 
 /**
  * What each column's values need, worked out once per call rather than per value. SQLite holds a
@@ -227,11 +232,6 @@ function refuseClass(column: string, kinds: string[], v: unknown): never {
 function byteLength(v: unknown): number {
   if (v instanceof ArrayBuffer || ArrayBuffer.isView(v)) {return v.byteLength;}
   return Array.isArray(v) ? v.length : 0;
-}
-
-/** A REAL's, an INTEGER's or a NUMERIC's column (`int|float|text`, the one kind a NUMERIC has), where integer digits can only be an INTEGER's. */
-function numericOnly(kinds: string[]): boolean {
-  return kinds.every((k) => k === "int" || k === "float") || (kinds.length === 3 && kinds.includes("int") && kinds.includes("float") && kinds.includes("text"));
 }
 
 /**

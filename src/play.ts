@@ -44,6 +44,28 @@ type Backend = {
 
 const DEFAULT_PORT = 4983;
 
+function parseArgs(args: string[]): { port?: number; open: boolean; help: boolean } | string {
+  const out: { port?: number; open: boolean; help: boolean } = { open: true, help: false };
+  for (let i = 0; i < args.length; i++) {
+    const a = args[i]!;
+    const [flag, inline] = a.startsWith("--") && a.includes("=") ? [a.slice(0, a.indexOf("=")), a.slice(a.indexOf("=") + 1)] : [a, undefined];
+    const value = () => inline ?? args[++i];
+    if (flag === "--help" || flag === "-h") {out.help = true;}
+    else if (flag === "--no-open") {out.open = false;}
+    else if (flag === "--port") {
+      const n = Number(value());
+      if (!Number.isInteger(n) || n < 0 || n > 65_535) {return `--port takes a port number`;}
+      out.port = n;
+    } else {return `unknown argument ${a}`;}
+  }
+  return out;
+}
+
+function openBrowser(url: string): void {
+  const [command, args] = process.platform === "darwin" ? ["open", [url]] : process.platform === "win32" ? ["cmd", ["/c", "start", "", url]] : ["xdg-open", [url]];
+  spawn(command, args, { detached: true, stdio: "ignore" }).on("error", () => {}).unref();
+}
+
 export async function play(args: string[]): Promise<number> {
   const options = parseArgs(args);
   if (matchesString(options)) {
@@ -75,6 +97,43 @@ export async function play(args: string[]): Promise<number> {
 
 export type Playground = { url: string; label: string; notice?: string; close(): Promise<void> };
 
+/** The built page: in an installed reylo, `play/` beside its package.json; in this repository, dist/reylo/play/. */
+function pageDir(cwd: string): string | undefined {
+  const candidates = [process.env.REYLO_PLAY_PAGE];
+  // Reylo exports no package.json: its entry is resolved, and its directory found above it.
+  for (const from of [join(cwd, "noop.js"), import.meta.filename]) {
+    try {
+      let dir = dirname(createRequire(from).resolve("@totto2727/reylo"));
+      while (dir !== dirname(dir) && !existsSync(join(dir, "package.json"))) {dir = dirname(dir);}
+      candidates.push(join(dir, "play"));
+    } catch {}
+  }
+  candidates.push(join(import.meta.dirname, "..", "dist", "reylo", "play"));
+  return candidates.find((dir): dir is string => !!dir && existsSync(join(dir, "index.html")));
+}
+
+function send(res: ServerResponse, status: number, body: unknown): void {
+  res.writeHead(status, { "content-type": "application/json; charset=utf-8", "cache-control": "no-store", "x-content-type-options": "nosniff" });
+  res.end(JSON.stringify(body));
+}
+
+function listen(server: ReturnType<typeof createServer>, port: number | undefined): Promise<number | undefined> {
+  // A port the caller names is that port or nothing; the default moves up past ports in use.
+  const tries = matchesUndefined(port) ? Array.from({ length: 20 }, (_, i) => DEFAULT_PORT + i) : [port];
+  return new Promise((done) => {
+    const attempt = (i: number) => {
+      if (i >= tries.length) {return done(undefined);}
+      server.once("error", (e: NodeJS.ErrnoException) => (e.code === "EADDRINUSE" ? attempt(i + 1) : done(undefined)));
+      server.listen(tries[i], "127.0.0.1", () => {
+        server.removeAllListeners("error");
+        const address = server.address();
+        done(hasObjectType(address) && address ? address.port : undefined);
+      });
+    };
+    attempt(0);
+  });
+}
+
 /** Starts the playground for the project of `cwd`, on `port` (by default the first free one from 4983): what `reylo play` runs, and the tests. */
 export async function startPlay(options: { port?: number | undefined; cwd?: string; env?: Record<string, string | undefined> } = {}): Promise<Playground> {
   const cwd = options.cwd ?? process.cwd();
@@ -99,38 +158,6 @@ export async function startPlay(options: { port?: number | undefined; cwd?: stri
       await backend.close();
     },
   };
-}
-
-function parseArgs(args: string[]): { port?: number; open: boolean; help: boolean } | string {
-  const out: { port?: number; open: boolean; help: boolean } = { open: true, help: false };
-  for (let i = 0; i < args.length; i++) {
-    const a = args[i]!;
-    const [flag, inline] = a.startsWith("--") && a.includes("=") ? [a.slice(0, a.indexOf("=")), a.slice(a.indexOf("=") + 1)] : [a, undefined];
-    const value = () => inline ?? args[++i];
-    if (flag === "--help" || flag === "-h") {out.help = true;}
-    else if (flag === "--no-open") {out.open = false;}
-    else if (flag === "--port") {
-      const n = Number(value());
-      if (!Number.isInteger(n) || n < 0 || n > 65_535) {return `--port takes a port number`;}
-      out.port = n;
-    } else {return `unknown argument ${a}`;}
-  }
-  return out;
-}
-
-/** The built page: in an installed reylo, `play/` beside its package.json; in this repository, dist/reylo/play/. */
-function pageDir(cwd: string): string | undefined {
-  const candidates = [process.env.REYLO_PLAY_PAGE];
-  // Reylo exports no package.json: its entry is resolved, and its directory found above it.
-  for (const from of [join(cwd, "noop.js"), import.meta.filename]) {
-    try {
-      let dir = dirname(createRequire(from).resolve("@totto2727/reylo"));
-      while (dir !== dirname(dir) && !existsSync(join(dir, "package.json"))) {dir = dirname(dir);}
-      candidates.push(join(dir, "play"));
-    } catch {}
-  }
-  candidates.push(join(import.meta.dirname, "..", "dist", "reylo", "play"));
-  return candidates.find((dir): dir is string => !!dir && existsSync(join(dir, "index.html")));
 }
 
 /** The project's database, the one its type check reads; a project that names none is refused. */
@@ -251,23 +278,6 @@ function schemaText(dialect: Dialect, cat: Catalog): string {
     .join("\n\n");
 }
 
-function listen(server: ReturnType<typeof createServer>, port: number | undefined): Promise<number | undefined> {
-  // A port the caller names is that port or nothing; the default moves up past ports in use.
-  const tries = matchesUndefined(port) ? Array.from({ length: 20 }, (_, i) => DEFAULT_PORT + i) : [port];
-  return new Promise((done) => {
-    const attempt = (i: number) => {
-      if (i >= tries.length) {return done(undefined);}
-      server.once("error", (e: NodeJS.ErrnoException) => (e.code === "EADDRINUSE" ? attempt(i + 1) : done(undefined)));
-      server.listen(tries[i], "127.0.0.1", () => {
-        server.removeAllListeners("error");
-        const address = server.address();
-        done(hasObjectType(address) && address ? address.port : undefined);
-      });
-    };
-    attempt(0);
-  });
-}
-
 const TYPES: Record<string, string> = { ".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8", ".css": "text/css; charset=utf-8", ".woff2": "font/woff2", ".svg": "image/svg+xml", ".wasm": "application/wasm", ".json": "application/json" };
 
 async function handle(req: IncomingMessage, res: ServerResponse, backend: Backend, page: string, address: () => ReturnType<ReturnType<typeof createServer>["address"]>): Promise<void> {
@@ -308,11 +318,6 @@ async function handle(req: IncomingMessage, res: ServerResponse, backend: Backen
   res.end(readFileSync(path));
 }
 
-function send(res: ServerResponse, status: number, body: unknown): void {
-  res.writeHead(status, { "content-type": "application/json; charset=utf-8", "cache-control": "no-store", "x-content-type-options": "nosniff" });
-  res.end(JSON.stringify(body));
-}
-
 function readBody(req: IncomingMessage): Promise<string> {
   return new Promise((done, fail) => {
     let text = "";
@@ -324,10 +329,5 @@ function readBody(req: IncomingMessage): Promise<string> {
     req.on("end", () => done(text));
     req.on("error", fail);
   });
-}
-
-function openBrowser(url: string): void {
-  const [command, args] = process.platform === "darwin" ? ["open", [url]] : process.platform === "win32" ? ["cmd", ["/c", "start", "", url]] : ["xdg-open", [url]];
-  spawn(command, args, { detached: true, stdio: "ignore" }).on("error", () => {}).unref();
 }
 

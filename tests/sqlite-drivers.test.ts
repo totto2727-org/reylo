@@ -16,6 +16,12 @@ import { DRIVERS } from "./helpers.ts";
 const missing = ["better-sqlite3", "@libsql/client", "sqlite3"].find((d) => !existsSync(join(DRIVERS, d)));
 const skip = missing ? `lab/drivers is not installed (no ${missing})` : false;
 
+function link(root: string, driver: string) {
+  const to = join(root, "node_modules", driver);
+  mkdirSync(dirname(to), { recursive: true });
+  symlinkSync(join(DRIVERS, driver), to);
+}
+
 const project = function (drivers: string[]): { root: string; env: Record<string, string> } {
   const root = mkdtempSync(join(tmpdir(), "reylo-drivers-"));
   writeFileSync(join(root, "package.json"), JSON.stringify({ dependencies: Object.fromEntries(drivers.map((d) => [d, "*"])) }));
@@ -25,12 +31,6 @@ const project = function (drivers: string[]): { root: string; env: Record<string
   db.close();
   return { root, env: { DATABASE_URL: "file:./app.db" } };
 };
-
-function link(root: string, driver: string) {
-  const to = join(root, "node_modules", driver);
-  mkdirSync(dirname(to), { recursive: true });
-  symlinkSync(join(DRIVERS, driver), to);
-}
 
 const analyze = async function (root: string, env: Record<string, string>, sql: string) {
   const session = await Session.open(root, env);

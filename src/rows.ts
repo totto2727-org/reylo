@@ -49,6 +49,18 @@ class Raw {
   }
 }
 
+/** The checked rows as JSON text, a 64-bit integer as its digits. */
+function write(v: unknown): string {
+  if (v instanceof Raw) {return v.text;}
+  if (Array.isArray(v)) {return `[${v.map(write).join(",")}]`;}
+  if (!matchesNull(v) && hasObjectType(v)) {
+    return `{${Object.entries(v as Record<string, unknown>)
+      .map(([k, x]) => `${JSON.stringify(k)}:${write(x)}`)
+      .join(",")}}`;
+  }
+  return JSON.stringify(v);
+}
+
 /**
  * Checks a structured parameter's value against its column list, and gives the value to bind:
  * on Postgres the JSON value, which the run time binds as it binds every JSON parameter, and on
@@ -277,6 +289,32 @@ const MYSQL_INTEGERS: Record<string, Readonly<[bigint, bigint]>> = {
 };
 
 /**
+ * A date, a time of day or both, as text MySQL's CAST reads without changing it; it turns other
+ * text into NULL, an impossible date included, and rounds a fraction finer than the type keeps
+ * (`::time` keeps none, and `::datetime` is written as DATETIME(6)).
+ */
+function wallClock(base: string, written: string, v: unknown, fail: (message: string) => never): void {
+  const example = base === "date" ? `"2026-10-12"` : base === "time" ? `"19:06:48"` : `"2026-10-12 19:06:48.282"`;
+  if (!matchesString(v)) {return void fail(`is ${written}, which takes its text (${example}), not ${describe(v)}${v instanceof Date ? ": drivers write a Date's time in different zones" : ""}.`);}
+  const s = v.trim();
+  const keeps = Number(/\(\s*(\d+)\s*\)/u.exec(written)?.[1] ?? (base === "time" ? 0 : 6));
+  const m =
+    base === "time"
+      ? /^(-?)(\d{1,3}):(\d{2})(?::(\d{2})(?:\.(\d+))?)?$/u.exec(s)
+      : /^(\d{4})-(\d{2})-(\d{2})(?:(?:[T ])(\d{2}):(\d{2})(?::(\d{2})(?:\.(\d+))?)?)?$/u.exec(s);
+  const ok = (() => {
+    if (!m) {return false;}
+    if (base === "time") {return Number(m[2]) <= 838 && Number(m[3]) < 60 && Number(m[4] ?? 0) < 60 && (m[5] ?? "").length <= keeps;}
+    const [year, month, day] = [Number(m[1]), Number(m[2]), Number(m[3])];
+    const days = new Date(Date.UTC(year, month, 0)).getUTCDate();
+    if (month < 1 || month > 12 || day < 1 || day > days) {return false;}
+    if (base === "date") {return matchesUndefined(m[4]);}
+    return Number(m[4] ?? 0) < 24 && Number(m[5] ?? 0) < 60 && Number(m[6] ?? 0) < 60 && (m[7] ?? "").length <= keeps;
+  })();
+  if (!ok) {fail(`is ${written}, as text like ${example}${keeps > 0 && base !== "date" ? ` with at most ${keeps} digits after the second's point` : base === "time" ? " with no fraction of a second" : ""}; got ${describe(v)}, which MySQL's CAST would make NULL or change.`);}
+}
+
+/**
  * Checks the value of a parameter written `:p::type` on MySQL or SQLite, whose cast turns a value
  * it cannot read into 0 or NULL instead of failing (`CAST('abc' AS SIGNED)` is 0, and SQLite's
  * `CAST('1.9' AS INTEGER)` is 1), against the type as written, before the statement runs; the
@@ -304,32 +342,6 @@ export function checkCast(name: string, written: string, type: EngineType, v: un
     return;
   }
   check(type, written, v, dialect, fail);
-}
-
-/**
- * A date, a time of day or both, as text MySQL's CAST reads without changing it; it turns other
- * text into NULL, an impossible date included, and rounds a fraction finer than the type keeps
- * (`::time` keeps none, and `::datetime` is written as DATETIME(6)).
- */
-function wallClock(base: string, written: string, v: unknown, fail: (message: string) => never): void {
-  const example = base === "date" ? `"2026-10-12"` : base === "time" ? `"19:06:48"` : `"2026-10-12 19:06:48.282"`;
-  if (!matchesString(v)) {return void fail(`is ${written}, which takes its text (${example}), not ${describe(v)}${v instanceof Date ? ": drivers write a Date's time in different zones" : ""}.`);}
-  const s = v.trim();
-  const keeps = Number(/\(\s*(\d+)\s*\)/u.exec(written)?.[1] ?? (base === "time" ? 0 : 6));
-  const m =
-    base === "time"
-      ? /^(-?)(\d{1,3}):(\d{2})(?::(\d{2})(?:\.(\d+))?)?$/u.exec(s)
-      : /^(\d{4})-(\d{2})-(\d{2})(?:(?:[T ])(\d{2}):(\d{2})(?::(\d{2})(?:\.(\d+))?)?)?$/u.exec(s);
-  const ok = (() => {
-    if (!m) {return false;}
-    if (base === "time") {return Number(m[2]) <= 838 && Number(m[3]) < 60 && Number(m[4] ?? 0) < 60 && (m[5] ?? "").length <= keeps;}
-    const [year, month, day] = [Number(m[1]), Number(m[2]), Number(m[3])];
-    const days = new Date(Date.UTC(year, month, 0)).getUTCDate();
-    if (month < 1 || month > 12 || day < 1 || day > days) {return false;}
-    if (base === "date") {return matchesUndefined(m[4]);}
-    return Number(m[4] ?? 0) < 24 && Number(m[5] ?? 0) < 60 && Number(m[6] ?? 0) < 60 && (m[7] ?? "").length <= keeps;
-  })();
-  if (!ok) {fail(`is ${written}, as text like ${example}${keeps > 0 && base !== "date" ? ` with at most ${keeps} digits after the second's point` : base === "time" ? " with no fraction of a second" : ""}; got ${describe(v)}, which MySQL's CAST would make NULL or change.`);}
 }
 
 /**
@@ -368,18 +380,6 @@ function decimal(written: string, v: unknown, fail: (message: string) => never):
     if (whole.length > precision - scale) {fail(`is ${written}, which holds at most ${precision - scale} digit${precision - scale === 1 ? "" : "s"} before the point; got ${text}.`);}
   }
   return matchesBigInt(v) ? v.toString() : v;
-}
-
-/** The checked rows as JSON text, a 64-bit integer as its digits. */
-function write(v: unknown): string {
-  if (v instanceof Raw) {return v.text;}
-  if (Array.isArray(v)) {return `[${v.map(write).join(",")}]`;}
-  if (!matchesNull(v) && hasObjectType(v)) {
-    return `{${Object.entries(v as Record<string, unknown>)
-      .map(([k, x]) => `${JSON.stringify(k)}:${write(x)}`)
-      .join(",")}}`;
-  }
-  return JSON.stringify(v);
 }
 
 /** The statement with each list of a structured parameter written again for the keys present (MySQL): an entry stays when its key is required or present. */

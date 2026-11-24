@@ -5,6 +5,7 @@ import type { EngineType } from "../src/engine.ts";
 import { renderParamType } from "../src/render.ts";
 import { prepareRows, variant } from '../src/rows.ts';
 import type { RowsType } from '../src/rows.ts';
+import { nativeDriverDate } from "./helpers.ts";
 
 // What the engine gives for `:events::rows(id int8 not null, ts timestamptz not null, status? text
 // Not null, amount numeric(12,2), tags text[], meta jsonb('{"type": "object", …}'))`.
@@ -46,7 +47,7 @@ test("a value is checked against its column list, and written as the JSON the st
     [{ id: BigInt("2") ** BigInt("63"), ts: "2026-10-20T10:00:00Z" }, /from -9223372036854775808 to 9223372036854775807/u],
     [{ id: 1.5, ts: "2026-10-20T10:00:00Z" }, /"id" is int8, an integer; got 1.5/],
     [{ id: 1, ts: "2026-10-20 10:00" }, /names its zone/u],
-    [{ id: 1, ts: new Date() }, /not a Date: pass date.toISOString\(\)/],
+    [{ id: 1, ts: nativeDriverDate() }, /not a Date: pass date.toISOString\(\)/],
     [{ id: 1, ts: "2026-10-20T10:00:00Z", amount: "1.234" }, /keeps 2 digits after the point, so 1.234 would be rounded/],
     [{ id: 1, ts: "2026-10-20T10:00:00Z", amount: "12345678901" }, /at most 10 digits before the point/u],
     [{ id: 1, ts: "2026-10-20T10:00:00Z", tags: ["a", 1] }, /"tags" element 2 is text, a string; got 1/u],

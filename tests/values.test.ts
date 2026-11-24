@@ -9,7 +9,7 @@ import { typeSchema } from "../src/schema.ts";
 import { coerce, columnKind, DecodeError, duration, hstore, hstoreText, instant, kindType, postgresInterval, postgresYear, scalarKind, textDecoder } from "../src/values.ts";
 import type { EngineType } from "../src/engine-type.ts";
 import type { Columns } from "../src/values.ts";
-import { promiseDriverStub } from "./helpers.ts";
+import { nativeDriverDate, promiseDriverStub } from "./helpers.ts";
 
 // The one table (src/values.ts): the kind of each SQL type, the TypeScript type the module declares
 // For it, the JSON Schema of its JSON form, and the value the run time gives it, which must agree.
@@ -168,9 +168,9 @@ test("date and timestamp: a year outside 0000 to 9999 in ISO 8601's extended for
   assert.deepEqual(textDecoder("date[]")('{"0002-06-01 BC",12345-01-01,2026-10-20,NULL,infinity}'), ["-000001-06-01", "+012345-01-01", "2026-10-20", null, "infinity"]);
   assert.deepEqual(textDecoder("timestamp[]")('{"0002-06-01 12:00:00 BC","10000-01-01 00:00:00",-infinity}'), ["-000001-06-01T12:00:00", "+010000-01-01T00:00:00", "-infinity"]);
   // A driver's Date (Bun.sql's, read as UTC) gives the same text as the server's.
-  assert.equal(coerce("date", new Date("+012345-01-01T00:00:00Z"), "d"), "+012345-01-01");
-  assert.equal(coerce("timestamp", new Date("+010000-01-01T00:00:00.250Z"), "t"), "+010000-01-01T00:00:00.25");
-  assert.equal(coerce("timestamp", new Date("-000001-06-01T12:00:00Z"), "t"), "-000001-06-01T12:00:00");
+  assert.equal(coerce("date", nativeDriverDate("+012345-01-01T00:00:00Z"), "d"), "+012345-01-01");
+  assert.equal(coerce("timestamp", nativeDriverDate("+010000-01-01T00:00:00.250Z"), "t"), "+010000-01-01T00:00:00.25");
+  assert.equal(coerce("timestamp", nativeDriverDate("-000001-06-01T12:00:00Z"), "t"), "-000001-06-01T12:00:00");
 });
 
 // oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
@@ -206,8 +206,8 @@ test("timestamptz: the instant's ISO 8601 text in UTC, the server's fraction kep
   assert.equal(instant("infinity"), "infinity");
   assert.equal(instant("-infinity"), "-infinity");
   // The failing control: what postgres.js and PGlite use, and what a Date holds.
-  assert.equal(new Date("0001-01-01 00:00:00+00").getUTCFullYear(), 2001);
-  assert.equal(new Date("2026-10-20T03:03:00.123456-07:00").toISOString(), "2026-10-20T10:03:00.123Z");
+  assert.equal(nativeDriverDate("0001-01-01 00:00:00+00").getUTCFullYear(), 2001);
+  assert.equal(nativeDriverDate("2026-10-20T03:03:00.123456-07:00").toISOString(), "2026-10-20T10:03:00.123Z");
 });
 
 // oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
@@ -267,17 +267,17 @@ test("coerce: a value a driver decoded, given its kind; an integer a number cann
   assert.throws(() => coerce("int8", 9_007_199_254_740_992, "big_id"), (e: Error) => e instanceof DecodeError && /^Column "big_id" is a 64-bit integer, and the driver already rounded its value to 9007199254740992/u.test(e.message));
   assert.deepEqual(coerce("int8[]", ["1", BigInt("2")], "c"), [BigInt("1"), BigInt("2")]);
   assert.equal(coerce("decimal", 1.5, "c"), "1.5");
-  assert.equal(coerce("date", new Date("2026-10-20T00:00:00Z"), "c"), "2026-10-20");
+  assert.equal(coerce("date", nativeDriverDate("2026-10-20T00:00:00Z"), "c"), "2026-10-20");
   // Bun.sql decodes a date or timestamp before 1 AD as an Invalid Date (its infinities are ±Infinity):
   // Refused, never read as infinity.
   for (const kind of ["date", "timestamp", "timestamptz", "timestamp|timestamptz"]) {
-    assert.throws(() => coerce(kind, new Date(Number.NaN), "born"), (e: Error) => e instanceof DecodeError && /^Column "born": the driver returned an Invalid Date/u.test(e.message), kind);
+    assert.throws(() => coerce(kind, nativeDriverDate(Number.NaN), "born"), (e: Error) => e instanceof DecodeError && /^Column "born": the driver returned an Invalid Date/u.test(e.message), kind);
   }
   assert.equal(coerce("timestamptz", Infinity, "c"), "infinity");
   assert.equal(coerce("timestamptz", -Infinity, "c"), "-infinity");
-  assert.equal(coerce("timestamp", new Date("2026-10-20T10:00:00.500Z"), "c"), "2026-10-20T10:00:00.5");
-  assert.equal(coerce("timestamptz", new Date("2026-10-20T10:00:00.500Z"), "c"), "2026-10-20T10:00:00.5Z", "Bun.sql's Date, to its millisecond");
-  assert.equal(coerce("timestamptz", new Date("2026-10-20T10:00:00Z"), "c"), "2026-10-20T10:00:00Z");
+  assert.equal(coerce("timestamp", nativeDriverDate("2026-10-20T10:00:00.500Z"), "c"), "2026-10-20T10:00:00.5");
+  assert.equal(coerce("timestamptz", nativeDriverDate("2026-10-20T10:00:00.500Z"), "c"), "2026-10-20T10:00:00.5Z", "Bun.sql's Date, to its millisecond");
+  assert.equal(coerce("timestamptz", nativeDriverDate("2026-10-20T10:00:00Z"), "c"), "2026-10-20T10:00:00Z");
   assert.equal(coerce("timestamptz", "2026-10-20 10:00:00.123456+02", "c"), "2026-10-20T08:00:00.123456Z");
   assert.equal(coerce("timestamptz", -Infinity, "c"), "-infinity");
   assert.deepEqual(coerce("int[]", Int32Array.of(1, 2), "c"), [1, 2]);

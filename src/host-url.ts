@@ -31,6 +31,32 @@ const MYSQL_ATTRIBUTE = "reylo_bridge";
 /** How long a connection to the bridge may take to show its token. */
 const TOKEN_TIMEOUT = 10_000;
 
+function splitQuery(url: string): [string, string?] {
+  const q = url.indexOf("?");
+  return q < 0 ? [url] : [url.slice(0, q), url.slice(q + 1)];
+}
+
+function splitPair(pair: string): [string, string] {
+  const eq = pair.indexOf("=");
+  const decode = (s: string) => {
+    try {
+      return decodeURIComponent(s);
+    } catch {
+      return s;
+    }
+  };
+  return eq < 0 ? [decode(pair), ""] : [decode(pair.slice(0, eq)), decode(pair.slice(eq + 1))];
+}
+
+function join(base: string, pairs: string[]): string {
+  return pairs.length ? `${base}?${pairs.join("&")}` : base;
+}
+
+/** `base` with its host and port replaced, its user, password and path kept. */
+function withHost(base: string, host: string): string {
+  return base.replace(/^([a-z]+:\/\/(?:[^@/?]*@)?)[^/?]*/i, `$1${host}`);
+}
+
 /**
  * `url` as the engine opens it: files resolved, a Unix socket bridged. On Windows,
  * where Node opens no Unix socket, a Postgres URL that names one is an Unreachable that says so.
@@ -79,32 +105,6 @@ function mysqlSocket(pairs: string[]): { path: string; params: string[] } | unde
   // Its TLS settings too: the bridge takes TLS out of the server's greeting (`gateMysql`), and a
   // Unix socket carries none.
   return path ? { path, params: ["socketPath", "socket", "ssl", "ssl-mode", "sslmode", "ssl_mode", "sslaccept"] } : undefined;
-}
-
-function splitQuery(url: string): [string, string?] {
-  const q = url.indexOf("?");
-  return q < 0 ? [url] : [url.slice(0, q), url.slice(q + 1)];
-}
-
-function splitPair(pair: string): [string, string] {
-  const eq = pair.indexOf("=");
-  const decode = (s: string) => {
-    try {
-      return decodeURIComponent(s);
-    } catch {
-      return s;
-    }
-  };
-  return eq < 0 ? [decode(pair), ""] : [decode(pair.slice(0, eq)), decode(pair.slice(eq + 1))];
-}
-
-function join(base: string, pairs: string[]): string {
-  return pairs.length ? `${base}?${pairs.join("&")}` : base;
-}
-
-/** `base` with its host and port replaced, its user, password and path kept. */
-function withHost(base: string, host: string): string {
-  return base.replace(/^([a-z]+:\/\/(?:[^@/?]*@)?)[^/?]*/i, `$1${host}`);
 }
 
 /**

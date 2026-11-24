@@ -149,6 +149,26 @@ const T = {
   TIMESTAMP_TZ: 31, UHUGEINT: 32, ARRAY: 33, BIGNUM: 35, TIME_NS: 39, VARIANT: 41, TIMESTAMP_TZ_NS: 42,
 } as const;
 
+/** `v` as node-api builds it for `bindType`'s type: a scalar its text, a JSON value its JSON. */
+function bindValue(a: Api, t: EngineType | undefined, v: unknown): unknown {
+  if (matchesNull(v) || matchesUndefined(v)) {return null;}
+  if (v instanceof Uint8Array) {return a.blobValue(v);}
+  if (t?.kind === "tuple" && Array.isArray(v)) {return a.tupleValue(t.items.map((item, i) => bindValue(a, item, v[i])));}
+  if (Array.isArray(v)) {
+    if (t?.kind === "map") {return a.mapValue(v.map((e) => ({ key: bindValue(a, t.key, (e as { key?: unknown } | null)?.key), value: bindValue(a, t.value, (e as { value?: unknown } | null)?.value) })));}
+    return a.listValue(v.map((e) => bindValue(a, t?.kind === "array" ? t.of : undefined, e)));
+  }
+  if (hasObjectType(v)) {
+    if (t?.kind === "struct") {return a.structValue(Object.fromEntries(t.fields.map((f) => [f.name, bindValue(a, f.type, (v as Record<string, unknown>)[f.name])])));}
+    if (t?.kind === "union") {
+      const { tag, value } = v as { tag?: unknown; value?: unknown };
+      return a.unionValue(String(tag), bindValue(a, t.members.find((m) => m.name === tag)?.type, value));
+    }
+    return JSON.stringify(v);
+  }
+  return String(v);
+}
+
 /**
  * Runs `text` with `values`, each bound by `types` (the engine's type of each parameter), and
  * returns its rows, each value given its kind. `columns` is empty for a statement that returns no
@@ -203,26 +223,6 @@ function firstOf(entries: unknown[], key: "key" | "value"): unknown {
 }
 
 const INTEGERS = new Set(["tinyint", "smallint", "integer", "bigint", "hugeint", "utinyint", "usmallint", "uinteger", "ubigint", "uhugeint", "bignum"]);
-
-/** `v` as node-api builds it for `bindType`'s type: a scalar its text, a JSON value its JSON. */
-function bindValue(a: Api, t: EngineType | undefined, v: unknown): unknown {
-  if (matchesNull(v) || matchesUndefined(v)) {return null;}
-  if (v instanceof Uint8Array) {return a.blobValue(v);}
-  if (t?.kind === "tuple" && Array.isArray(v)) {return a.tupleValue(t.items.map((item, i) => bindValue(a, item, v[i])));}
-  if (Array.isArray(v)) {
-    if (t?.kind === "map") {return a.mapValue(v.map((e) => ({ key: bindValue(a, t.key, (e as { key?: unknown } | null)?.key), value: bindValue(a, t.value, (e as { value?: unknown } | null)?.value) })));}
-    return a.listValue(v.map((e) => bindValue(a, t?.kind === "array" ? t.of : undefined, e)));
-  }
-  if (hasObjectType(v)) {
-    if (t?.kind === "struct") {return a.structValue(Object.fromEntries(t.fields.map((f) => [f.name, bindValue(a, f.type, (v as Record<string, unknown>)[f.name])])));}
-    if (t?.kind === "union") {
-      const { tag, value } = v as { tag?: unknown; value?: unknown };
-      return a.unionValue(String(tag), bindValue(a, t.members.find((m) => m.name === tag)?.type, value));
-    }
-    return JSON.stringify(v);
-  }
-  return String(v);
-}
 
 /**
  * A value bound to a DuckDB parameter, checked and written as DuckDB reads it (the round-trip

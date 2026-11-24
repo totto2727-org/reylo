@@ -208,41 +208,6 @@ const SQLSTATE = /^[0-9A-Z]{5}$/u;
 const text = (v: unknown) => (matchesString(v) && v !== "" ? v : undefined);
 const record = (e: unknown): Record<string, unknown> | undefined => (hasObjectType(e) && !matchesNull(e) ? (e as Record<string, unknown>) : undefined);
 
-/** The database's error `error` is, or undefined where it is another. */
-export async function readQueryError(dialect: Dialect, error: unknown): Promise<QueryError | undefined> {
-  if (dialect === "sqlite") {return readQueryErrorSync(dialect, error);}
-  if (dialect === "duckdb") {
-    // A plain Error, its message opening with the kind of error: Reylo's own errors are of classes of their own.
-    const e = record(error);
-    const kind = error instanceof Error && Object.getPrototypeOf(error) === Error.prototype && matchesString(e?.message) ? /^([A-Za-z ]+?) Error: /u.exec(e.message)?.[1] : undefined;
-    if (matchesUndefined(kind)) {return undefined;}
-    return new DatabaseError(e!.message as string, error, { code: (DUCKDB_CODES as Record<string, DuckdbCode>)[kind] }) as DuckdbQueryError;
-  }
-  if (dialect === "postgres") {
-    // Slonik wraps pg's error in its own (InputSyntaxError, UniqueIntegrityConstraintViolationError),
-    // Keeping pg's as its cause.
-    const read = postgresError(error) ?? postgresError(record(error)?.cause);
-    if (!read) {return undefined;}
-    // The lists are loaded where an error needs one, so a bundle carries them apart from the run time.
-    const { POSTGRES_CODES } = await import("./error-codes-postgres.ts");
-    return new DatabaseError(read.message, error, { code: read.code, condition: (POSTGRES_CODES as Record<string, string>)[read.code], ...read.fields }) as PostgresQueryError;
-  }
-  const read = mysqlError(error);
-  if (!read) {return undefined;}
-  const { MYSQL_CODES } = await import("./error-codes-mysql.ts");
-  let code: string | undefined;
-  for (const [first, names] of MYSQL_CODES) {if (read.errno >= first && read.errno < first + names.length) {code = names[read.errno - first];}}
-  return new DatabaseError(read.message, error, { code, errno: read.errno, sqlState: read.sqlState, ...mysqlNames(read.errno, read.message) }) as MysqlQueryError;
-}
-
-/** `readQueryError` for the synchronous SQLite clients, whose list is no import away. */
-export function readQueryErrorSync(dialect: Dialect, error: unknown): QueryError | undefined {
-  if (dialect !== "sqlite") {return undefined;}
-  const read = sqliteError(error);
-  if (!read) {return undefined;}
-  return new DatabaseError(read.message, error, { code: read.code, errcode: read.errcode, ...sqliteNames(read.errcode, read.message) }) as SqliteQueryError;
-}
-
 function postgresError(error: unknown) {
   const e = record(error);
   if (!e || !matchesString(e.severity) || !matchesString(e.message)) {return undefined;}
@@ -327,6 +292,63 @@ function mysqlNames(errno: number, message: string) {
   return { key: names.key, constraint: names.constraint, table: names.table, column: names.column };
 }
 
+/** The database's error `error` is, or undefined where it is another. */
+export async function readQueryError(dialect: Dialect, error: unknown): Promise<QueryError | undefined> {
+  if (dialect === "sqlite") {return readQueryErrorSync(dialect, error);}
+  if (dialect === "duckdb") {
+    // A plain Error, its message opening with the kind of error: Reylo's own errors are of classes of their own.
+    const e = record(error);
+    const kind = error instanceof Error && Object.getPrototypeOf(error) === Error.prototype && matchesString(e?.message) ? /^([A-Za-z ]+?) Error: /u.exec(e.message)?.[1] : undefined;
+    if (matchesUndefined(kind)) {return undefined;}
+    return new DatabaseError(e!.message as string, error, { code: (DUCKDB_CODES as Record<string, DuckdbCode>)[kind] }) as DuckdbQueryError;
+  }
+  if (dialect === "postgres") {
+    // Slonik wraps pg's error in its own (InputSyntaxError, UniqueIntegrityConstraintViolationError),
+    // Keeping pg's as its cause.
+    const read = postgresError(error) ?? postgresError(record(error)?.cause);
+    if (!read) {return undefined;}
+    // The lists are loaded where an error needs one, so a bundle carries them apart from the run time.
+    const { POSTGRES_CODES } = await import("./error-codes-postgres.ts");
+    return new DatabaseError(read.message, error, { code: read.code, condition: (POSTGRES_CODES as Record<string, string>)[read.code], ...read.fields }) as PostgresQueryError;
+  }
+  const read = mysqlError(error);
+  if (!read) {return undefined;}
+  const { MYSQL_CODES } = await import("./error-codes-mysql.ts");
+  let code: string | undefined;
+  for (const [first, names] of MYSQL_CODES) {if (read.errno >= first && read.errno < first + names.length) {code = names[read.errno - first];}}
+  return new DatabaseError(read.message, error, { code, errno: read.errno, sqlState: read.sqlState, ...mysqlNames(read.errno, read.message) }) as MysqlQueryError;
+}
+
+/** What SQLite's message names, for a constraint it failed. */
+function sqliteNames(errcode: number | undefined, message: string) {
+  const names: { table?: string | undefined; columns?: string[] | undefined; constraint?: string | undefined } = {};
+  let m: RegExpExecArray | null;
+  if (!matchesUndefined(errcode) && (errcode & 0xFF) === SQLITE_CODES.SQLITE_CONSTRAINT) {
+    if ((m = /^UNIQUE constraint failed: index '([\s\S]*)'$/.exec(message))) {names.constraint = m[1];}
+    else if ((m = /^(?:UNIQUE|NOT NULL) constraint failed: ([\s\S]+)$/.exec(message))) {
+      const columns = m[1]!.split(", ").map((c) => /^([^.]+)\.([\s\S]+)$/.exec(c));
+      const table = columns[0]?.[1];
+      if (columns.every((c) => c && c[1] === table)) {
+        names.table = table;
+        names.columns = columns.map((c) => c![2]!);
+      }
+    } else if ((m = /^CHECK constraint failed: ([\s\S]*)$/.exec(message))) {names.constraint = m[1];}
+    else if ((m = /^cannot store \S+ value in \S+ column ([^.]+)\.([\s\S]+)$/.exec(message))) {
+      names.table = m[1];
+      names.columns = [m[2]!];
+    }
+  }
+  return { table: names.table, columns: names.columns, constraint: names.constraint };
+}
+
+/** `readQueryError` for the synchronous SQLite clients, whose list is no import away. */
+export function readQueryErrorSync(dialect: Dialect, error: unknown): QueryError | undefined {
+  if (dialect !== "sqlite") {return undefined;}
+  const read = sqliteError(error);
+  if (!read) {return undefined;}
+  return new DatabaseError(read.message, error, { code: read.code, errcode: read.errcode, ...sqliteNames(read.errcode, read.message) }) as SqliteQueryError;
+}
+
 const SQLITE_NAMES = new Map<number, SqliteCode>(Object.entries(SQLITE_CODES).map(([name, code]) => [code, name as SqliteCode]));
 const SQLITE_NAME = /^SQLITE_[A-Z_]+$/u;
 
@@ -363,26 +385,4 @@ function sqliteError(error: unknown) {
   // The most specific code given: an extended one where any is.
   const errcode = codes.find((c) => c > 0xFF) ?? codes[0];
   return { code: matchesUndefined(errcode) ? undefined : SQLITE_NAMES.get(errcode), errcode, message };
-}
-
-/** What SQLite's message names, for a constraint it failed. */
-function sqliteNames(errcode: number | undefined, message: string) {
-  const names: { table?: string | undefined; columns?: string[] | undefined; constraint?: string | undefined } = {};
-  let m: RegExpExecArray | null;
-  if (!matchesUndefined(errcode) && (errcode & 0xFF) === SQLITE_CODES.SQLITE_CONSTRAINT) {
-    if ((m = /^UNIQUE constraint failed: index '([\s\S]*)'$/.exec(message))) {names.constraint = m[1];}
-    else if ((m = /^(?:UNIQUE|NOT NULL) constraint failed: ([\s\S]+)$/.exec(message))) {
-      const columns = m[1]!.split(", ").map((c) => /^([^.]+)\.([\s\S]+)$/.exec(c));
-      const table = columns[0]?.[1];
-      if (columns.every((c) => c && c[1] === table)) {
-        names.table = table;
-        names.columns = columns.map((c) => c![2]!);
-      }
-    } else if ((m = /^CHECK constraint failed: ([\s\S]*)$/.exec(message))) {names.constraint = m[1];}
-    else if ((m = /^cannot store \S+ value in \S+ column ([^.]+)\.([\s\S]+)$/.exec(message))) {
-      names.table = m[1];
-      names.columns = [m[2]!];
-    }
-  }
-  return { table: names.table, columns: names.columns, constraint: names.constraint };
 }

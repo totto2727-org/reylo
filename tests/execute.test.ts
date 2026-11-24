@@ -9,7 +9,7 @@ import { checks, defineQuery } from "../src/index.ts";
 import type { EngineType, JsonSchema } from "../src/engine-type.ts";
 // oxlint-disable-next-line import/no-relative-parent-imports -- Match the native driver boundary in this direct Node integration test.
 import { matchesNullish } from "../src/native-predicates.ts";
-import { promiseDriverStub } from "./helpers.ts";
+import { nativeDriverDate, promiseDriverStub } from "./helpers.ts";
 
 // Each fake client records what execute handed it and answers the way its driver does; the
 // Driver behaviour each one copies was checked against the real package (lab/driver-matrix).
@@ -102,7 +102,7 @@ const jsonQuery: QueryModule<"postgres"> = {
   params: ["s", "n", "b", "t", "z", "o", "e", "l"],
   inputs: { ...Object.fromEntries([..."snbtzoe"].map((k) => [k, { type: { kind: "json" as const } }])), l: { type: { kind: "array", of: { kind: "json" } } } },
 };
-const jsonValues = { s: "abc", n: 5, b: true, t: '{"a":1}', z: null, o: { d: new Date("2026-01-02T03:04:05Z") }, e: [], l: ["x", { a: 1 }, [true]] };
+const jsonValues = { s: "abc", n: 5, b: true, t: '{"a":1}', z: null, o: { d: nativeDriverDate("2026-01-02T03:04:05Z") }, e: [], l: ["x", { a: 1 }, [true]] };
 const jsonTexts = ['"abc"', "5", "true", '"{\\"a\\":1}"', null, '{"d":"2026-01-02T03:04:05.000Z"}', "[]", '{"\\"x\\"","{\\"a\\":1}","[true]"}'];
 
 // oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
@@ -240,12 +240,12 @@ test("a Date for any date or time parameter, and a string without its zone for a
   await execute(client, q, ok);
   assert.equal(seen.length, 1);
   const refused = async (values: Record<string, unknown>, message: RegExp) => assert.rejects(Promise.resolve().then(() => execute(client, q, { ...ok, ...values })), (e: Error) => e instanceof TypeError && message.test(e.message));
-  await refused({ at: new Date() }, /^Parameter "at" is a timestamp without a time zone, so it takes the wall-clock text/u);
-  await refused({ day: new Date() }, /^Parameter "day" is a date without a time zone/u);
-  await refused({ days: [[new Date()]] }, /^Parameter "days" is a date/u);
+  await refused({ at: nativeDriverDate() }, /^Parameter "at" is a timestamp without a time zone, so it takes the wall-clock text/u);
+  await refused({ day: nativeDriverDate() }, /^Parameter "day" is a date without a time zone/u);
+  await refused({ days: [[nativeDriverDate()]] }, /^Parameter "days" is a date/u);
   // A timestamptz takes the string `.run()` returns for one, and a Date nowhere.
-  await refused({ tz: new Date(0) }, /^Parameter "tz" is a timestamptz, which takes the instant as a string that names its zone, as `\.run\(\)` returns one, not a Date: pass date\.toISOString\(\)/u);
-  await refused({ tzs: ["2026-10-12T00:00:00Z", new Date(0)] }, /^Parameter "tzs" is a timestamptz, .*not a Date/);
+  await refused({ tz: nativeDriverDate(0) }, /^Parameter "tz" is a timestamptz, which takes the instant as a string that names its zone, as `\.run\(\)` returns one, not a Date: pass date\.toISOString\(\)/u);
+  await refused({ tzs: ["2026-10-12T00:00:00Z", nativeDriverDate(0)] }, /^Parameter "tzs" is a timestamptz, .*not a Date/);
   for (const tz of ["2026-10-12 19:06:48", "2026-10-12T19:06:48.282", "2026-10-12"]) {await refused({ tz }, /^Parameter "tz" is a timestamptz, an instant, so a string for it names its zone/u);}
   await refused({ tzs: ["2026-10-12T00:00:00Z", "2026-10-12 19:06"] }, /^Parameter "tzs" is a timestamptz/u);
   // An array parameter takes no null element, as its type says, in any dimension.
@@ -254,7 +254,7 @@ test("a Date for any date or time parameter, and a string without its zone for a
   assert.equal(seen.length, 1);
   // MySQL's DATETIME and TIMESTAMP are the engine's timestamp, and a placeholder compared with both is either.
   const my: QueryModule<"mysql"> = { dialect: "mysql", sql: "select :at", params: ["at"], inputs: { at: time("date|timestamp") } };
-  await assert.rejects(Promise.resolve().then(() => execute({ query: promiseDriverStub(() => [[], []] as [unknown, unknown]), execute: promiseDriverStub(() => [[], []] as [unknown, unknown]) }, my, { at: new Date() })), /^TypeError: Parameter "at" is a timestamp without a time zone/u);
+  await assert.rejects(Promise.resolve().then(() => execute({ query: promiseDriverStub(() => [[], []] as [unknown, unknown]), execute: promiseDriverStub(() => [[], []] as [unknown, unknown]) }, my, { at: nativeDriverDate() })), /^TypeError: Parameter "at" is a timestamp without a time zone/u);
 });
 
 // oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
@@ -734,6 +734,26 @@ test("an unsupported client rejects, naming what it has and what reylo takes", a
   await assert.rejects(() => execute({ query: promiseDriverStub(() => ({ rows: [] })) } as never, lite) as Promise<unknown>, /sqlite statement on an object with query/u);
 });
 
+// A SQLite-backed Durable Object's ctx.storage.sql, as workerd's answers
+// (lab/driver-matrix/probes/durable-object.mjs): exec() runs at once and returns a cursor; a BigInt
+// Binding throws; an INTEGER comes back as a number, rounded past 2^53; a BLOB as an ArrayBuffer.
+function durableObjectSql(db: DatabaseSync) {
+  return {
+    exec(sql: string, ...bindings: unknown[]) {
+      if (bindings.some((b) => typeof b === "bigint")) {throw new TypeError("Cannot convert a BigInt value to a number");}
+      const st = db.prepare(sql);
+      st.setReadBigInts(true);
+      const rows = st.all(...(bindings as never[])).map((row) =>
+        Object.fromEntries(Object.entries(row).map(([k, v]) => [k, typeof v === "bigint" ? Number(v) : v instanceof Uint8Array ? v.slice().buffer : v])),
+      );
+      return { toArray: () => rows, columnNames: rows.length ? Object.keys(rows[0]!) : [] };
+    },
+    get databaseSize() {
+      return 4096;
+    },
+  };
+}
+
 // oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
 test("a Drizzle database or transaction runs on the driver client its session keeps", async () => {
   // Drizzle's database and transaction objects: select() beside a session holding the dialect and the client.
@@ -903,7 +923,7 @@ test("a query's source names its file, and Reylo's own errors about the query st
   assert.ok(rejected instanceof TypeError);
   assert.match(rejected.message, /^at\.sql: Parameter "at" is a timestamptz/u);
   assert.match(rejected.stack!, /^TypeError: at\.sql: Parameter "at"/u);
-  const viaWith = await at.with({ query: promiseDriverStub(() => ({ rows: [] })) })({ at: new Date() as never }).then(() => undefined, (e: Error) => e);
+  const viaWith = await at.with({ query: promiseDriverStub(() => ({ rows: [] })) })({ at: nativeDriverDate() as never }).then(() => undefined, (e: Error) => e);
   assert.match(viaWith!.stack!, /^TypeError: at\.sql: Parameter "at" is a timestamptz, which takes the instant as a string/u);
   // A column's value Reylo cannot give its kind.
   const truth = defineQuery<{}, unknown, "many", "sqlite">({ dialect: "sqlite", sql: "select 2 as b", params: [], columns: [["b", "bool"]], source: "truth.sql" });
@@ -923,26 +943,6 @@ test("a query's source names its file, and Reylo's own errors about the query st
   // oxlint-disable-next-line rules/no-effect-runtime-run -- This test exercises Reylo's native synchronous query API, which does not run Effect.
   assert.throws(() => bare.runSync(db), { message: "Expected exactly one row, got 0" });
 });
-
-// A SQLite-backed Durable Object's ctx.storage.sql, as workerd's answers
-// (lab/driver-matrix/probes/durable-object.mjs): exec() runs at once and returns a cursor; a BigInt
-// Binding throws; an INTEGER comes back as a number, rounded past 2^53; a BLOB as an ArrayBuffer.
-function durableObjectSql(db: DatabaseSync) {
-  return {
-    exec(sql: string, ...bindings: unknown[]) {
-      if (bindings.some((b) => typeof b === "bigint")) {throw new TypeError("Cannot convert a BigInt value to a number");}
-      const st = db.prepare(sql);
-      st.setReadBigInts(true);
-      const rows = st.all(...(bindings as never[])).map((row) =>
-        Object.fromEntries(Object.entries(row).map(([k, v]) => [k, typeof v === "bigint" ? Number(v) : v instanceof Uint8Array ? v.slice().buffer : v])),
-      );
-      return { toArray: () => rows, columnNames: rows.length ? Object.keys(rows[0]!) : [] };
-    },
-    get databaseSize() {
-      return 4096;
-    },
-  };
-}
 
 // oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
 test("a Durable Object's ctx.storage.sql: runSync and run take it, its values given their kinds", async () => {

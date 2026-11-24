@@ -20,6 +20,11 @@ export type SqlModule = {
   watched: string[];
 };
 
+/** The JavaScript offset into `text` of a UTF-8 byte offset. */
+function utf16(text: string, bytes: number): number {
+  return Buffer.from(text, "utf8").subarray(0, bytes).toString("utf8").length;
+}
+
 export async function sqlModule(path: string, sql: string): Promise<SqlModule> {
   const session = await Session.for(dirname(path));
   let outcome = await session.analyze(sql);
@@ -95,9 +100,4 @@ export async function sqlModule(path: string, sql: string): Promise<SqlModule> {
 function place(text: string, bytes: number): string {
   const before = text.slice(0, utf16(text, bytes));
   return `${before.split("\n").length}:${before.length - before.lastIndexOf("\n")}`;
-}
-
-/** The JavaScript offset into `text` of a UTF-8 byte offset. */
-function utf16(text: string, bytes: number): number {
-  return Buffer.from(text, "utf8").subarray(0, bytes).toString("utf8").length;
 }

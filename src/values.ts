@@ -534,6 +534,14 @@ export function describe(v: unknown): string {
 
 const MAX_SAFE = Number.MAX_SAFE_INTEGER;
 
+function outOfRange(value: string, column: string, rounded = false): DecodeError {
+  return new DecodeError(
+    rounded
+      ? `Column "${column}" holds an integer past ±(2^53 - 1), which the driver already rounded to ${value}: a number cannot hold it exactly, so Reylo refuses it rather than return a rounded value. Cast it to text in the statement (cast(${column} as text)) to read it exactly.`
+      : `Column "${column}" holds ${value}, an integer past ±(2^53 - 1), which a number cannot hold exactly, so Reylo refuses it rather than return a rounded value. Cast it to text in the statement (cast(${column} as text)) to read it exactly.`,
+  );
+}
+
 /** An integer as a number, refused where a number cannot hold it exactly. */
 export function exactInteger(v: number | bigint, column: string): number {
   if (matchesBigInt(v)) {
@@ -547,14 +555,6 @@ export function exactInteger(v: number | bigint, column: string): number {
   }
   if (v > MAX_SAFE || v < -MAX_SAFE) {throw outOfRange(String(v), column, true);}
   return v;
-}
-
-function outOfRange(value: string, column: string, rounded = false): DecodeError {
-  return new DecodeError(
-    rounded
-      ? `Column "${column}" holds an integer past ±(2^53 - 1), which the driver already rounded to ${value}: a number cannot hold it exactly, so Reylo refuses it rather than return a rounded value. Cast it to text in the statement (cast(${column} as text)) to read it exactly.`
-      : `Column "${column}" holds ${value}, an integer past ±(2^53 - 1), which a number cannot hold exactly, so Reylo refuses it rather than return a rounded value. Cast it to text in the statement (cast(${column} as text)) to read it exactly.`,
-  );
 }
 
 const INTEGER = /^[+-]?\d+$/u;

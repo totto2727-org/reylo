@@ -127,6 +127,19 @@ const keptKey = function (request: object): string | undefined {
 /** How many answers to `config` and `lex` are kept: each is the same for the same request, and a type check asks again for each file it transforms. */
 const KEPT_ANSWERS = 512;
 
+/**
+ * An answer as the session reads it. A refused login and a database that cannot be reached are an
+ * Unreachable, its cause carrying the server's code, so that `refusedLogin` reads it
+ * (src/connection.ts); a MariaDB server, which the type check refuses, is a NotMysql; any other
+ * failure is an Error.
+ */
+function settled(answer: Answer): Answer {
+  if (answer.status === "notMysql") {throw new NotMysql(answer.server!);}
+  if (answer.status === "unreachable" || answer.status === "refused") {throw new Unreachable(Object.assign(new Error(answer.message), answer.code && { code: answer.code }));}
+  if (answer.status === "error") {throw Object.assign(new Error(answer.message), answer.code && { code: answer.code });}
+  return answer;
+}
+
 /** One database's engine, as the `reylo` executable serves it. */
 export class Engine extends EngineCore {
   public readonly binary: string;
@@ -213,19 +226,6 @@ export class Engine extends EngineCore {
       },
     };
   }
-}
-
-/**
- * An answer as the session reads it. A refused login and a database that cannot be reached are an
- * Unreachable, its cause carrying the server's code, so that `refusedLogin` reads it
- * (src/connection.ts); a MariaDB server, which the type check refuses, is a NotMysql; any other
- * failure is an Error.
- */
-function settled(answer: Answer): Answer {
-  if (answer.status === "notMysql") {throw new NotMysql(answer.server!);}
-  if (answer.status === "unreachable" || answer.status === "refused") {throw new Unreachable(Object.assign(new Error(answer.message), answer.code && { code: answer.code }));}
-  if (answer.status === "error") {throw Object.assign(new Error(answer.message), answer.code && { code: answer.code });}
-  return answer;
 }
 
 /** The variables that name a file the engine reads: Node's extra roots, and libpq's TLS files. */

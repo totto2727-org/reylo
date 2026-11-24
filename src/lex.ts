@@ -14,6 +14,17 @@ import { matchesUndefined } from "./native-predicates.ts";
 // MySQL's other modes).
 export type Placeholder = { name: string; start: number; end: number };
 
+// A doubled quote is one character, and so, where `escapes`, is a backslash and what follows it.
+function skipQuoted(sql: string, start: number, quote: string, escapes: boolean): number {
+  let i = start + 1;
+  while (i < sql.length) {
+    if (escapes && sql[i] === "\\") { i += 2; continue; }
+    if (sql[i] === quote) { if (sql[i + 1] === quote) { i += 2; continue; } return i + 1; }
+    i += 1;
+  }
+  return i;
+}
+
 // A name drops its prefix (`:id` is `id`); a positional placeholder is named by its number
 // (`$2` and `?2` are `2`), and a bare `?` takes the number after the largest so far.
 export function lexPlaceholders(sql: string, dialect: "postgres" | "mysql" | "sqlite" | "duckdb"): { params: string[]; placeholders: Placeholder[] } {
@@ -84,15 +95,4 @@ export function lexPlaceholders(sql: string, dialect: "postgres" | "mysql" | "sq
 /** Whether a parameter name is a position: a number, where a name starts with a letter or `_`. */
 export function isPositional(name: string): boolean {
   return /^\d+$/u.test(name);
-}
-
-// A doubled quote is one character, and so, where `escapes`, is a backslash and what follows it.
-function skipQuoted(sql: string, start: number, quote: string, escapes: boolean): number {
-  let i = start + 1;
-  while (i < sql.length) {
-    if (escapes && sql[i] === "\\") { i += 2; continue; }
-    if (sql[i] === quote) { if (sql[i + 1] === quote) { i += 2; continue; } return i + 1; }
-    i += 1;
-  }
-  return i;
 }
