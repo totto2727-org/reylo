@@ -9,6 +9,7 @@
 import { lexConfig, lexExpression, lexTemplate, graphemeClusters } from './scanner.ts';
 import { Peeker } from './peeker.ts';
 import { parseStringLiteralToken } from './string-literal.ts';
+import { trimLeadingWhitespace as trimLeft, trimTrailingWhitespace as trimRight } from './whitespace.ts';
 import { rangeBetween as between, emptyRangeAt, rangeString, isStringLiteral } from './types.ts';
 import type { Attribute, Block, Body, Diagnostic, Expression, ForExpression, Literal, ObjectKey, Pos, Range, Token, TraversalStep } from './types.ts';
 
@@ -749,10 +750,6 @@ export class Parser extends Peeker {
 
 // Unicode White_Space as used by Go unicode.IsSpace. JavaScript's \s differs
 // For FEFF and NEL, so do not use String.trim() here.
-const spaceLeft = /^[\u0009-\u000D\u0020\u0085\u00A0\u1680\u2000-\u200A\u2028\u2029\u202F\u205F\u3000]+/u;
-const spaceRight = /[\u0009-\u000D\u0020\u0085\u00A0\u1680\u2000-\u200A\u2028\u2029\u202F\u205F\u3000]+$/u;
-const trimLeft = (value: string): string => value.replace(spaceLeft, '');
-const trimRight = (value: string): string => value.replace(spaceRight, '');
 const cloneRange = (range: Range): Range => ({ filename: range.filename, start: { ...range.start }, end: { ...range.end } });
 
 type TemplateToken =

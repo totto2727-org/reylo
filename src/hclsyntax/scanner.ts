@@ -10,6 +10,7 @@ import * as tables from './scanner-tables.ts';
 import * as stringTables from './string-literal-tables.ts';
 import { RagelState, runRagel } from './scanner-ragel.ts';
 import { graphemeClusters } from './scanner-grapheme.ts';
+import { matchesWhitespace } from './whitespace.ts';
 
 export { graphemeClusters } from './scanner-grapheme.ts';
 
@@ -33,27 +34,39 @@ const crlfLength = 2;
 function equalBytes(leftBytes: Uint8Array, rightBytes: Uint8Array): boolean {
   return leftBytes.length === rightBytes.length && leftBytes.every((v, index) => v === rightBytes[index]);
 }
-// Bytes.TrimSpace uses Unicode White_Space, which deliberately excludes BOM.
-function trimSpace(data: Uint8Array): Uint8Array {
-  const ws = (n: number): boolean => (n >= 9 && n <= 13) || n === 32 || n === 0x85 || n === 0xA0 || n === 0x16_80 || (n >= 0x20_00 && n <= 0x20_0A) || n === 0x20_28 || n === 0x20_29 || n === 0x20_2F || n === 0x20_5F || n === 0x30_00;
-  // The heredoc candidate is already UTF-8 tokenized. Trimming via code points is
-  // Safe here and preserves the original bytes by calculating UTF-8 widths.
-  let from = 0;
-  let to = data.length;
-  const decoded = new TextDecoder('utf-8', { ignoreBOM: true }).decode(data);
-  let leading = true;
-  let trailing = 0;
-  Iterator.from(decoded).forEach((ch) => {
-    const n = ch.codePointAt(0)!;
-    const width = n <= 0x7F ? 1 : n <= 0x7_FF ? 2 : n <= 0xFF_FF ? 3 : 4;
-    if (ws(n)) {
-      if (leading) {from += width;}
-      else {trailing += width;}
-    } else { leading = false; trailing = 0; }
+const sourceStart = 0;
+const maxAscii = 0x7F;
+const maxTwoByte = 0x7_FF;
+const maxThreeByte = 0xFF_FF;
+const oneByte = 1;
+const twoBytes = 2;
+const threeBytes = 3;
+const fourBytes = 4;
+const heredocDecoder = new TextDecoder(undefined, { ignoreBOM: true });
+
+const utf8Width = (character: string): number => {
+  const codePoint = character.codePointAt(sourceStart) ?? sourceStart;
+  if (codePoint <= maxAscii) {return oneByte;}
+  if (codePoint <= maxTwoByte) {return twoBytes;}
+  if (codePoint <= maxThreeByte) {return threeBytes;}
+  return fourBytes;
+};
+
+// The heredoc candidate is already UTF-8 tokenized. Trim its original bytes using the decoded widths.
+const trimSpace = (data: Uint8Array): Uint8Array => {
+  const bounds = { leading: sourceStart, seenContent: false, trailing: sourceStart };
+  Iterator.from(heredocDecoder.decode(data)).forEach((character) => {
+    if (!matchesWhitespace(character)) {
+      bounds.seenContent = true;
+      bounds.trailing = sourceStart;
+      return;
+    }
+    const width = utf8Width(character);
+    if (bounds.seenContent) {bounds.trailing += width;}
+    else {bounds.leading += width;}
   });
-  to -= trailing;
-  return data.subarray(from, to);
-}
+  return data.subarray(bounds.leading, data.length - bounds.trailing);
+};
 
 // Token accumulation deliberately segments each token separately, as token.go does.
 // Whitespace between tokens is ASCII, so the skipped byte count is a column count.
