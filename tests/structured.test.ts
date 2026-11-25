@@ -1,364 +1,172 @@
-// oxlint-disable-next-line rules/no-node-imports, vitest/no-import-node-test -- Nub runs this suite with Node's test runner and provides the runtime used by the SQLite integration tests.
+// oxlint-disable-next-line rules/no-node-imports, vitest/no-import-node-test -- Nub runs this suite with the native Node test runner.
 import { test } from "node:test";
-// oxlint-disable-next-line rules/no-node-imports -- Nub's Node suite uses native assertions for driver, CLI, and protocol results.
+// oxlint-disable-next-line rules/no-node-imports -- Compare native SQLite rows and mapper diagnostics.
 import assert from "node:assert/strict";
-// oxlint-disable-next-line rules/no-node-imports -- The Nub integration fixtures use this built-in to inspect or write files through the host filesystem.
-import { mkdirSync, mkdtempSync, symlinkSync, writeFileSync } from "node:fs";
-// oxlint-disable-next-line rules/no-node-imports -- The Nub integration fixtures use this built-in to await writes and reads through the host filesystem.
-import { writeFile } from "node:fs/promises";
-// oxlint-disable-next-line rules/no-node-imports -- Exercise the native SQLite driver used by Reylo's Node runtime.
-import { DatabaseSync } from "node:sqlite";
-// oxlint-disable-next-line rules/no-node-imports -- The Nub integration fixtures use this built-in to select the host's real temporary directory.
-import { tmpdir } from "node:os";
-// oxlint-disable-next-line rules/no-node-imports -- The Nub integration fixtures use this built-in to resolve paths using the host platform's filesystem conventions.
-import { join } from "node:path";
-// oxlint-disable-next-line rules/no-node-imports -- The Nub integration fixtures use this built-in to convert local module URLs with the host platform's path rules.
-import { pathToFileURL } from "node:url";
-import { Session } from "#reylo-source/analyze.ts";
 import { sqlModule } from "#reylo-source/loader.ts";
-import { DRIVERS, INDEX, closeSessions, importSqliteQueryFixture, plain, requireFixtureValue } from "./helpers.ts";
-import type { SqliteQueryFixture } from "./helpers.ts";
+import { plain, requireFixtureValue, forEachFixtureInOrder, SQL_NULL } from "./helpers.ts";
+import { analysis, built, querySource, withProject } from "./structured-fixture.ts";
+// oxlint-disable-next-line rules/no-node-imports -- The integration suite exercises the real synchronous host SQLite driver.
+import type { DatabaseSync } from "node:sqlite";
 
-// Structured parameters (wiki/structured-params.md): a parameter cast to `rows(…)` or `row(…)` is
-// Typed by its column list and written for its position; the run time checks each value, and a key
-// A row leaves out takes its column's default, copied from SQLite's catalog into the insert.
-
-const project = function (driver?: string): string {
-  const root = mkdtempSync(join(tmpdir(), "reylo-structured-"));
-  writeFileSync(join(root, "package.json"), "{}");
-  if (driver) {
-    mkdirSync(join(root, "node_modules"));
-    symlinkSync(join(DRIVERS, driver), join(root, "node_modules", driver));
-  }
-  return root;
+const checkEventRowType = async function (root: string, insert: string): Promise<void> {
+  const report = await analysis(root, insert);
+  assert.deepEqual(report.params.map((parameter) => [parameter.name, parameter.type_name]), [["events", "rows"]]);
+  const events = requireFixtureValue(report.params[0]).type;
+  assert.ok(events.kind === "rows");
+  assert.deepEqual(events.fields.map((field) => [field.name, field.type.kind === "scalar" ? field.type.name : field.type.kind, field.nullable, field.optional]), [["id", "integer", false, false], ["ts", "text", false, false], ["status", "text", false, true], ["amount", "real", true, true], ["meta", "json", true, true]]);
 };
 
-/** The module a build step writes for `sql`, imported. */
-const built = async function (root: string, url: string, name: string, sql: string): Promise<SqliteQueryFixture<"many">> {
-  const file = join(root, `${name}.sql`);
-  await writeFile(file, sql);
-  await writeFile(join(root, ".env"), `DATABASE_URL=${url}\n`);
-  const { code } = await sqlModule(file, sql);
-  const out = join(root, `${name}.mjs`);
-  await writeFile(out, code.replace(`from "@totto2727/reylo"`, `from ${JSON.stringify(INDEX)}`));
-  return importSqliteQueryFixture(pathToFileURL(out).href, "many");
+const checkStoredEvents = function (database: DatabaseSync): void {
+  // An explicit null stores NULL, never the text null, and a document stays JSON text.
+  const stored = database.prepare("select id, status, amount, meta, typeof(meta) as t from events order by id").all();
+  assert.deepEqual(plain(stored), [
+    { amount: SQL_NULL, id: 1, meta: SQL_NULL, status: "late", t: "null" },
+    { amount: 1.5, id: 2, meta: `{"source":"x"}`, status: "done", t: "text" },
+    { amount: SQL_NULL, id: 3, meta: SQL_NULL, status: "new", t: "null" },
+  ]);
 };
 
-const analysis = async function (root: string, url: string, sql: string) {
-  const session = await Session.open(root, { DATABASE_URL: url });
-  try {
-    const outcome = await session.analyze(sql, { force: true });
-    assert.ok(outcome.ok, outcome.ok ? "" : outcome.message);
-    return outcome.analysis;
-  } finally {
-    await session.close();
-  }
+const checkEventUpsert = async function (root: string, database: DatabaseSync): Promise<void> {
+  // An upsert reads ON CONFLICT as its own, since the expansion ends in WHERE.
+  const upsert = await built(root, "upsert", "insert into events :events::rows(id integer not null, ts text not null) on conflict (id) do update set ts = excluded.ts returning id, ts");
+  assert.deepEqual(plain(await upsert.run(database, { events: [{ id: 3, ts: "2026-10-22" }] })), [{ id: 3, ts: "2026-10-22" }]);
 };
-
-// The rows as plain objects: drivers return them with their own prototypes and extra properties.
 
 // oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
 test("SQLite: an insert's rows are checked and written in their order, a key left out takes its default, and the column list types the parameter", async () => {
-  const root = project();
-  const db = new DatabaseSync(join(root, "app.db"));
-  db.exec("create table events (id integer primary key, ts text not null, status text not null default 'new', amount real, meta text)");
-  const url = "file:./app.db";
-  const insert = `insert into events :events::rows(id integer not null, ts text not null, status? text not null, amount real, meta json('{"type": "object", "properties": {"source": {"type": "string"}}}')) returning id, status`;
-  try {
-    const a = await analysis(root, url, insert);
-    assert.deepEqual(a.params.map((parameter) => [parameter.name, parameter.type_name]), [["events", "rows"]]);
-    const events = requireFixtureValue(a.params[0]).type;
-    assert.ok(events.kind === "rows");
-    assert.deepEqual(events.fields.map((field) => [field.name, field.type.kind === "scalar" ? field.type.name : field.type.kind, field.nullable, field.optional]), [["id", "integer", false, false], ["ts", "text", false, false], ["status", "text", false, true], ["amount", "real", true, true], ["meta", "json", true, true]]);
-    const q = await built(root, url, "insert_events", insert);
-    assert.deepEqual(plain(await q.run(db, { events: [{ id: 2, ts: "2026-10-20", status: "done", amount: 1.5, meta: { source: "x" } }, { id: 1, ts: "2026-10-20", status: "late", amount: null, meta: null }] })), [{ id: 2, status: "done" }, { id: 1, status: "late" }]);
-    assert.deepEqual(plain(await q.run(db, { events: [{ id: 3, ts: "2026-10-21" }] })), [{ id: 3, status: "new" }]);
-    await assert.rejects(q.run(db, { events: [{ id: 4, ts: "x", status: null }] }), /"status" is text not null, and the row gives null/u);
-    await assert.rejects(q.run(db, { events: [{ id: "4", ts: "x" }] }), /"id" is integer, an integer; got "4"/u);
-    // An explicit null stores NULL, never the text null, and a document stays JSON text.
-    assert.deepEqual(db.prepare("select id, status, amount, meta, typeof(meta) as t from events order by id").all().map((r) => ({ ...r })), [
-      { amount: null, id: 1, meta: null, status: "late", t: "null" },
-      { amount: 1.5, id: 2, meta: `{"source":"x"}`, status: "done", t: "text" },
-      { amount: null, id: 3, meta: null, status: "new", t: "null" },
-    ]);
+  await withProject("create table events (id integer primary key, ts text not null, status text not null default 'new', amount real, meta text)", async ({ database, root }) => {
+    const insert = `insert into events :events::rows(id integer not null, ts text not null, status? text not null, amount real, meta json('{"type": "object", "properties": {"source": {"type": "string"}}}')) returning id, status`;
+    await checkEventRowType(root, insert);
+    const query = await built(root, "insert_events", insert);
+    assert.deepEqual(plain(await query.run(database, { events: [{ amount: 1.5, id: 2, meta: { source: "x" }, status: "done", ts: "2026-10-20" }, { amount: SQL_NULL, id: 1, meta: SQL_NULL, status: "late", ts: "2026-10-20" }] })), [{ id: 2, status: "done" }, { id: 1, status: "late" }]);
+    assert.deepEqual(plain(await query.run(database, { events: [{ id: 3, ts: "2026-10-21" }] })), [{ id: 3, status: "new" }]);
+    await assert.rejects(query.run(database, { events: [{ id: 4, status: SQL_NULL, ts: "x" }] }), /"status" is text not null, and the row gives null/u);
+    await assert.rejects(query.run(database, { events: [{ id: "4", ts: "x" }] }), /"id" is integer, an integer; got "4"/u);
+    checkStoredEvents(database);
     // Rows that leave out different keys go in one insert, each such row with the default.
-    assert.deepEqual(plain(await q.run(db, { events: [{ id: 4, ts: "x" }, { id: 5, ts: "x", status: "s" }] })), [{ id: 4, status: "new" }, { id: 5, status: "s" }]);
-    // An upsert reads ON CONFLICT as its own, since the expansion ends in WHERE.
-    const upsert = await built(root, url, "upsert", "insert into events :events::rows(id integer not null, ts text not null) on conflict (id) do update set ts = excluded.ts returning id, ts");
-    assert.deepEqual(plain(await upsert.run(db, { events: [{ id: 3, ts: "2026-10-22" }] })), [{ id: 3, ts: "2026-10-22" }]);
-  } finally {
-    db.close();
-    await closeSessions();
-  }
+    assert.deepEqual(plain(await query.run(database, { events: [{ id: 4, ts: "x" }, { id: 5, status: "s", ts: "x" }] })), [{ id: 4, status: "new" }, { id: 5, status: "s" }]);
+    await checkEventUpsert(root, database);
+  });
 });
+
+const checkAccountDefaults = function (database: DatabaseSync): void {
+  const stored = database.prepare("select id, name, email, role, nick, token, n, at, typeof(n) as tn from accounts order by id").all();
+  // A key left out takes the default; a key given as null is NULL; the bare identifier `member` is the string SQLite stores.
+  assert.deepEqual(stored.map((row) => [row.id, row.email, row.role, row.nick, row.n, row.tn]), [[1, SQL_NULL, "member", "member", 7, "integer"], [100, SQL_NULL, "admin", "g", 1, "integer"], [101, SQL_NULL, "member", SQL_NULL, SQL_NULL, "null"]]);
+  // An expression default runs per row, current_timestamp once per statement, as the database's own.
+  assert.equal(requireFixtureValue(stored[1]).token, "given");
+  assert.match(String(requireFixtureValue(stored[0]).token), /^[0-9a-f]{16}$/u);
+  assert.match(String(requireFixtureValue(stored[2]).token), /^[0-9a-f]{16}$/u);
+  assert.notEqual(requireFixtureValue(stored[0]).token, requireFixtureValue(stored[2]).token);
+  assert.equal(requireFixtureValue(stored[0]).at, requireFixtureValue(stored[2]).at);
+  assert.match(String(requireFixtureValue(stored[0]).at), /^\d{4}-\d\d-\d\d \d\d:\d\d:\d\d$/u);
+};
+
+const checkAccountRow = async function (root: string, database: DatabaseSync): Promise<void> {
+  // One row: the same.
+  const one = await built(root, "insert_account", "insert into accounts :a::row(name text not null, role? text not null) returning role");
+  assert.deepEqual(plain(await one.run(database, { a: { name: "Mary" } })), [{ role: "member" }]);
+  assert.deepEqual(plain(await one.run(database, { a: { name: "Ken", role: "owner" } })), [{ role: "owner" }]);
+};
 
 // oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
 test("SQLite: rows that leave out different keys go in one insert, each such row with its column's default copied from the catalog", async () => {
-  const root = project();
-  const db = new DatabaseSync(join(root, "app.db"));
-  db.exec(`create table accounts (id integer primary key, name text not null, email text, role text not null default 'member',
-    nick text default member, token text not null default (lower(hex(randomblob(8)))), n integer default 7, at text not null default current_timestamp)`);
-  const url = "file:./app.db";
-  const insert = "insert into accounts :a::rows(id? integer not null, name text not null, email text, role? text not null, nick text, token? text not null, n integer, at? text not null) returning id, role";
-  try {
-    const file = join(root, "insert_accounts.sql");
-    await writeFile(file, insert);
-    await writeFile(join(root, ".env"), `DATABASE_URL=${url}\n`);
+  await withProject(`create table accounts (id integer primary key, name text not null, email text, role text not null default 'member',
+    nick text default member, token text not null default (lower(hex(randomblob(8)))), n integer default 7, at text not null default current_timestamp)`, async ({ database, root }) => {
+    const insert = "insert into accounts :a::rows(id? integer not null, name text not null, email text, role? text not null, nick text, token? text not null, n integer, at? text not null) returning id, role";
+    const file = await querySource(root, "insert_accounts", insert);
     // One statement for every call: no list for the run time to write again.
     const { code } = await sqlModule(file, insert);
     assert.ok(!code.includes("structured:"), code);
-    const q = await built(root, url, "insert_accounts", insert);
-    assert.match(q.sql, /CASE WHEN json_type\("reylo\.e"\.value, '\$\."role"'\) IS NOT NULL THEN "reylo\.e"\.value ->> '\$\."role"' ELSE \('member'\) END/u);
-    const rows = [{ name: "Ada" }, { id: 100, name: "Grace", role: "admin", nick: "g", token: "given", n: 1 }, { name: "Linus", email: null, nick: null, n: null }];
-    assert.deepEqual(plain(await q.run(db, { a: rows })), [{ id: 1, role: "member" }, { id: 100, role: "admin" }, { id: 101, role: "member" }]);
-    const stored = db.prepare("select id, name, email, role, nick, token, n, at, typeof(n) as tn from accounts order by id").all().map((r) => ({ ...r })) as Record<string, unknown>[];
-    // A key left out takes the default; a key given as null is NULL; the bare identifier `member` is the string SQLite stores.
-    assert.deepEqual(stored.map((r) => [r.id, r.email, r.role, r.nick, r.n, r.tn]), [[1, null, "member", "member", 7, "integer"], [100, null, "admin", "g", 1, "integer"], [101, null, "member", null, null, "null"]]);
-    // An expression default runs per row, current_timestamp once per statement, as the database's own.
-    assert.equal(requireFixtureValue(stored[1]).token, "given");
-    assert.match(String(requireFixtureValue(stored[0]).token), /^[0-9a-f]{16}$/u);
-    assert.match(String(requireFixtureValue(stored[2]).token), /^[0-9a-f]{16}$/u);
-    assert.notEqual(requireFixtureValue(stored[0]).token, requireFixtureValue(stored[2]).token);
-    assert.equal(requireFixtureValue(stored[0]).at, requireFixtureValue(stored[2]).at);
-    assert.match(String(requireFixtureValue(stored[0]).at), /^\d{4}-\d\d-\d\d \d\d:\d\d:\d\d$/u);
-    // One row: the same.
-    const one = await built(root, url, "insert_account", "insert into accounts :a::row(name text not null, role? text not null) returning role");
-    assert.deepEqual(plain(await one.run(db, { a: { name: "Mary" } })), [{ role: "member" }]);
-    assert.deepEqual(plain(await one.run(db, { a: { name: "Ken", role: "owner" } })), [{ role: "owner" }]);
-  } finally {
-    db.close();
-    await closeSessions();
-  }
+    const query = await built(root, "insert_accounts", insert);
+    assert.match(query.sql, /CASE WHEN json_type\("reylo\.e"\.value, '\$\."role"'\) IS NOT NULL THEN "reylo\.e"\.value ->> '\$\."role"' ELSE \('member'\) END/u);
+    const rows = [{ name: "Ada" }, { id: 100, n: 1, name: "Grace", nick: "g", role: "admin", token: "given" }, { email: SQL_NULL, n: SQL_NULL, name: "Linus", nick: SQL_NULL }];
+    assert.deepEqual(plain(await query.run(database, { a: rows })), [{ id: 1, role: "member" }, { id: 100, role: "admin" }, { id: 101, role: "member" }]);
+    checkAccountDefaults(database);
+    await checkAccountRow(root, database);
+  });
 });
 
 // oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
 test("SQLite: elsewhere a rows parameter is a table named by its alias or by the parameter, a not null key never null and the rest nullable", async () => {
-  const root = project();
-  new DatabaseSync(join(root, "app.db")).close();
-  const url = "file:./app.db";
-  const sql = "select e.id, e.note from :events::rows(id integer not null, note text) as e order by e.id";
-  try {
-    const a = await analysis(root, url, sql);
-    assert.deepEqual(a.columns.map((column) => [column.name, column.nullable]), [["id", false], ["note", true]]);
-    const q = await built(root, url, "select_events", sql);
-    const db = new DatabaseSync(join(root, "app.db"));
-    try {
-      assert.deepEqual(plain(await q.run(db, { events: [{ id: 2 }, { id: 1, note: "a" }] })), [{ id: 1, note: "a" }, { id: 2, note: null }]);
-    } finally {
-      db.close();
-    }
-    const unaliased = await analysis(root, url, "select events.id from :events::rows(id integer not null)");
+  await withProject("", async ({ database, root }) => {
+    const sql = "select e.id, e.note from :events::rows(id integer not null, note text) as e order by e.id";
+    const report = await analysis(root, sql);
+    assert.deepEqual(report.columns.map((column) => [column.name, column.nullable]), [["id", false], ["note", true]]);
+    const query = await built(root, "select_events", sql);
+    assert.deepEqual(plain(await query.run(database, { events: [{ id: 2 }, { id: 1, note: "a" }] })), [{ id: 1, note: "a" }, { id: 2, note: SQL_NULL }]);
+    const unaliased = await analysis(root, "select events.id from :events::rows(id integer not null)");
     assert.deepEqual(unaliased.columns.map((column) => [column.name, column.nullable]), [["id", false]]);
-  } finally {
-    await closeSessions();
-  }
+  });
 });
 
 // oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
 test("a column list that does not read is the type check's error at its place, and fails the build", async () => {
-  const root = project();
-  new DatabaseSync(join(root, "app.db")).close();
-  const url = "file:./app.db";
-  const cases: [string, string, RegExp][] = [
-    ["insert into t :p::rows(a text not null default 'x')", "default", /never restates a default/u],
-    ["insert into t :p::rows(a? text)", "a?", /may be left out already/u],
-    ["select * from :p::rows(a? text not null)", "a?", /only where the rows are inserted/u],
-    ["insert into t :p::row(a text, posts rows(title text))", "rows(title text)", /nested row or rows member is not built yet/u],
-  ];
-  try {
-    for (const [sql, at, message] of cases) {
-      const a = await analysis(root, url, sql);
-      const currentDiagnostic = a.diagnostics.find((diagnostic) => diagnostic.code === 20);
+  await withProject("", async ({ database, root }) => {
+    database.close();
+    const cases: [string, string, RegExp][] = [
+      ["insert into t :p::rows(a text not null default 'x')", "default", /never restates a default/u],
+      ["insert into t :p::rows(a? text)", "a?", /may be left out already/u],
+      ["select * from :p::rows(a? text not null)", "a?", /only where the rows are inserted/u],
+      ["insert into t :p::row(a text, posts rows(title text))", "rows(title text)", /nested row or rows member is not built yet/u],
+    ];
+    await forEachFixtureInOrder(cases, async ([sql, at, message]) => {
+      const report = await analysis(root, sql);
+      const currentDiagnostic = report.diagnostics.find((diagnostic) => diagnostic.code === 20);
       assert.ok(currentDiagnostic, sql);
       assert.match(currentDiagnostic.message, message);
       assert.equal(sql.slice(currentDiagnostic.start, currentDiagnostic.start + currentDiagnostic.length), at, sql);
-      const file = join(root, "bad.sql");
-      await writeFile(file, sql);
-      await writeFile(join(root, ".env"), `DATABASE_URL=${url}\n`);
+      const file = await querySource(root, "bad", sql);
       await assert.rejects(sqlModule(file, sql), message);
-    }
-  } finally {
-    await closeSessions();
-  }
+    });
+  });
 });
 
 // oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
 test("SQLite: the column list is checked against the table its insert writes, and a disagreement fails the build", async () => {
-  const root = project();
-  const db = new DatabaseSync(join(root, "app.db"));
-  db.exec("create table events (id integer primary key, ts text not null, status text not null default 'new', amount real, total real generated always as (amount * 2))");
-  db.close();
-  const url = "file:./app.db";
-  const cases: [string, string, RegExp][] = [
-    ["insert into events :e::rows(id integer not null, ts text, status? text not null)", "ts text", /events\.ts is not null, and `ts` lets a row give null or leave the key out: write `ts text not null`/u],
-    ["insert into events :e::rows(id integer not null, ts text not null, status text)", "status text", /write `status\? text not null`, which lets a row leave the key out so that the default applies/u],
-    ["insert into events :e::rows(id integer not null, ts text not null, amount? real not null)", "amount", /`amount\?` lets a row leave the key out, but events\.amount has no default/u],
-    ["insert into events :e::rows(id integer not null, status? text not null)", ":e::rows", /events\.ts is not null and has no default, and the column list leaves it out/u],
-    ["insert into events :e::rows(id text not null, ts text not null)", "text", /events\.id is INTEGER, and the column list says text: their affinities differ \(TEXT and INTEGER\)/u],
-    ["insert into events :e::rows(ts text not null, total real)", "total", /events\.total is a generated column/u],
-  ];
-  try {
-    for (const [sql, at, message] of cases) {
-      const a = await analysis(root, url, sql);
-      const d = a.diagnostics.filter((diagnostic) => diagnostic.code === 21);
-      assert.equal(d.length, 1, `${sql}: ${JSON.stringify(a.diagnostics)}`);
-      assert.match(requireFixtureValue(d[0]).message, message);
-      assert.equal(sql.slice(requireFixtureValue(d[0]).start, requireFixtureValue(d[0]).start + requireFixtureValue(d[0]).length), at, sql);
-      const file = join(root, "bad.sql");
-      await writeFile(file, sql);
-      await writeFile(join(root, ".env"), `DATABASE_URL=${url}\n`);
+  await withProject("create table events (id integer primary key, ts text not null, status text not null default 'new', amount real, total real generated always as (amount * 2))", async ({ database, root }) => {
+    database.close();
+    const cases: [string, string, RegExp][] = [
+      ["insert into events :e::rows(id integer not null, ts text, status? text not null)", "ts text", /events\.ts is not null, and `ts` lets a row give null or leave the key out: write `ts text not null`/u],
+      ["insert into events :e::rows(id integer not null, ts text not null, status text)", "status text", /write `status\? text not null`, which lets a row leave the key out so that the default applies/u],
+      ["insert into events :e::rows(id integer not null, ts text not null, amount? real not null)", "amount", /`amount\?` lets a row leave the key out, but events\.amount has no default/u],
+      ["insert into events :e::rows(id integer not null, status? text not null)", ":e::rows", /events\.ts is not null and has no default, and the column list leaves it out/u],
+      ["insert into events :e::rows(id text not null, ts text not null)", "text", /events\.id is INTEGER, and the column list says text: their affinities differ \(TEXT and INTEGER\)/u],
+      ["insert into events :e::rows(ts text not null, total real)", "total", /events\.total is a generated column/u],
+    ];
+    await forEachFixtureInOrder(cases, async ([sql, at, message]) => {
+      const report = await analysis(root, sql);
+      const diagnostics = report.diagnostics.filter((diagnostic) => diagnostic.code === 21);
+      assert.equal(diagnostics.length, 1, `${sql}: ${JSON.stringify(report.diagnostics)}`);
+      const diagnostic = requireFixtureValue(diagnostics[0]);
+      assert.match(diagnostic.message, message);
+      assert.equal(sql.slice(diagnostic.start, diagnostic.start + diagnostic.length), at, sql);
+      const file = await querySource(root, "bad", sql);
       await assert.rejects(sqlModule(file, sql), message);
-    }
+    });
     // The rowid is filled when it is left out, so an INTEGER PRIMARY KEY needs no `?`.
-    assert.deepEqual((await analysis(root, url, "insert into events :e::rows(ts text not null)")).diagnostics, []);
-  } finally {
-    await closeSessions();
-  }
+    const withoutRowid = await analysis(root, "insert into events :e::rows(ts text not null)");
+    assert.deepEqual(withoutRowid.diagnostics, []);
+  });
 });
 
-
-
-
-// oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
-test("an imported query carries its input's and its output's JSON Schema, a structured parameter's keys included", async () => {
-  const root = project();
-  const db = new DatabaseSync(join(root, "app.db"));
-  db.exec("create table events (id integer primary key, ts text not null, status text not null default 'new', amount real)");
-  db.close();
-  try {
-    const q = await built(root, "file:./app.db", "insert_events", "insert into events :events::rows(id integer not null, ts text not null, status? text not null, amount real) returning id, status");
-    assert.deepEqual(q.inputSchema, {
-      $schema: "https://json-schema.org/draft/2020-12/schema",
-      additionalProperties: false,
-      properties: {
-        events: {
-          items: {
-            additionalProperties: false,
-            properties: { amount: { anyOf: [{ format: "double", type: "number" }, { type: "null" }] }, id: { format: "int64", type: "integer" }, status: { type: "string" }, ts: { type: "string" } },
-            required: ["id", "ts"],
-            type: "object",
-          },
-          type: "array",
-        },
-      },
-      required: ["events"],
-      type: "object",
-    });
-    assert.deepEqual(q.outputSchema, {
-      $schema: "https://json-schema.org/draft/2020-12/schema",
-      items: { properties: { id: { format: "int64", type: "integer" }, status: { type: "string" } }, required: ["id", "status"], type: "object" },
-      type: "array",
-    });
-    // Standard Schema's converter gives the same.
-    assert.deepEqual(q["~standard"].jsonSchema.input({ target: "draft-2020-12" }), q.inputSchema);
-  } finally {
-    await closeSessions();
-  }
-});
-
-// oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
-test("SQLite: a typed JSON parameter is typed by its schema, takes its defaults, and is checked before the statement runs", async () => {
-  const root = project();
-  const db = new DatabaseSync(join(root, "app.db"));
-  db.exec("create table todos (id integer primary key, title text not null, done integer not null default 0)");
-  const url = "file:./app.db";
-  const insert = `insert into todos (title, done)
-select value ->> '$.title', value ->> '$.done' from json_each(:todos::json('{
-  "type": "array",
-  "maxItems": 2,
-  "items": {
-    "type": "object",
-    "properties": { "title": { "type": "string", "minLength": 1 }, "done": { "type": "boolean", "default": false } },
-    "required": ["title", "done"],
-    "additionalProperties": false
-  }
-}')) returning id, title, done`;
-  try {
-    const a = await analysis(root, url, insert);
-    const p = a.params[0]!;
-    assert.deepEqual([p.name, p.type_name, p.type.kind], ["todos", "json", "json"]);
-    // `done` has a default, so the caller may leave it out; the run time fills it.
-    assert.deepEqual(p.type.kind === "json" && p.type.schema && (p.type.schema as { items: { required: string[] } }).items.required, ["title"]);
-    const q = await built(root, url, "insert_todos", insert);
-    assert.deepEqual(plain(await q.run(db, { todos: [{ title: "a" }, { title: "b", done: true }] })), [{ done: 0, id: 1, title: "a" }, { done: 1, id: 2, title: "b" }]);
-    await assert.rejects(q.run(db, { todos: [{ title: "" }] }), /Parameter "todos" at \/0\/title must be at least 1 characters long/u);
-    await assert.rejects(q.run(db, { todos: [{ title: "a", extra: 1 }] }), /at \/0\/extra is a key the schema does not allow/u);
-    await assert.rejects(q.run(db, { todos: [{ title: "a" }, { title: "b" }, { title: "c" }] }), /must have at most 2 items/u);
-    // A parameter whose schema has a default at its root may be left out.
-    const limited = await built(root, url, "limited", `select id from todos order by id limit :n::json('{ "type": "integer", "minimum": 1, "maximum": 200, "default": 1 }')`);
-    assert.deepEqual(plain(await limited.run(db, {})), [{ id: 1 }]);
-    assert.deepEqual(plain(await limited.run(db, { n: 2 })), [{ id: 1 }, { id: 2 }]);
-    await assert.rejects(limited.run(db, { n: 0 }), /Parameter "n" must be at least 1/u);
-    assert.deepEqual(limited.inputSchema.required, []);
-    // What the profile refuses is the type check's error at the schema, and fails the build.
-    const bad = `select * from json_each(:p::json('{ "$ref": "#/$defs/x" }'))`;
-    const currentDiagnostic = (await analysis(root, url, bad)).diagnostics.find((diagnostic) => diagnostic.code === 20);
-    assert.ok(currentDiagnostic);
-    assert.match(currentDiagnostic.message, /breaks the schema's locality/u);
-    assert.equal(bad.slice(currentDiagnostic.start, currentDiagnostic.start + currentDiagnostic.length), `'{ "$ref": "#/$defs/x" }'`);
-  } finally {
-    db.close();
-    await closeSessions();
-  }
-});
-
-// oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
-test("SQLite: a JSON member of a column list is checked against its schema, its nested defaults filled", async () => {
-  const root = project();
-  const db = new DatabaseSync(join(root, "app.db"));
-  db.exec("create table events (id integer primary key, meta text)");
-  try {
-    const q = await built(root, "file:./app.db", "insert_events", `insert into events :events::rows(id integer not null, meta json('{"type": "object", "properties": {"source": {"type": "string", "default": "web"}, "n": {"type": "integer", "minimum": 0}}, "required": ["source"]}')) returning id, meta`);
-    assert.deepEqual(plain(await q.run(db, { events: [{ id: 1, meta: {} }, { id: 2, meta: { source: "app", n: 3 } }] })), [{ id: 1, meta: `{"source":"web"}` }, { id: 2, meta: `{"source":"app","n":3}` }]);
-    await assert.rejects(q.run(db, { events: [{ id: 3, meta: { n: -1 } }] }), /row 1: "meta" at \/n must be at least 0/u);
-  } finally {
-    db.close();
-    await closeSessions();
-  }
-});
-
-// oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
-test("binary data in a column list travels as hexadecimal text, which each reader decodes", async () => {
-  const bytes = new Uint8Array([0, 1, 127, 128, 255]);
-  const same = (got: unknown): void => assert.deepEqual([...new Uint8Array(got as ArrayLike<number>)], [...bytes]);
-  // SQLite decodes it with unhex().
-  const root = project();
-  const db = new DatabaseSync(join(root, "app.db"));
-  db.exec("create table files (id integer primary key, data blob not null)");
-  try {
-    const insert = await built(root, "file:./app.db", "insert_files", "insert into files :files::rows(id integer not null, data blob not null) returning id, data");
-    const [row] = await insert.run(db, { files: [{ id: 1, data: bytes }] });
-    same(requireFixtureValue(row).data);
-    const read = await built(root, "file:./app.db", "read_files", "select f.data from :files::rows(data blob not null) as f");
-    const [roundTrip] = await read.run(db, { files: [{ data: bytes }] });
-    same(requireFixtureValue(roundTrip).data);
-    await assert.rejects(insert.run(db, { files: [{ id: 2, data: "00ff" }] }), /"data" is blob, binary data, a Uint8Array; got "00ff"/u);
-  } finally {
-    db.close();
-    await closeSessions();
-  }
-});
-
+const checkOwnColumnList = async function (root: string): Promise<void> {
+  const own = "insert into t (id, x) :p::rows(id integer not null, x text not null)";
+  const report = await analysis(root, own);
+  const currentDiagnostic = report.diagnostics.find((diagnostic) => diagnostic.code === 20);
+  assert.ok(currentDiagnostic);
+  assert.match(currentDiagnostic.message, /writes the insert's column list itself/u);
+  assert.equal(own.slice(currentDiagnostic.start, currentDiagnostic.start + currentDiagnostic.length), "(id, x)");
+  const file = await querySource(root, "own", own);
+  await assert.rejects(sqlModule(file, own), /writes the insert's column list itself/u);
+};
 
 // oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
 test("an insert takes the table's alias before its rows, and refuses a column list of its own at the author's text", async () => {
-  const root = project();
-  const db = new DatabaseSync(join(root, "app.db"));
-  db.exec("create table t (id integer primary key, x text not null)");
-  db.exec("insert into t values (1, 'a'), (2, 'b')");
-  const url = "file:./app.db";
-  try {
-    const upsert = await built(root, url, "aliased", "insert into t as tt :p::rows(id integer not null, x text not null) on conflict (id) do update set x = excluded.x where tt.x <> excluded.x returning id, x");
-    assert.deepEqual(plain(await upsert.run(db, { p: [{ id: 2, x: "B" }, { id: 3, x: "c" }] })), [{ id: 2, x: "B" }, { id: 3, x: "c" }]);
-    const own = "insert into t (id, x) :p::rows(id integer not null, x text not null)";
-    const currentDiagnostic = (await analysis(root, url, own)).diagnostics.find((diagnostic) => diagnostic.code === 20);
-    assert.ok(currentDiagnostic);
-    assert.match(currentDiagnostic.message, /writes the insert's column list itself/u);
-    assert.equal(own.slice(currentDiagnostic.start, currentDiagnostic.start + currentDiagnostic.length), "(id, x)");
-    await writeFile(join(root, "own.sql"), own);
-    await assert.rejects(sqlModule(join(root, "own.sql"), own), /writes the insert's column list itself/u);
-  } finally {
-    db.close();
-    await closeSessions();
-  }
+  await withProject("create table t (id integer primary key, x text not null)", async ({ database, root }) => {
+    database.exec("insert into t values (1, 'a'), (2, 'b')");
+    const upsert = await built(root, "aliased", "insert into t as tt :p::rows(id integer not null, x text not null) on conflict (id) do update set x = excluded.x where tt.x <> excluded.x returning id, x");
+    assert.deepEqual(plain(await upsert.run(database, { p: [{ id: 2, x: "B" }, { id: 3, x: "c" }] })), [{ id: 2, x: "B" }, { id: 3, x: "c" }]);
+    await checkOwnColumnList(root);
+  });
 });
