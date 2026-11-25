@@ -1,3 +1,5 @@
+import { isEmptyArray } from "./native-predicates.ts";
+
 // Placeholder lexing for the runtime loader: finds `:name` (and SQLite's `@name` and `$name`), and
 // The dialect's own positional form (`$1` on Postgres, `?` on MySQL, `?` and `?NNN` on SQLite, and
 // All three on DuckDB),
@@ -10,6 +12,7 @@
 // A control character. This is the provisional JavaScript version of the engine's lexer; the Rust
 // Engine owns the authoritative one (dollar quoting, E'' strings, nested comments, array slices,
 // MySQL's other modes).
+// oxlint-disable-next-line typescript/consistent-type-definitions -- Keep the published placeholder range structurally assignable.
 export type Placeholder = { name: string; start: number; end: number };
 
 const BLOCK_COMMENT_END = "*/";
@@ -29,26 +32,23 @@ const allowsMysqlLineComment = (sql: string, offset: number): boolean => {
   return code <= ASCII_SPACE || code === ASCII_DELETE;
 };
 
-/**
- * Skip to the end of a quoted token. A doubled quote, or an enabled backslash escape,
- * consumes both code units as a single character.
- * @param {string} sql - The original SQL text.
- * @param {number} start - The offset of the opening quote.
- * @param {string} quote - The character that ends the token.
- * @param {boolean} escapes - Whether this dialect recognizes a backslash escape in the token.
- * @returns {number} The first offset after the quoted token.
- */
-const skipQuoted = function skipQuoted(sql: string, start: number, quote: string, escapes: boolean): number {
-  let offset = start + CODE_UNIT_LENGTH;
-  while (offset < sql.length) {
-    if (escapes && sql[offset] === "\\") { offset += ESCAPED_CODE_UNITS; continue; }
-    if (sql[offset] === quote) {
-      if (sql[offset + CODE_UNIT_LENGTH] === quote) { offset += ESCAPED_CODE_UNITS; continue; }
-      return offset + CODE_UNIT_LENGTH;
-    }
-    offset += CODE_UNIT_LENGTH;
+const START_OFFSET = 0;
+
+interface Quote { backslashes: boolean; quote: string }
+
+const escapedQuote = (sql: string, offset: number, { backslashes, quote }: Quote): boolean => {
+  const current = sql[offset];
+  return (backslashes && current === "\\") || (current === quote && sql[offset + CODE_UNIT_LENGTH] === quote);
+};
+
+const skipQuoted = (sql: string, start: number, token: Quote): number => {
+  const cursor = { offset: start + CODE_UNIT_LENGTH };
+  while (cursor.offset < sql.length) {
+    if (escapedQuote(sql, cursor.offset, token)) {cursor.offset += ESCAPED_CODE_UNITS;}
+    else if (sql[cursor.offset] === token.quote) {return cursor.offset + CODE_UNIT_LENGTH;}
+    else {cursor.offset += CODE_UNIT_LENGTH;}
   }
-  return offset;
+  return cursor.offset;
 };
 
 /**
@@ -57,99 +57,164 @@ const skipQuoted = function skipQuoted(sql: string, start: number, quote: string
  */
 export const isPositional = (name: string): boolean => /^\d+$/u.test(name);
 
-/**
- * Strip each named parameter's prefix (`:id` becomes `id`). `$2` and `?2` use the name `2`.
- * A bare `?` takes the next number after the largest one already read.
- * @param {string} sql - The original SQL text with dialect-specific placeholders.
- * @param {"postgres" | "mysql" | "sqlite" | "duckdb"} dialect - The dialect that defines placeholder, comment, and string syntax.
- * @returns {{ params: string[], placeholders: Placeholder[] }} The parameter binding order and the matching spans in the original SQL.
- */
-export const lexPlaceholders = function lexPlaceholders(sql: string, dialect: "postgres" | "mysql" | "sqlite" | "duckdb"): { params: string[]; placeholders: Placeholder[] } {
-  const placeholders: Placeholder[] = [];
-  const params: string[] = [];
-  let largest = 0;
-  let offset = 0;
-  const push = (name: string, start: number, end: number): void => {
-    placeholders.push({ name, start, end });
-    if (!params.includes(name)) {params.push(name);}
-  };
-  const position = (digits: string): string => {
-    const normalized = digits.replace(/^0+(?=\d)/u, "");
-    largest = Math.max(largest, Number(normalized));
-    return normalized;
-  };
-  const mysql = dialect === "mysql";
-  // What was read last, past whitespace and comments: an operand (a name other than `array`, a
-  // Number, a quoted name, a placeholder, `)` or `]`), the `[` of a subscript after one, or other.
-  let last: "other" | "operand" | "subscript" = "other";
-  while (offset < sql.length) {
-    const character = sql.charAt(offset);
-    const nextOffset = offset + CODE_UNIT_LENGTH;
-    const next = sql.charAt(nextOffset);
-    if (character === "'" || (character === '"' && mysql)) { offset = skipQuoted(sql, offset, character, mysql); last = "other"; continue; }
-    if (character === '"' || character === "`") { offset = skipQuoted(sql, offset, character, false); last = "operand"; continue; }
-    const beginsLineComment = character === "-" && next === "-";
-    const comment = character === "#" ? mysql : beginsLineComment && (!mysql || allowsMysqlLineComment(sql, offset));
-    if (comment) { offset = sql.indexOf("\n", offset); if (offset === NOT_FOUND) {break;} continue; }
-    if (character === "/" && next === "*") {
-      const end = sql.indexOf(BLOCK_COMMENT_END, offset + "/*".length);
-      offset = end === NOT_FOUND ? sql.length : end + BLOCK_COMMENT_END.length;
-      continue;
-    }
-    if (character === ":" && next === ":") {
-      // A `::` cast: the type name after it is not a parameter.
-      const typeStart = offset + CAST_MARKER.length;
-      const typeName = /^[A-Za-z_][A-Za-z0-9_]*/u.exec(sql.slice(typeStart))?.[0] ?? "";
-      offset = typeStart + typeName.length;
-      last = "operand";
-      continue;
-    }
-    // A colon that opens a Postgres subscript is a slice with no lower bound, since no expression
-    // Starts with a colon there; an array constructor's `[` follows `array` or another `[`.
-    if (character === ":" && last === "subscript" && dialect === "postgres") { offset = nextOffset; last = "other"; continue; }
-    // `arr[lo:hi]` is a slice: a name character before the colon means it opens nothing. SQLite's
-    // Own `@name` and `$name` are named placeholders there too.
-    const previous = sql.charAt(offset - CODE_UNIT_LENGTH);
-    if ((character === ":" || (dialect === "sqlite" && (character === "@" || character === "$"))) && /[A-Za-z_]/u.test(next) && !/[A-Za-z0-9_]/u.test(previous)) {
-      const name = /^[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*/u.exec(sql.slice(nextOffset))?.[0] ?? next;
-      const end = nextOffset + name.length;
-      push(name, offset, end);
-      offset = end;
-      last = "operand";
-      continue;
-    }
-    const numberedDollar = character === "$" && (dialect === "postgres" || dialect === "duckdb");
-    const numberedQuestion = character === "?" && (dialect === "sqlite" || dialect === "duckdb");
-    if ((numberedDollar || numberedQuestion) && /[0-9]/u.test(next)) {
-      const digits = /^[0-9]+/u.exec(sql.slice(nextOffset))?.[0] ?? next;
-      const end = nextOffset + digits.length;
-      push(position(digits), offset, end);
-      offset = end;
-      last = "operand";
-      continue;
-    }
-    if (character === "?" && dialect !== "postgres") {
-      largest += FIRST_POSITION;
-      push(String(largest), offset, nextOffset);
-      offset = nextOffset;
-      last = "operand";
-      continue;
-    }
-    if (/\s/u.test(character)) { offset = nextOffset; continue; }
-    if (/[A-Za-z0-9_]/u.test(character)) {
-      // A name or a number, whole: `array` opens a constructor, anything else is an operand.
-      const operand = /^[A-Za-z0-9_]+/u.exec(sql.slice(offset))?.[0] ?? character;
-      last = operand.toLowerCase() === "array" ? "other" : "operand";
-      offset += operand.length;
-      continue;
-    }
-    const closesOperand = character === ")" || character === "]" || (character === "$" && /[A-Za-z0-9_]/u.test(previous));
-    const opensSubscript: boolean = character === "[" && last === "operand";
-    if (closesOperand) {last = "operand";}
-    else {last = opensSubscript ? "subscript" : "other";}
-    offset = nextOffset;
+type Dialect = "postgres" | "mysql" | "sqlite" | "duckdb";
+type Context = "other" | "operand" | "subscript";
+interface Character { current: string; next: string; nextOffset: number }
+// oxlint-disable-next-line typescript/consistent-type-definitions -- Preserve structural assignment to the exported lexer's result.
+type Binding = { params: string[]; placeholders: Placeholder[] };
+
+const NORMAL_NAME = /^[A-Za-z_][A-Za-z0-9_]*/u;
+const QUALIFIED_NAME = /^[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*/u;
+const NAME_START = /[A-Za-z_]/u;
+const NAME_CHARACTER = /[A-Za-z0-9_]/u;
+const WHOLE_WORD = /^[A-Za-z0-9_]+/u;
+
+const namedPrefix = (value: string, dialect: Dialect): boolean =>
+  value === ":" || (dialect === "sqlite" && (value === "@" || value === "$"));
+
+const numberedPrefix = (value: string, dialect: Dialect): boolean => {
+  if (value === "$") {return dialect === "postgres" || dialect === "duckdb";}
+  return value === "?" && (dialect === "sqlite" || dialect === "duckdb");
+};
+
+class PlaceholderScanner {
+  #sql: string;
+  #dialect: Dialect;
+  #offset = START_OFFSET;
+  #largest = START_OFFSET;
+  #last: Context = "other";
+  #params: string[] = [];
+  #placeholders: Placeholder[] = [];
+
+  public constructor(sql: string, dialect: Dialect) {
+    this.#sql = sql;
+    this.#dialect = dialect;
   }
-  // Positional parameters bind by number, whatever order they appear in.
-  if (params.length && params.every((name) => isPositional(name))) {params.sort((left, right) => Number(left) - Number(right));}
-  return { params, placeholders };
+
+  #character(): Character {
+    const nextOffset = this.#offset + CODE_UNIT_LENGTH;
+    return { current: this.#sql.charAt(this.#offset), next: this.#sql.charAt(nextOffset), nextOffset };
+  }
+
+  #record(name: string, end: number): void {
+    // oxlint-disable-next-line eslint/sort-keys -- Preserve each public placeholder's property order.
+    this.#placeholders.push({ name, start: this.#offset, end });
+    if (!this.#params.includes(name)) {this.#params.push(name);}
+    this.#offset = end;
+    this.#last = "operand";
+  }
+
+  #skipLiteral(current: string): boolean {
+    const mysql = this.#dialect === "mysql";
+    const isString = current === "'" || (current === '"' && mysql);
+    if (!isString && current !== '"' && current !== "`") {return false;}
+    this.#offset = skipQuoted(this.#sql, this.#offset, { backslashes: isString && mysql, quote: current });
+    this.#last = isString ? "other" : "operand";
+    return true;
+  }
+
+  #lineComment(current: string, next: string): boolean {
+    const mysql = this.#dialect === "mysql";
+    if (current === "#") {return mysql;}
+    return current === "-" && next === "-" && (!mysql || allowsMysqlLineComment(this.#sql, this.#offset));
+  }
+
+  #skipComment({ current, next }: Character): boolean {
+    if (this.#lineComment(current, next)) {
+      const newline = this.#sql.indexOf("\n", this.#offset);
+      this.#offset = newline === NOT_FOUND ? this.#sql.length : newline;
+      return true;
+    }
+    if (current !== "/" || next !== "*") {return false;}
+    const end = this.#sql.indexOf(BLOCK_COMMENT_END, this.#offset + "/*".length);
+    this.#offset = end === NOT_FOUND ? this.#sql.length : end + BLOCK_COMMENT_END.length;
+    return true;
+  }
+
+  #skipColon({ current, next, nextOffset }: Character): boolean {
+    if (current !== ":") {return false;}
+    if (next === ":") {
+      const start = this.#offset + CAST_MARKER.length;
+      const typeName = NORMAL_NAME.exec(this.#sql.slice(start))?.[START_OFFSET] ?? "";
+      this.#offset = start + typeName.length;
+      this.#last = "operand";
+      return true;
+    }
+    return this.#skipOpenSlice(nextOffset);
+  }
+
+  #skipOpenSlice(end: number): boolean {
+    // A colon that opens a Postgres subscript takes no lower bound in a slice.
+    if (this.#last !== "subscript" || this.#dialect !== "postgres") {return false;}
+    this.#offset = end;
+    this.#last = "other";
+    return true;
+  }
+
+  #named({ current, next, nextOffset }: Character): boolean {
+    if (!namedPrefix(current, this.#dialect) || !NAME_START.test(next)) {return false;}
+    const previous = this.#sql.charAt(this.#offset - CODE_UNIT_LENGTH);
+    if (NAME_CHARACTER.test(previous)) {return false;}
+    const name = QUALIFIED_NAME.exec(this.#sql.slice(nextOffset))?.[START_OFFSET] ?? next;
+    this.#record(name, nextOffset + name.length);
+    return true;
+  }
+
+  #numbered(next: string, nextOffset: number): void {
+    const digits = /^[0-9]+/u.exec(this.#sql.slice(nextOffset))?.[START_OFFSET] ?? next;
+    const name = digits.replace(/^0+(?=\d)/u, "");
+    this.#largest = Math.max(this.#largest, Number(name));
+    this.#record(name, nextOffset + digits.length);
+  }
+
+  #positional({ current, next, nextOffset }: Character): boolean {
+    if (numberedPrefix(current, this.#dialect) && /[0-9]/u.test(next)) {
+      this.#numbered(next, nextOffset);
+      return true;
+    }
+    if (current !== "?" || this.#dialect === "postgres") {return false;}
+    this.#largest += FIRST_POSITION;
+    this.#record(String(this.#largest), nextOffset);
+    return true;
+  }
+
+  #punctuation(current: string): Context {
+    const previous = this.#sql.charAt(this.#offset - CODE_UNIT_LENGTH);
+    if (current === ")" || current === "]" || (current === "$" && NAME_CHARACTER.test(previous))) {return "operand";}
+    return current === "[" && this.#last === "operand" ? "subscript" : "other";
+  }
+
+  #skipOther({ current, nextOffset }: Character): void {
+    if (/\s/u.test(current)) {this.#offset = nextOffset; return;}
+    if (NAME_CHARACTER.test(current)) {
+      const operand = WHOLE_WORD.exec(this.#sql.slice(this.#offset))?.[START_OFFSET] ?? current;
+      this.#last = operand.toLowerCase() === "array" ? "other" : "operand";
+      this.#offset += operand.length;
+      return;
+    }
+    this.#last = this.#punctuation(current);
+    this.#offset = nextOffset;
+  }
+
+  public scan(): Binding {
+    while (this.#offset < this.#sql.length) {
+      const token = this.#character();
+      // This order distinguishes cast syntax and Postgres slices from named placeholders.
+      if (!(this.#skipLiteral(token.current) || this.#skipComment(token) ||
+        this.#skipColon(token) || this.#named(token) || this.#positional(token))) {this.#skipOther(token);}
+    }
+    const positional = !isEmptyArray(this.#params) && this.#params.every((name) => isPositional(name));
+    const params = positional ? this.#params.toSorted((left, right) => Number(left) - Number(right)) : this.#params;
+    return { params, placeholders: this.#placeholders };
+  }
+}
+
+/**
+ * Strip named prefixes and return each placeholder's original range and binding position.
+ * @param {string} sql - The original SQL text.
+ * @param {Dialect} dialect - The SQL dialect's binding and quoting syntax.
+ * @returns {Binding} The parameters and their original offsets.
+ */
+export const lexPlaceholders = function lexPlaceholders(sql: string, dialect: Dialect): Binding {
+  return new PlaceholderScanner(sql, dialect).scan();
 };

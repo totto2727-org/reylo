@@ -1,10 +1,11 @@
 // The doc comments of a statement's module: the comment written at the top of the `.sql` file as
 // Prose, then the statement in a `sql` code block, so an editor's hover over the import (or over
 // Its `.sql`) shows them as it shows any declaration's JSDoc. It imports nothing from Node.
-import type { Dialect } from "./engine.ts";
+import type { Dialect } from "./engine-core.ts";
 import { isEmptyString, matchesNull, matchesNullish, matchesUndefined } from "./native-predicates.ts";
 
 /** The comments before a statement, as prose, and the offset where they end. */
+// oxlint-disable-next-line typescript/consistent-type-definitions -- Preserve the public leading-comment record's structural assignability.
 export type Leading = { prose: string; end: number };
 
 const START = 0;
@@ -77,13 +78,15 @@ const readBlock = (sql: string, contentStart: number, nested: boolean): Comment 
   return { end: cursor.end, kind: "block", lines: blockLines(sql.slice(contentStart, contentEnd)) };
 };
 
+const readLine = (sql: string, start: number, marker: number): Comment => {
+  const stop = sql.indexOf("\n", start);
+  const end = stop === NOT_FOUND ? sql.length : stop;
+  return { end, kind: "line", lines: [sql.slice(start + marker, end)] };
+};
+
 const readComment = (sql: string, start: number, dialect: Dialect | undefined): Comment | undefined => {
   const marker = lineMarkerLength(sql, start, dialect);
-  if (marker > EMPTY) {
-    const stop = sql.indexOf("\n", start);
-    const end = stop === NOT_FOUND ? sql.length : stop;
-    return { end, kind: "line", lines: [sql.slice(start + marker, end)] };
-  }
+  if (marker > EMPTY) {return readLine(sql, start, marker);}
   if (!sql.startsWith(BLOCK_START, start)) {
     return undefined;
   }
@@ -92,6 +95,19 @@ const readComment = (sql: string, start: number, dialect: Dialect | undefined): 
     return undefined;
   }
   return readBlock(sql, contentStart, dialect === "postgres" || dialect === "duckdb");
+};
+
+interface Comments { end: number; lineParagraph?: string[]; paragraphs: string[][] }
+
+const keepComment = (cursor: Comments, comment: Comment, whitespace: string): void => {
+  const blankBefore = (whitespace.match(/\n/gu)?.length ?? EMPTY) > ONE_LINE_BREAK;
+  if (comment.kind === "line" && cursor.lineParagraph && !blankBefore) {cursor.lineParagraph.push(...comment.lines);}
+  else {
+    cursor.paragraphs.push(comment.lines);
+    if (comment.kind === "line") {cursor.lineParagraph = comment.lines;}
+    else {delete cursor.lineParagraph;}
+  }
+  cursor.end = comment.end;
 };
 
 /**
@@ -105,24 +121,15 @@ const readComment = (sql: string, start: number, dialect: Dialect | undefined): 
  * @returns {Leading} The leading prose and the end offset of the last comment.
  */
 export const leadingComment = (sql: string, dialect?: Dialect): Leading => {
-  const paragraphs: string[][] = [];
-  const cursor: { end: number; lineParagraph?: string[] } = { end: START };
+  const cursor: Comments = { end: START, paragraphs: [] };
   while (cursor.end < sql.length) {
     const whitespace = /^\s*/u.exec(sql.slice(cursor.end))?.[START] ?? "";
     const start = cursor.end + whitespace.length;
     const comment = readComment(sql, start, dialect);
-    if (!comment) {break;}
-    const blankBefore = (whitespace.match(/\n/gu)?.length ?? EMPTY) > ONE_LINE_BREAK;
-    if (comment.kind === "line" && cursor.lineParagraph && !blankBefore) {
-      cursor.lineParagraph.push(...comment.lines);
-    } else {
-      paragraphs.push(comment.lines);
-      if (comment.kind === "line") {cursor.lineParagraph = comment.lines;}
-      else {delete cursor.lineParagraph;}
-    }
-    cursor.end = comment.end;
+    if (matchesUndefined(comment)) {break;}
+    keepComment(cursor, comment, whitespace);
   }
-  const prose = paragraphs
+  const prose = cursor.paragraphs
     .map((lines) => dedent(lines))
     .filter((lines) => lines.length)
     .map((lines) => lines.join("\n"))
@@ -147,19 +154,38 @@ export const statementAfter = function statementAfter(sql: string, leading: Lead
  * @returns {string | undefined} The open fence, if there is one.
  */
 const openFence = function openFence(text: string): string | undefined {
-  let open: string | undefined;
+  const state: { open?: string } = {};
   Iterator.from(text.split("\n")).forEach((line) => {
     const match = /^ {0,3}(?<fence>`{3,}|~{3,})/u.exec(line);
     if (matchesNull(match)) {return;}
     const fence = match.groups?.fence;
     if (matchesUndefined(fence)) {return;}
-    if (matchesUndefined(open)) {open = fence;}
+    const { open } = state;
+    if (matchesUndefined(open)) {state.open = fence;}
     else if (fence.startsWith(open.charAt(START)) && fence.length >= open.length && isEmptyString(line.slice(match[START].length).trim())) {
-      open = undefined;
+      delete state.open;
     }
   });
-  return open;
+  return state.open;
 };
+
+const sqlBlock = (sql: string): string => {
+  const longest = Math.max(EMPTY, ...(sql.match(/`+/gu) ?? []).map((run) => run.length));
+  const fence = "`".repeat(Math.max(MIN_FENCE_LENGTH, longest + ONE_CODE_UNIT));
+  return `${fence}sql\n${sql}\n${fence}`;
+};
+
+const markdownParts = (prose: string, sql: string | undefined, note: string): string[] => {
+  const parts: string[] = [];
+  if (prose) {
+    const open = openFence(prose);
+    parts.push(matchesUndefined(open) ? prose : `${prose}\n${open}`);
+  }
+  if (!matchesNullish(sql) && !isEmptyString(sql)) {parts.push(sqlBlock(sql));}
+  if (note) {parts.push(note);}
+  return parts;
+};
+
 
 /**
  * A JSDoc comment, indented by `indent`: the prose, then `sql` in a fenced `sql` block, then
@@ -172,18 +198,9 @@ const openFence = function openFence(text: string): string | undefined {
  * @param {string} [indent] - The prefix before each JSDoc line.
  * @returns {string} The JSDoc comment, including its final line break.
  */
+// oxlint-disable-next-line eslint/max-params -- Keep the public JSDoc renderer's positional arguments.
 export const docComment = function docComment(prose: string, sql: string | undefined, note = "", indent = ""): string {
-  const parts: string[] = [];
-  if (prose) {
-    const open = openFence(prose);
-    parts.push(matchesUndefined(open) ? prose : `${prose}\n${open}`);
-  }
-  if (!matchesNullish(sql) && !isEmptyString(sql)) {
-    const longest = Math.max(EMPTY, ...(sql.match(/`+/gu) ?? []).map((run) => run.length));
-    const fence = "`".repeat(Math.max(MIN_FENCE_LENGTH, longest + ONE_CODE_UNIT));
-    parts.push(`${fence}sql\n${sql}\n${fence}`);
-  }
-  if (note) {parts.push(note);}
+  const parts = markdownParts(prose, sql, note);
   if (!parts.length) {return "";}
   const body = parts.join("\n\n").replaceAll("*/", String.raw`*\/`).split("\n");
   return [`${indent}/**`, ...body.map((line) => (line ? `${indent} * ${line}` : `${indent} *`)), `${indent} */`, ""].join("\n");
