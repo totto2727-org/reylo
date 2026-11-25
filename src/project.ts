@@ -11,16 +11,15 @@
 // `reylo generate`, once, and by the error a project with no connection gets; never by an error of
 // Its own, since TypeScript makes every content mapper diagnostic one. With no URL, this fork
 // Defaults to SQLite for cached analysis.
-// oxlint-disable-next-line rules/no-node-imports -- This server-side entry point uses this built-in to launch the real programs whose stdout, stderr and status are consumed.
-import { spawnSync } from "node:child_process";
 // oxlint-disable-next-line rules/no-node-imports -- This server-side entry point uses this built-in to inspect or write files through the host filesystem.
 import { existsSync, readFileSync } from "node:fs";
 // oxlint-disable-next-line rules/no-node-imports -- This server-side entry point uses this built-in to resolve paths using the host platform's filesystem conventions.
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { MissingEngine } from './engine.ts';
 import type { Engine } from './engine.ts';
-import { matchesNull, matchesUndefined } from "./native-predicates.ts";
+import { matchesUndefined } from "./native-predicates.ts";
 
+import { commandOutput } from "./project-command.ts";
 import { inUserinfo, urlParts } from "./project-url-template.ts";
 import { dialectOf, hclPath } from "./project-address.ts";
 import type { Dialect } from "./project-address.ts";
@@ -136,35 +135,6 @@ const place = function (text: string, offset: number): string {
  */
 const TYPES_KEY = /^types[ \t]*:/mu;
 
-/** How long a `$(command)` in `direct_url` may run: long enough to answer a password manager's prompt. */
-const COMMAND_TIMEOUT_MS = 120_000;
-/** How long a command's failure stands before the command is run again. */
-const FAILED_COMMAND_TTL = 60_000;
-
-/** What each command printed, by directory and command: run once per process, and again on a refused login or after a failure has stood a minute. */
-const commandOutputs = new Map<string, { value: string } | { error: string; at: number }>();
-
-/** What a command prints, its trailing newlines dropped, or why it printed nothing usable. */
-const commandOutput = function (command: string, cwd: string, env: Record<string, string>, fresh: boolean): { value: string } | { error: string } {
-  const key = `${cwd}\0${command}`;
-  const kept = commandOutputs.get(key);
-  if (!fresh && kept && ("value" in kept || Date.now() - kept.at < FAILED_COMMAND_TTL)) {return kept;}
-  const run = spawnSync(command, { shell: true, cwd, env, encoding: "utf8", timeout: COMMAND_TIMEOUT_MS, stdio: ["ignore", "pipe", "pipe"], windowsHide: true });
-  const said = run.stderr?.split(/\r?\n/u).map((line) => line.trim()).find(Boolean)?.slice(0, 300);
-  let outcome: { value: string } | { error: string };
-  if (run.error) {
-    const timedOut = (run.error as NodeJS.ErrnoException).code === "ETIMEDOUT";
-    outcome = { error: timedOut ? `which did not finish within ${COMMAND_TIMEOUT_MS / 1000} s` : `which could not start: ${run.error.message}` };
-  } else if (run.status === 0) {
-    const value = run.stdout.replace(/(?:\r?\n)+$/u, "");
-    outcome = value ? { value } : { error: "which printed nothing" };
-  } else {
-    outcome = { error: `which ${matchesNull(run.status) ? `ended on ${run.signal}` : `exited with code ${run.status}`}${said ? `: ${said}` : ""}` };
-  }
-  commandOutputs.set(key, "value" in outcome ? outcome : { ...outcome, at: Date.now() });
-  return outcome;
-};
-
 /**
  * The project `projectDir` belongs to. `engine` reads the project file: any database's engine does
  * (src/engine.ts, `anyEngine`), and where none is installed a project file is the project's error.
@@ -258,7 +228,7 @@ export const resolveProject = function resolveProject(engine: Engine | MissingEn
               built += texts[index];
               continue;
             }
-            const out = commandOutput(part.command, root, shellEnv, fresh);
+            const out = commandOutput(part.command, { cwd: root, env: shellEnv }, fresh);
             if ("error" in out) {return { error: `${shown(file!)}: "direct_url" runs \`${part.command}\`, ${out.error}.` };}
             built += encoded.has(part) ? encodeURIComponent(out.value) : out.value;
           }
