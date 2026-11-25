@@ -38,10 +38,51 @@ const FIRST_EXPRESSION = 0;
 // oxlint-disable-next-line unicorn/no-null -- HCL's null keyword and absent optional AST clauses use a native null value.
 const HCL_NULL = null;
 
+interface ObjectEntry {
+  key: ObjectKey;
+  value: Expression;
+}
+
 interface ParsedExpression {
   expression: Expression;
   failed: boolean;
 }
+
+interface FunctionHead {
+  nameEnd: Pos;
+  nameString: string;
+  open: Token;
+}
+
+interface FunctionSelector {
+  nameRange: Range;
+  nameString: string;
+  open: Token;
+}
+
+interface FunctionEnd {
+  close: Token | undefined;
+  expandFinal: boolean;
+}
+
+interface FunctionArguments extends FunctionEnd {
+  args: Expression[];
+}
+
+const functionNameRange = (name: Token, end: Pos): Range => {
+  const { filename, start } = name.range;
+  // oxlint-disable-next-line eslint/sort-keys -- Preserve the source range field order.
+  return { filename, start, end };
+};
+
+const ZERO_COORDINATE = 0;
+// Go's zero Token carries these zero positions when recovery does not find a closer.
+const zeroPosition = (): Pos =>
+  // oxlint-disable-next-line eslint/sort-keys -- Preserve the source position order of the public zero range.
+  ({ line: ZERO_COORDINATE, column: ZERO_COORDINATE, byte: ZERO_COORDINATE });
+const zeroRange = (): Range =>
+  // oxlint-disable-next-line eslint/sort-keys -- Preserve the public range's filename, start, end order.
+  ({ filename: "", start: zeroPosition(), end: zeroPosition() });
 
 const binaryOps: Record<string, string>[] = [
   { TokenOr: '||' }, { TokenAnd: '&&' }, { TokenEqualOp: '==', TokenNotEqual: '!=' },
@@ -499,132 +540,258 @@ export class Parser extends Peeker {
     }
   }
 
-  private finishParsingFunctionCall(name: Token): Expression {
-    let open = this.read(); let nameString = text(name); let nameEnd = name.range.end;
-    if (open.type !== 'TokenOParen' && open.type !== 'TokenDoubleColon') {throw new Error('finishParsingFunctionCall called with unsupported next token');}
-    while (open.type === 'TokenDoubleColon') {
+  private invalidFunctionSelector(name: Token, next: Token, kind: "scope" | "parenthesis"): Expression {
+    const summary = kind === "scope" ? "Missing function name" : "Missing open parenthesis";
+    const detail = kind === "scope"
+      ? "Function scope resolution symbol :: must be followed by a function name in this scope."
+      : "Function selector must be followed by an open parenthesis to begin the function call.";
+    const diagnostic = error(summary, detail, next.range, between(name.range, next.range));
+    this.diagnostics.push(diagnostic);
+    this.recoverOver("TokenOParen");
+    return dynamic(between(name.range, next.range), [diagnostic]);
+  }
+
+  private consumeFunctionNamePart(head: FunctionHead, next: Token): void {
+    head.nameString += `::${text(next)}`;
+    head.nameEnd = next.range.end;
+    head.open = this.read();
+  }
+
+  private scopedFunctionName(name: Token, head: FunctionHead): FunctionSelector | Expression {
+    while (head.open.type === "TokenDoubleColon") {
       const nextName = this.read();
-      if (nextName.type !== 'TokenIdent') {
-        const diagnostic = error('Missing function name', 'Function scope resolution symbol :: must be followed by a function name in this scope.', nextName.range, between(name.range, nextName.range));
-        this.diagnostics.push(diagnostic); this.recoverOver('TokenOParen');
-        return dynamic(between(name.range, nextName.range), [diagnostic]);
-      }
-      nameString += `::${text(nextName)}`; nameEnd = nextName.range.end; open = this.read();
+      if (nextName.type !== "TokenIdent") {return this.invalidFunctionSelector(name, nextName, "scope");}
+      this.consumeFunctionNamePart(head, nextName);
     }
-    const nameRange = { filename: name.range.filename, start: name.range.start, end: nameEnd };
-    if (open.type !== 'TokenOParen') {
-      const diagnostic = error('Missing open parenthesis', 'Function selector must be followed by an open parenthesis to begin the function call.', open.range, between(name.range, open.range));
-      this.diagnostics.push(diagnostic); this.recoverOver('TokenOParen');
-      return dynamic(between(name.range, open.range), [diagnostic]);
+    const nameRange = functionNameRange(name, head.nameEnd);
+    if (head.open.type !== "TokenOParen") {return this.invalidFunctionSelector(name, head.open, "parenthesis");}
+    return { nameRange, nameString: head.nameString, open: head.open };
+  }
+
+  private readFunctionSelector(name: Token): FunctionSelector | Expression {
+    const open = this.read();
+    const nameString = text(name);
+    const nameEnd = name.range.end;
+    if (open.type !== "TokenOParen" && open.type !== "TokenDoubleColon") {
+      // oxlint-disable-next-line rules/require-tagged-error -- The internal parser invariant keeps its native Error without importing Effect.
+      throw new Error("finishParsingFunctionCall called with unsupported next token");
     }
+    return this.scopedFunctionName(name, { nameEnd, nameString, open });
+  }
+
+  private expandedArgumentEnd(name: Token, separator: Token): Token {
+    if (this.peek().type === "TokenCParen") {return this.read();}
+    if (!this.recovery) {
+      this.diag("Missing closing parenthesis", "An expanded function argument (with ...) must be immediately followed by closing parentheses.", separator.range, between(name.range, separator.range));
+    }
+    return this.recover("TokenCParen");
+  }
+
+  private reportFunctionSeparator(name: Token, open: Token, separator: Token): Token {
+    if (separator.type === "TokenEOF") {
+      this.diag("Unterminated function call", "There is no closing parenthesis for this function call before the end of the file. This may be caused by incorrect parenthesis nesting elsewhere in this file.", between(name.range, open.range));
+    } else {
+      this.diag("Missing argument separator", "A comma is required to separate each function argument from the next.", separator.range, between(name.range, separator.range));
+    }
+    return this.recover("TokenCParen");
+  }
+
+  private recoveredFunctionClose(): Token | undefined {
+    const recovered = this.recover("TokenCParen");
+    return recovered.type === "TokenCParen" ? recovered : undefined;
+  }
+
+  private nextFunctionSeparator(args: Expression[]): Token | undefined {
+    const before = this.diagnostics.length;
+    args.push(this.parseExpression());
+    if (this.failedSince(before)) {return undefined;}
+    return this.read();
+  }
+
+  private functionArgumentEnd(name: Token, open: Token, separator: Token | undefined): FunctionEnd {
+    if (!separator) {
+      return { close: this.recoveredFunctionClose(), expandFinal: false };
+    }
+    if (separator.type === "TokenCParen") {return { close: separator, expandFinal: false };}
+    if (separator.type === "TokenEllipsis") {
+      return { close: this.expandedArgumentEnd(name, separator), expandFinal: true };
+    }
+    return { close: this.reportFunctionSeparator(name, open, separator), expandFinal: false };
+  }
+
+  private readFunctionArguments(name: Token, open: Token): FunctionArguments {
     const args: Expression[] = [];
-    let expandFinal = false;
-    let close: Token | undefined;
-    this.pushIncludeNewlines(false);
+    // oxlint-disable-next-line rules/no-for-loops -- Parse each function argument through its separator or recovery before advancing.
     for (;;) {
-      if (this.peek().type === 'TokenCParen') { close = this.read(); break }
-      const before = this.diagnostics.length;
-      args.push(this.parseExpression());
-      if (this.failedSince(before)) {
-        const recovered = this.recover('TokenCParen');
-        if (recovered.type === 'TokenCParen') {close = recovered;}
-        break;
-      }
-      const sep = this.read();
-      if (sep.type === 'TokenCParen') { close = sep; break }
-      if (sep.type === 'TokenEllipsis') {
-        expandFinal = true;
-        if (this.peek().type === 'TokenCParen') {close = this.read();} else {
-          if (!this.recovery) {this.diag('Missing closing parenthesis', 'An expanded function argument (with ...) must be immediately followed by closing parentheses.', sep.range, between(name.range, sep.range));}
-          close = this.recover('TokenCParen');
-        }
-        break;
-      }
-      if (sep.type !== 'TokenComma') {
-        if (sep.type === 'TokenEOF') {this.diag('Unterminated function call', 'There is no closing parenthesis for this function call before the end of the file. This may be caused by incorrect parenthesis nesting elsewhere in this file.', between(name.range, open.range));}
-        else {this.diag('Missing argument separator', 'A comma is required to separate each function argument from the next.', sep.range, between(name.range, sep.range));}
-        close = this.recover('TokenCParen'); break;
-      }
-      if (this.peek().type === 'TokenCParen') { close = this.read(); break }
+      if (this.peek().type === "TokenCParen") {return { args, close: this.read(), expandFinal: false };}
+      const separator = this.nextFunctionSeparator(args);
+      if (separator?.type !== "TokenComma") {return { args, ...this.functionArgumentEnd(name, open, separator) };}
     }
+  }
+
+  private finishParsingFunctionCall(name: Token): Expression {
+    const selector = this.readFunctionSelector(name);
+    if ("kind" in selector) {return selector;}
+    const { nameRange, nameString, open } = selector;
+    this.pushIncludeNewlines(false);
+    const { args, close, expandFinal } = this.readFunctionArguments(name, open);
     this.popIncludeNewlines();
-    // Go's zero Token has a zero range when recovery never found a closer.
-    const closeRange = close?.range ?? { filename: '', start: { line: 0, column: 0, byte: 0 }, end: { line: 0, column: 0, byte: 0 } };
-    return { kind: 'call', name: nameString, args, expandFinal, nameRange, openParenRange: open.range, closeParenRange: closeRange, range: between(nameRange, closeRange) };
+    const closeRange = close?.range ?? zeroRange();
+    // oxlint-disable-next-line eslint/sort-keys -- Preserve the public function call AST key order.
+    return {
+      kind: "call", name: nameString, args, expandFinal, nameRange, openParenRange: open.range,
+      closeParenRange: closeRange, range: between(nameRange, closeRange),
+    };
+  }
+
+  private invalidTupleSeparator(open: Token, next: Token): Token {
+    if (!this.recovery) {
+      if (next.type === "TokenEOF") {
+        this.diag("Unterminated tuple constructor expression", "There is no corresponding closing bracket before the end of the file. This may be caused by incorrect bracket nesting elsewhere in this file.", open.range);
+      } else {
+        this.diag("Missing item separator", "Expected a comma to mark the beginning of the next item.", next.range, between(open.range, next.range));
+      }
+    }
+    return this.recover("TokenCBrack");
+  }
+
+  private tupleDelimiter(open: Token): Token | undefined {
+    const next = this.peek();
+    if (next.type === "TokenCBrack") {return this.read();}
+    if (next.type !== "TokenComma") {return this.invalidTupleSeparator(open, next);}
+    this.read();
+    return undefined;
+  }
+
+  private appendTupleExpression(expressions: Expression[]): boolean {
+    const before = this.diagnostics.length;
+    expressions.push(this.parseExpression());
+    return !this.failedSince(before);
+  }
+
+  private readTupleItems(open: Token, expressions: Expression[]): Token {
+    // oxlint-disable-next-line rules/no-for-loops -- Read one tuple expression at a time through the closing bracket or recovery.
+    for (;;) {
+      if (this.peek().type === "TokenCBrack") {return this.read();}
+      if (!this.appendTupleExpression(expressions)) {return this.recover("TokenCBrack");}
+      const end = this.tupleDelimiter(open);
+      if (end) {return end;}
+    }
   }
 
   private parseTupleCons(): Expression {
     const open = this.read();
     this.pushIncludeNewlines(false);
     try {
-      if (keyword(this.peek(), 'for')) {return this.finishParsingForExpr(open);}
+      if (keyword(this.peek(), "for")) {return this.finishParsingForExpr(open);}
       const expressions: Expression[] = [];
-      let close: Token;
-      for (;;) {
-        if (this.peek().type === 'TokenCBrack') { close = this.read(); break }
-        const before = this.diagnostics.length;
-        expressions.push(this.parseExpression());
-        if (this.failedSince(before)) { close = this.recover('TokenCBrack'); break }
-        const next = this.peek();
-        if (next.type === 'TokenCBrack') { close = this.read(); break }
-        if (next.type !== 'TokenComma') {
-          if (!this.recovery) {
-            if (next.type === 'TokenEOF') {this.diag('Unterminated tuple constructor expression', 'There is no corresponding closing bracket before the end of the file. This may be caused by incorrect bracket nesting elsewhere in this file.', open.range);}
-            else {this.diag('Missing item separator', 'Expected a comma to mark the beginning of the next item.', next.range, between(open.range, next.range));}
-          }
-          close = this.recover('TokenCBrack'); break;
-        }
-        this.read();
+      const close = this.readTupleItems(open, expressions);
+      // oxlint-disable-next-line eslint/sort-keys -- Preserve the public tuple AST order.
+      return { kind: "tuple", expressions, range: between(open.range, close.range), openRange: open.range };
+    } finally {
+      this.popIncludeNewlines();
+    }
+  }
+
+  private unterminatedObject(open: Token): void {
+    this.diag("Unterminated object constructor expression", "There is no corresponding closing brace before the end of the file. This may be caused by incorrect brace nesting elsewhere in this file.", open.range);
+  }
+
+  private invalidObjectValue(open: Token, separator: Token): Token {
+    if (!this.recovery) {this.reportObjectValueSeparator(open, separator);}
+    return this.recover("TokenCBrace");
+  }
+
+  private reportObjectValueSeparator(open: Token, separator: Token): void {
+    const { range, type } = separator;
+    switch (type) {
+      case "TokenNewline": case "TokenComma": {
+        this.diag("Missing attribute value", 'Expected an attribute value, introduced by an equals sign ("=").', range, between(open.range, range));
+        break;
       }
-      return { kind: 'tuple', expressions, range: between(open.range, close.range), openRange: open.range };
-    } finally { this.popIncludeNewlines() }
+      case "TokenIdent": {
+        this.diag("Missing key/value separator", 'Expected an equals sign ("=") to mark the beginning of the attribute value. If you intended to given an attribute name containing periods or spaces, write the name in quotes to create a string literal.', range, between(open.range, range));
+        break;
+      }
+      case "TokenEOF": {
+        this.unterminatedObject(open);
+        break;
+      }
+      default: {
+        this.diag("Missing key/value separator", 'Expected an equals sign ("=") to mark the beginning of the attribute value.', range, between(open.range, range));
+      }
+    }
+  }
+
+  private invalidObjectDelimiter(open: Token, next: Token): Token {
+    if (!this.recovery) {
+      if (next.type === "TokenEOF") {this.unterminatedObject(open);}
+      else {
+        this.diag("Missing attribute separator", "Expected a newline or comma to mark the beginning of the next attribute.", next.range, between(open.range, next.range));
+      }
+    }
+    return this.recover("TokenCBrace");
+  }
+
+  private objectDelimiter(open: Token): Token | undefined {
+    const next = this.peek();
+    if (next.type === "TokenCBrace") {return this.read();}
+    if (next.type !== "TokenComma" && next.type !== "TokenNewline") {return this.invalidObjectDelimiter(open, next);}
+    this.read();
+    return undefined;
+  }
+
+  private parseObjectValue(open: Token, items: ObjectEntry[], key: ObjectKey): Token | undefined {
+    this.read();
+    const before = this.diagnostics.length;
+    const value = this.parseExpression();
+    items.push({ key, value });
+    return this.failedSince(before) ? this.recover("TokenCBrace") : this.objectDelimiter(open);
+  }
+
+  private parseObjectEntry(open: Token, items: ObjectEntry[], next: Token): Token | undefined {
+    const forceNonLiteral = next.type === "TokenOParen";
+    const { expression: wrapped, failed } = this.expressionAttempt(() => this.parseExpression());
+    if (failed) {return this.recover("TokenCBrace");}
+    // oxlint-disable-next-line eslint/sort-keys -- Preserve the public object key order.
+    const key: ObjectKey = { kind: "objectKey", wrapped, forceNonLiteral, range: wrapped.range };
+    const separator = this.peek();
+    if (separator.type !== "TokenEqual" && separator.type !== "TokenColon") {return this.invalidObjectValue(open, separator);}
+    return this.parseObjectValue(open, items, key);
+  }
+
+  private readObjectEntries(open: Token, items: ObjectEntry[]): Token {
+    // oxlint-disable-next-line rules/no-for-loops -- Read one object attribute at a time through the closing brace or recovery.
+    for (;;) {
+      const next = this.peek();
+      if (next.type === "TokenNewline") {this.read();}
+      else if (next.type === "TokenCBrace") {return this.read();}
+      else {
+        const end = this.parseObjectEntry(open, items, next);
+        if (end) {return end;}
+      }
+    }
+  }
+
+  private objectStartsWithFor(): boolean {
+    this.pushIncludeNewlines(false);
+    const isFor = keyword(this.peek(), "for");
+    this.popIncludeNewlines();
+    return isFor;
   }
 
   private parseObjectCons(): Expression {
     const open = this.read();
-    this.pushIncludeNewlines(false);
-    const isFor = keyword(this.peek(), 'for');
-    this.popIncludeNewlines();
-    if (isFor) {return this.finishParsingForExpr(open);}
+    if (this.objectStartsWithFor()) {return this.finishParsingForExpr(open);}
     this.pushIncludeNewlines(true);
     try {
-      const items: { key: ObjectKey; value: Expression }[] = [];
-      let close: Token;
-      for (;;) {
-        let next = this.peek();
-        if (next.type === 'TokenNewline') { this.read(); continue }
-        if (next.type === 'TokenCBrace') { close = this.read(); break }
-        const forceNonLiteral = next.type === 'TokenOParen'; const before = this.diagnostics.length;
-        const wrapped = this.parseExpression();
-        if (this.failedSince(before)) { close = this.recover('TokenCBrace'); break }
-        const key: ObjectKey = { kind: 'objectKey', wrapped, forceNonLiteral, range: wrapped.range };
-        next = this.peek();
-        if (next.type !== 'TokenEqual' && next.type !== 'TokenColon') {
-          if (!this.recovery) {
-            if (next.type === 'TokenNewline' || next.type === 'TokenComma') {this.diag('Missing attribute value', 'Expected an attribute value, introduced by an equals sign ("=").', next.range, between(open.range, next.range));}
-            else if (next.type === 'TokenIdent') {this.diag('Missing key/value separator', 'Expected an equals sign ("=") to mark the beginning of the attribute value. If you intended to given an attribute name containing periods or spaces, write the name in quotes to create a string literal.', next.range, between(open.range, next.range));}
-            else if (next.type === 'TokenEOF') {this.diag('Unterminated object constructor expression', 'There is no corresponding closing brace before the end of the file. This may be caused by incorrect brace nesting elsewhere in this file.', open.range);}
-            else {this.diag('Missing key/value separator', 'Expected an equals sign ("=") to mark the beginning of the attribute value.', next.range, between(open.range, next.range));}
-          }
-          close = this.recover('TokenCBrace'); break;
-        }
-        this.read();
-        const valueBefore = this.diagnostics.length;
-        const value = this.parseExpression(); items.push({ key, value });
-        if (this.failedSince(valueBefore)) { close = this.recover('TokenCBrace'); break }
-        next = this.peek();
-        if (next.type === 'TokenCBrace') { close = this.read(); break }
-        if (next.type !== 'TokenComma' && next.type !== 'TokenNewline') {
-          if (!this.recovery) {
-            if (next.type === 'TokenEOF') {this.diag('Unterminated object constructor expression', 'There is no corresponding closing brace before the end of the file. This may be caused by incorrect brace nesting elsewhere in this file.', open.range);}
-            else {this.diag('Missing attribute separator', 'Expected a newline or comma to mark the beginning of the next attribute.', next.range, between(open.range, next.range));}
-          }
-          close = this.recover('TokenCBrace'); break;
-        }
-        this.read();
-      }
-      return { kind: 'object', items, range: between(open.range, close.range), openRange: open.range };
-    } finally { this.popIncludeNewlines() }
+      const items: ObjectEntry[] = [];
+      const close = this.readObjectEntries(open, items);
+      // oxlint-disable-next-line eslint/sort-keys -- Preserve the public object AST order.
+      return { kind: "object", items, range: between(open.range, close.range), openRange: open.range };
+    } finally {
+      this.popIncludeNewlines();
+    }
   }
 
   private finishParsingForExpr(open: Token): Expression {
