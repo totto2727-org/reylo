@@ -299,7 +299,7 @@ export const readQueryError = async function readQueryError(dialect: Dialect, er
   if (dialect === "duckdb") {
     // A plain Error, its message opening with the kind of error: Reylo's own errors are of classes of their own.
     const e = record(error);
-    const kind = error instanceof Error && Object.getPrototypeOf(error) === Error.prototype && matchesString(e?.message) ? /^([A-Za-z ]+?) Error: /u.exec(e.message)?.[1] : undefined;
+    const kind = error instanceof Error && Object.getPrototypeOf(error) === Error.prototype && matchesString(e?.message) ? messageGroup(/^(?<kind>[A-Za-z ]+?) Error: /u, e.message, "kind") : undefined;
     if (matchesUndefined(kind)) {return undefined;}
     return new DatabaseError(e!.message as string, error, { code: (DUCKDB_CODES as Record<string, DuckdbCode>)[kind] }) as DuckdbQueryError;
   }
@@ -320,26 +320,35 @@ export const readQueryError = async function readQueryError(dialect: Dialect, er
   return new DatabaseError(read.message, error, { code, errno: read.errno, sqlState: read.sqlState, ...mysqlNames(read.errno, read.message) }) as MysqlQueryError;
 };
 
-/** What SQLite's message names, for a constraint it failed. */
-const sqliteNames = function sqliteNames(errcode: number | undefined, message: string) {
-  const names: { table?: string | undefined; columns?: string[] | undefined; constraint?: string | undefined } = {};
-  let m: RegExpExecArray | null;
-  if (!matchesUndefined(errcode) && (errcode & 0xFF) === SQLITE_CODES.SQLITE_CONSTRAINT) {
-    if ((m = /^UNIQUE constraint failed: index '([\s\S]*)'$/.exec(message))) {names.constraint = m[1];}
-    else if ((m = /^(?:UNIQUE|NOT NULL) constraint failed: ([\s\S]+)$/.exec(message))) {
-      const columns = m[1]!.split(", ").map((part) => /^([^.]+)\.([\s\S]+)$/.exec(part));
-      const table = columns[0]?.[1];
-      if (columns.every((currentColumn) => currentColumn && currentColumn[1] === table)) {
-        names.table = table;
-        names.columns = columns.map((currentColumn) => currentColumn![2]!);
-      }
-    } else if ((m = /^CHECK constraint failed: ([\s\S]*)$/.exec(message))) {names.constraint = m[1];}
-    else if ((m = /^cannot store \S+ value in \S+ column ([^.]+)\.([\s\S]+)$/.exec(message))) {
-      names.table = m[1];
-      names.columns = [m[2]!];
-    }
+const SQLITE_PRIMARY_CODE_MASK = 0xFF;
+
+interface SqliteNames {
+  table: string | undefined;
+  columns: string[] | undefined;
+  constraint: string | undefined;
+}
+
+const sqliteColumns = (columnList: string): Pick<SqliteNames, "columns" | "table"> => {
+  const references = columnList.split(", ").map((part) => /^(?<table>[^.]+)\.(?<column>[\s\S]+)$/u.exec(part)?.groups);
+  const table = references[0]?.table;
+  if (matchesUndefined(table) || !references.every((reference) => reference?.table === table)) {
+    return { columns: undefined, table: undefined };
   }
-  return { table: names.table, columns: names.columns, constraint: names.constraint };
+  return { columns: references.map((reference) => reference?.column ?? ""), table };
+};
+
+/** What SQLite's message names, for a constraint it failed. */
+const sqliteNames = function sqliteNames(errcode: number | undefined, message: string): SqliteNames {
+  const names: SqliteNames = { table: undefined, columns: undefined, constraint: undefined };
+  if (matchesUndefined(errcode) || (errcode & SQLITE_PRIMARY_CODE_MASK) !== SQLITE_CODES.SQLITE_CONSTRAINT) {return names;}
+  const index = messageGroup(/^UNIQUE constraint failed: index '(?<constraint>[\s\S]*)'$/u, message, "constraint");
+  if (!matchesUndefined(index)) {return { ...names, constraint: index };}
+  const columns = messageGroup(/^(?:UNIQUE|NOT NULL) constraint failed: (?<columns>[\s\S]+)$/u, message, "columns");
+  if (!matchesUndefined(columns)) {return { ...names, ...sqliteColumns(columns) };}
+  const check = messageGroup(/^CHECK constraint failed: (?<constraint>[\s\S]*)$/u, message, "constraint");
+  if (!matchesUndefined(check)) {return { ...names, constraint: check };}
+  const datatype = /^cannot store \S+ value in \S+ column (?<table>[^.]+)\.(?<column>[\s\S]+)$/u.exec(message)?.groups;
+  return matchesUndefined(datatype) ? names : { ...names, columns: [datatype.column ?? ""], table: datatype.table };
 };
 
 /** `readQueryError` for the synchronous SQLite clients, whose list is no import away. */
@@ -352,6 +361,15 @@ export function readQueryErrorSync(dialect: Dialect, error: unknown): QueryError
 
 const SQLITE_NAMES = new Map<number, SqliteCode>(Object.entries(SQLITE_CODES).map(([name, code]) => [code, name as SqliteCode]));
 const SQLITE_NAME = /^SQLITE_[A-Z_]+$/u;
+
+const readWrappedSqliteMessage = (
+  message: string,
+  mayBeTurso: boolean,
+): Readonly<Record<string, string | undefined>> | undefined =>
+  /^(?:D1_ERROR: )?(?<message>[\s\S]*): (?<primary>SQLITE_[A-Z_]+)(?: \(extended: (?<extended>SQLITE_[A-Z_]+)\))?$/u.exec(message)?.groups ??
+  (mayBeTurso
+    ? /^(?:prepare|step) failed: (?:Runtime error: )?(?<message>[\s\S]*?)(?: \((?<code>\d+)\))?$/u.exec(message)?.groups
+    : undefined);
 
 function sqliteError(error: unknown) {
   const e = record(error);
@@ -372,18 +390,14 @@ function sqliteError(error: unknown) {
   if (matchesNumber(e.errno) && named) {codes.push(e.errno);}
   if (named && matchesString(e.code) && message.startsWith(`${e.code}: `)) {message = message.slice(e.code.length + 2);}
   if (!named && !codes.length) {
-    const tail = /^(?:D1_ERROR: )?([\s\S]*): (SQLITE_[A-Z_]+)(?: \(extended: (SQLITE_[A-Z_]+)\))?$/.exec(message);
-    const turso = e.code === "GenericFailure" ? /^(?:prepare|step) failed: (?:Runtime error: )?([\s\S]*?)(?: \((\d+)\))?$/.exec(message) : null;
-    if (tail) {
-      message = tail[1]!;
-      name(tail[3]);
-      name(tail[2]);
-    } else if (turso) {
-      message = turso[1]!;
-      if (turso[2]) {codes.push(Number(turso[2]));}
-    } else {return undefined;}
+    const wrapped = readWrappedSqliteMessage(message, e.code === "GenericFailure");
+    if (matchesUndefined(wrapped)) {return undefined;}
+    message = wrapped.message ?? "";
+    name(wrapped.extended);
+    name(wrapped.primary);
+    if (!matchesUndefined(wrapped.code)) {codes.push(Number(wrapped.code));}
   }
   // The most specific code given: an extended one where any is.
-  const errcode = codes.find((c) => c > 0xFF) ?? codes[0];
+  const errcode = codes.find((code) => code > SQLITE_PRIMARY_CODE_MASK) ?? codes[0];
   return { code: matchesUndefined(errcode) ? undefined : SQLITE_NAMES.get(errcode), errcode, message };
 }
