@@ -23,11 +23,14 @@
 // MySQL has no boolean type: a TINYINT(1), a BIT(1) and a comparison are integers to every driver,
 // And a column whose kind is `bool` (src/values.ts) is made a boolean after the driver, a value
 // Other than 0 or 1 refused (`truth`).
-import { bigInteger, coerce, truth, utf8 } from './values.ts';
-import type { Columns, Kind } from './values.ts';
-import { hasFunctionType, hasObjectType, matchesBigInt, matchesNull, matchesNumber, matchesString, matchesUndefined } from "./native-predicates.ts";
+import { coerce, utf8 } from './values.ts';
+import type { Columns } from './values.ts';
+import { hasFunctionType, matchesNull, matchesString, matchesUndefined } from "./native-predicates.ts";
 
-type DriverRow = Record<string, unknown>;
+import { byKind, columnFixes, fixRows, toBigInt } from "./decode-mysql-columns.ts";
+import type { DriverRow, Fix } from "./decode-mysql-columns.ts";
+
+export { planetscale } from "./decode-planetscale.ts";
 const driverProtocol = <Protocol>(client: DriverRow): Protocol =>
   // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- Runtime dispatch identifies the native driver before entering its query adapter.
   client as Protocol;
@@ -110,38 +113,6 @@ const needsCast = function (client: Mysql2Protocol, columns: Columns | undefined
 /** Mysql2's protocol type of a BIGINT (MYSQL_TYPE_LONGLONG). */
 const LONGLONG = 8;
 
-/** What a column's values need after a driver: a truth value made a boolean, a BIGINT a BigInt. */
-type Fix = (v: unknown, name: string) => unknown;
-const toBool: Fix = truth;
-// A BIGINT's text is always its digits: BigInt reads it straight.
-const toBigInt: Fix = (v, name) => (matchesString(v) ? BigInt(v) : (matchesNumber(v) || matchesBigInt(v) ? bigInteger(v, name) : v));
-
-// A VECTOR is MySQL's one array: mysql2 decodes its floats, mariadb and PlanetScale give its bytes.
-const toFloats: Fix = (v, name) => coerce("float[]", v, name);
-
-/**
- * The fix a column of `kind` needs, if any: `bool` a boolean, `int8` (a BIGINT, or an integer a
- * temporary table may widen to one) a BigInt from whatever the driver gave, `float[]` (a VECTOR)
- * its floats.
- */
-const byKind = function (kind: Kind | undefined): Fix | undefined {
-  if (kind === "bool") {return toBool;}
-  if (kind === "int8") {return toBigInt;}
-  if (kind === "float[]") {return toFloats;}
-  return undefined;
-};
-
-/** Applies each column's fix, in place: the drivers build new rows per call. */
-const fixRows = function (rows: Record<string, unknown>[], fixes: (Readonly<[string, Fix]>)[]): void {
-  if (!fixes.length) {return;}
-  Iterator.from(rows).forEach((row) => {
-    for (const [name, fix] of fixes) {
-      const v = row[name];
-      if (!matchesNull(v) && !matchesUndefined(v)) {row[name] = fix(v, name);}
-    }
-  });
-};
-
 /** Mysql2's execute(), resolving to [rows, fields]. */
 export const mysql2 = async function mysql2(client: DriverRow, text: string, values: unknown[], columns: Columns | undefined): Promise<unknown[]> {
   const driver = driverProtocol<Mysql2Protocol>(client);
@@ -208,16 +179,6 @@ interface MariadbProtocol {
   ) => { then?: (resolve: (rows: MariadbResult) => void, reject: (error: unknown) => void) => unknown } | null | undefined;
 }
 
-/** The fixes the module's kinds call for, for a driver that tells each type by its value. */
-const columnFixes = function columnFixes(columns: Columns | undefined): (Readonly<[string, Fix]>)[] {
-  const fixes: (Readonly<[string, Fix]>)[] = [];
-  Iterator.from(columns ?? []).forEach(([name, kind]) => {
-    const fix = byKind(kind);
-    if (fix) {fixes.push([name, fix]);}
-  });
-  return fixes;
-};
-
 /** Mariadb's query(), on its promise or its callback API, with Reylo's options. */
 export const mariadb = async function mariadb(client: DriverRow, text: string, values: unknown[], columns: Columns | undefined): Promise<unknown[]> {
   const options = { sql: text, ...MARIADB_OPTIONS, ...(columns?.some(([, kind]) => kind === "unknown") ? { typeCast: mariadbGeometry } : {}) };
@@ -256,79 +217,4 @@ export const mariadb = async function mariadb(client: DriverRow, text: string, v
     });
   });
   return result;
-};
-
-// ---------------------------------------------------------------------------------------------
-// PlanetScale 1.x
-
-interface PlanetscaleField { type: string; charset?: number }
-/** PlanetScale hands each value over as a string of bytes, one character each. */
-const bytesOf = (s: string) => {
-  const out = new Uint8Array(s.length);
-  for (let i = 0; i < s.length; i++) {out[i] = s.charCodeAt(i);}
-  return out;
-};
-
-/** PlanetScale's own default cast (cast.js), with a BIGINT a BigInt and a DATETIME's and a TIMESTAMP's `T`: it replaces any cast of the app's for this query. */
-const planetscaleCast = function (field: PlanetscaleField, value: string | null): unknown {
-  if (matchesNull(value) || matchesUndefined(value)) {return value;}
-  switch (field.type) {
-    case "INT64":
-    case "UINT64": {
-      return BigInt(value);
-    }
-    case "DATE":
-    case "TIME":
-    case "DECIMAL": {
-      return value;
-    }
-    case "DATETIME":
-    case "TIMESTAMP": {
-      return value.replace(" ", "T");
-    }
-    case "JSON": {
-      return JSON.parse(utf8(bytesOf(value)));
-    }
-    case "INT8":
-    case "INT16":
-    case "INT24":
-    case "INT32":
-    case "UINT8":
-    case "UINT16":
-    case "UINT24":
-    case "UINT32":
-    case "YEAR": {
-      return Number.parseInt(value, 10);
-    }
-    case "FLOAT32":
-    case "FLOAT64": {
-      return Number.parseFloat(value);
-    }
-  }
-  if (field.charset === 63) {return bytesOf(value);}
-  return value ? utf8(bytesOf(value)) : "";
-};
-
-/** PlanetScale's execute(): 1.x binds parameters; 2.0 takes none, and its options come second. */
-export const planetscale = async function planetscale(client: DriverRow, text: string, values: unknown[], columns: Columns | undefined): Promise<unknown[]> {
-  const options = { as: "object", cast: planetscaleCast };
-  type Result = { rows?: DriverRow[] } | null | undefined;
-  type PlanetscaleProtocol = {
-    execute: (text: string, values: unknown[] | null | typeof options, queryOptions?: typeof options) => PromiseLike<Result>;
-  };
-  const driver = driverProtocol<PlanetscaleProtocol>(client);
-  let result;
-  try {
-    result = await driver.execute(text, values.length ? values : null, options);
-  } catch (error) {
-    if (!/^Query parameters are not supported/u.test((error as Error)?.message)) {throw error;}
-    if (values.length) {throw new TypeError(`@planetscale/database 2.0 binds no parameters, so reylo cannot pass this statement's values to it; use its 1.x line, or mysql2 on PlanetScale's MySQL endpoint.`, { cause: error });}
-    result = await driver.execute(text, options);
-  }
-  // PlanetScale's result always carries its rows, an empty array for a statement that returns
-  // None. Another driver's execute() (TiDB Cloud's answers with the rows themselves) would read
-  // As no rows at all.
-  if (!Array.isArray(result?.rows)) {throw new TypeError(`reylo ran this statement through execute(), as on PlanetScale's @planetscale/database, and the client answered with ${Array.isArray(result) ? "an array" : (matchesNull(result) || !hasObjectType(result) ? String(result) : "an object")} rather than a result with rows. It takes execute(text, values) as on mysql2 and PlanetScale, or a Drizzle database over one of them.`);}
-  fixRows(result.rows, columnFixes(columns));
-  return result.rows;
 };
