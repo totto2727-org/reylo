@@ -6,6 +6,7 @@ import { lexPlaceholders } from "#reylo-source/lex.ts";
 import { defineQuery } from "#reylo-source/index.ts";
 import { engine as load } from '#reylo-source/engine.ts';
 import type { Dialect } from '#reylo-source/engine.ts';
+import { promiseDriverStub } from "./helpers.ts";
 
 const names = (sql: string, dialect: "postgres" | "mysql" | "sqlite" = "postgres"): string[] => lexPlaceholders(sql, dialect).params;
 
@@ -79,15 +80,33 @@ test("the runtime's lexer agrees with the engine's", async () => {
 });
 
 // Without the engine's rewritten statement (a query defined by hand) the runtime rewrites it itself.
-const capture = () => {
-  const calls: { text: string; values?: unknown[] | undefined }[] = [];
-  return { calls, client: { async query(text: string, values?: unknown[]) { calls.push({ text, values }); return { rows: [{}] }; } } };
+type EmptyRow = Record<string, never>;
+// oxlint-disable-next-line typescript/no-generated-empty-object-type -- The query deliberately has no parameter keys, so calls may omit the parameter object.
+type EmptyParameters = Record<never, never>;
+
+interface CapturedCall {
+  text: string;
+  values?: unknown[] | undefined;
+}
+
+interface Capture {
+  calls: CapturedCall[];
+  client: { query: (text: string, values?: unknown[]) => Promise<{ rows: EmptyRow[] }> };
+}
+
+const capture = (): Capture => {
+  const calls: CapturedCall[] = [];
+  const query = promiseDriverStub((text: string, values?: unknown[]) => {
+    calls.push({ text, values });
+    return { rows: [{}] };
+  });
+  return { calls, client: { query } };
 };
 
 // oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
 test("run binds positional parameters by number", async () => {
   const { calls, client } = capture();
-  const query = defineQuery<{ 1: number; 2: string }, {}, "one", "postgres">({ dialect: "postgres", sql: "select $2::text, $1::int", params: ["1", "2"], cardinality: "one" });
+  const query = defineQuery<{ 1: number; 2: string }, EmptyRow, "one", "postgres">({ cardinality: "one", dialect: "postgres", params: ["1", "2"], sql: "select $2::text, $1::int" });
   await query.run(client, { 1: 7, 2: "z" });
   assert.deepEqual(calls, [{ text: "select $2::text, $1::int", values: [7, "z"] }]);
 });
@@ -95,22 +114,24 @@ test("run binds positional parameters by number", async () => {
 // oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
 test("with binds a client; the parameters may be left out when the statement takes none", async () => {
   const { calls, client } = capture();
-  const query = defineQuery<{ id: number }, {}, "one", "postgres">({ dialect: "postgres", sql: "select :id::int", params: ["id"], cardinality: "one" });
+  const query = defineQuery<{ id: number }, EmptyRow, "one", "postgres">({ cardinality: "one", dialect: "postgres", params: ["id"], sql: "select :id::int" });
   const get = query.with(client);
   assert.equal(calls.length, 0);
   await get({ id: 1 });
-  const none = defineQuery<Record<never, never>, {}, "one", "postgres">({ dialect: "postgres", sql: "select 1", params: [], cardinality: "one" });
+  const none = defineQuery<EmptyParameters, EmptyRow, "one", "postgres">({ cardinality: "one", dialect: "postgres", params: [], sql: "select 1" });
   await none.run(client);
   await none.with(client)();
   // @ts-expect-error a statement that takes parameters needs them
-  await query.run(client).catch(() => {});
+  await query.run(client).catch(() => {
+    // This call verifies the compiler's required parameter contract regardless of its runtime result.
+  });
   assert.deepEqual(calls.slice(0, 3), [{ text: "select $1::int", values: [1] }, { text: "select 1", values: [] }, { text: "select 1", values: [] }]);
 });
 
 // oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
 test("a hand-built query whose params miss a placeholder is refused", async () => {
   const { calls, client } = capture();
-  const query = defineQuery<{ id: number }, {}, "one", "postgres">({ dialect: "postgres", sql: "select $1", params: ["id"], cardinality: "one" });
+  const query = defineQuery<{ id: number }, EmptyRow, "one", "postgres">({ cardinality: "one", dialect: "postgres", params: ["id"], sql: "select $1" });
   await assert.rejects(query.run(client, { id: 1 }), /placeholder \$1 is parameter "1"/u);
   assert.equal(calls.length, 0);
 });

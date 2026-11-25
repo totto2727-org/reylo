@@ -6,6 +6,7 @@ import { fieldComment } from "#reylo-source/module-types.ts";
 
 // oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
 test("a doc comment is one line, or a block of lines, with a star and a slash kept apart", () => {
+  // oxlint-disable-next-line unicorn/no-useless-undefined -- An absent field comment is the input under test.
   assert.equal(fieldComment(undefined), "");
   assert.equal(fieldComment(" \n "), "");
   assert.equal(fieldComment("Age (in years)"), "/** Age (in years) */");

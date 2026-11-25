@@ -5,11 +5,12 @@ import assert from "node:assert/strict";
 // oxlint-disable-next-line rules/no-node-imports -- Exercise the native SQLite driver used by Reylo's Node runtime.
 import { DatabaseSync } from "node:sqlite";
 import { sqliteSchemaFromHcl } from "#reylo-source/hcl-sqlite.ts";
+import { requireFixtureValue, SQL_NULL } from "./helpers.ts";
 
 const schema = (body: string): string => `schema "main" {}\n${body}\n`;
-const column = (name: string, type = "text", nullable = true, extra = ""): string => `column ${JSON.stringify(name)} {\n type = ${type}\n null = ${nullable}\n ${extra}\n}\n`;
+const column = (name: string, type = "text", { nullable = true, extra = "" } = {}): string => `column ${JSON.stringify(name)} {\n type = ${type}\n null = ${nullable}\n ${extra}\n}\n`;
 const table = (body: string, name = "items"): string => `table ${JSON.stringify(name)} {\n schema = schema.main\n${body}\n}\n`;
-const open = function (source: string) {
+const open = function (source: string): DatabaseSync {
   const db = new DatabaseSync(":memory:");
   try {
     Iterator.from(sqliteSchemaFromHcl(source, "test.hcl")).forEach((sql) => {db.prepare(sql).run();});
@@ -20,10 +21,23 @@ const open = function (source: string) {
   }
 };
 
+const checkStaticCatalog = function (db: DatabaseSync): void {
+  const columns = db.prepare('pragma table_info("items")').all();
+  assert.deepEqual(columns.map((value) => [value.name, value.type, value.notnull, value.dflt_value, value.pk]), [
+    ["id", "TEXT", 0, SQL_NULL, 1], ["part", "INTEGER", 1, SQL_NULL, 2], ["title", "varchar(80)", 1, "'can''t'", 0], ["amount", "numeric", 1, "-2.50", 0], ["created", "datetime", 1, "CURRENT_TIMESTAMP", 0],
+  ]);
+  const indexes = db.prepare('pragma index_list("items")').all();
+  const unique = requireFixtureValue(indexes.find((row) => row.name === "sqlite_autoindex_items_2"));
+  assert.equal(unique.unique, 1);
+  assert.equal(unique.origin, "u");
+  const terms = db.prepare('pragma index_xinfo("items_title")').all().filter((row) => row.key === 1);
+  assert.deepEqual(terms.map((row) => [row.name, row.desc]), [["title", 1], ["part", 0]]);
+};
+
 // oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
 test("static Atlas declarations preserve SQLite constraints, defaults, indexes and nullability", () => {
   const source = schema(table(
-    `${column("id") + column("part", "integer", false) + column("title", "varchar(80)", false, 'default = "can\'t"') + column("amount", "numeric", false, "default = -2.50") + column("created", "datetime", false, 'default = sql("CURRENT_TIMESTAMP")')  }
+    `${column("id") + column("part", "integer", { nullable: false }) + column("title", "varchar(80)", { extra: 'default = "can\'t"', nullable: false }) + column("amount", "numeric", { extra: "default = -2.50", nullable: false }) + column("created", "datetime", { extra: 'default = sql("CURRENT_TIMESTAMP")', nullable: false })  }
     primary_key { columns = [column.id, column.part] }
     index "sqlite_autoindex_items_2" {
       unique = true
@@ -41,17 +55,9 @@ test("static Atlas declarations preserve SQLite constraints, defaults, indexes a
   `));
   const db = open(source);
   try {
-    const columns = db.prepare('pragma table_info("items")').all();
-    assert.deepEqual(columns.map((value) => [value.name, value.type, value.notnull, value.dflt_value, value.pk]), [
-      ["id", "TEXT", 0, null, 1], ["part", "INTEGER", 1, null, 2], ["title", "varchar(80)", 1, "'can''t'", 0], ["amount", "numeric", 1, "-2.50", 0], ["created", "datetime", 1, "CURRENT_TIMESTAMP", 0],
-    ]);
-    const unique = db.prepare('pragma index_list("items")').all().find((row) => row.name === "sqlite_autoindex_items_2");
-    assert.equal(unique?.unique, 1);
-    assert.equal(unique?.origin, "u");
-    const terms = db.prepare('pragma index_xinfo("items_title")').all().filter((row) => row.key === 1);
-    assert.deepEqual(terms.map((row) => [row.name, row.desc]), [["title", 1], ["part", 0]]);
+    checkStaticCatalog(db);
     db.prepare('insert into items (id, part) values (?, ?)').run("a", 1);
-    assert.equal(db.prepare("select title from items").get()!.title, "can't");
+    assert.equal(requireFixtureValue(db.prepare("select title from items").get()).title, "can't");
     assert.throws(() => db.prepare('insert into items (id, part) values (?, ?)').run("b", 0), /CHECK constraint failed/u);
     assert.throws(() => db.prepare('insert into items (id, part) values (?, ?)').run("c", 1), /UNIQUE constraint failed/u);
   } finally { db.close(); }
@@ -59,8 +65,8 @@ test("static Atlas declarations preserve SQLite constraints, defaults, indexes a
 
 // oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
 test("static Atlas references support composite foreign keys and validate all targets", () => {
-  const parent = table(`${column("key") + column("part", "integer", false)  }primary_key { columns = [column.key, column.part] }`, "parents");
-  const child = table(`${column("parent") + column("part", "integer", false)  }foreign_key "parent_key" {
+  const parent = table(`${column("key") + column("part", "integer", { nullable: false })  }primary_key { columns = [column.key, column.part] }`, "parents");
+  const child = table(`${column("parent") + column("part", "integer", { nullable: false })  }foreign_key "parent_key" {
     columns = [column.parent, column.part]
     ref_columns = [table.parents.column.key, table.parents.column.part]
     on_update = CASCADE
@@ -86,12 +92,12 @@ test("Atlas semantic boundary rejects unsupported expressions and declarations i
     [schema(valid).replace("columns = [column.id]", "columns = [column.missing]"), /declared column/u],
     [schema(valid).replace("columns = [column.id]", "columns = []"), /nonempty/u],
     [schema(valid).replace("columns = [column.id]", "columns = [column.id, column.id]"), /duplicates/u],
-    [schema(valid).replace("schema.main", "schema.other"), /schema.main/],
+    [schema(valid).replace("schema.main", "schema.other"), /schema.main/u],
     [schema(valid + valid), /Duplicate table/u],
     [schema(table(column("id") + column("id"))), /Duplicate column/u],
     [`${schema(valid)  }view "ignored" {}\n`, /Unsupported Atlas SQLite block view/u],
     [schema(valid).replace("null = true", 'null = true\n default = env("SECRET")'), /Only sql/u],
-    [schema(valid).replace("null = true", 'null = true\n default = "${var.secret}"'), /static HCL string|Unsupported Atlas SQLite default/u],
+    [schema(valid).replace("null = true", `null = true\n default = "\${var.secret}"`), /static HCL string|Unsupported Atlas SQLite default/u],
     [schema(valid).replace("null = true", "null = true\n default = [1, 2]"), /Unsupported Atlas SQLite default/u],
     [schema(table(`${column("id")  }index "bad" {\n columns = [column.id]\n on { column = column.id }\n}`)), /either columns or on/u],
     [schema(table(`${column("id")  }index "sqlite_autoindex_bad" { columns = [column.id] }`)), /implicit SQLite autoindex/u],

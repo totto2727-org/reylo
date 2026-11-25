@@ -10,11 +10,12 @@ import { ENGINE_VERSION } from "#reylo-source/engine-version.ts";
 // oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
 test("the installed native SQLite engine reports its version and cache fingerprint", async () => {
   const currentEngine = await engine("sqlite");
-  const ping = currentEngine.call({ op: "ping" }) as { database?: string; fingerprint: string; version: string };
+  const ping = currentEngine.call({ op: "ping" });
+  assert.ok("fingerprint" in ping && "version" in ping);
   assert.deepEqual([ping.database, ping.version], ["sqlite", ENGINE_VERSION]);
   assert.match(ping.fingerprint, /^[0-9a-f]{16}$/u);
   assert.equal(currentEngine.fingerprint, ping.fingerprint);
-  assert.deepEqual(currentEngine.call({ op: "analyze", sql: "select 1", dialect: "postgres", answers: {} }), {
+  assert.deepEqual(currentEngine.call({ answers: {}, dialect: "postgres", op: "analyze", sql: "select 1" }), {
     message: "this engine reads sqlite statements, not postgres ones", status: "error",
   });
 });

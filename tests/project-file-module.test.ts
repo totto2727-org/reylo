@@ -9,7 +9,7 @@ import { DatabaseSync } from "node:sqlite";
 // oxlint-disable-next-line rules/no-node-imports -- The Nub integration fixtures use this built-in to select the host's real temporary directory.
 import { tmpdir } from "node:os";
 // oxlint-disable-next-line rules/no-node-imports -- The Nub integration fixtures use this built-in to resolve paths using the host platform's filesystem conventions.
-import { join } from "node:path";
+import path from "node:path";
 import { ROOT, runChild } from "./helpers.ts";
 
 // The setup lists `.reylo.yaml` and `.reylo.yml` among the content mapper's extensions beside `.sql`,
@@ -17,28 +17,18 @@ import { ROOT, runChild } from "./helpers.ts";
 // Nothing, and neither an import of it nor a `<name>.reylo.yaml` that `include` takes in is read as a
 // Query. The type check runs as a project runs it, over SQLite, so no server is needed.
 // TypeScript's own launcher, run by this Node: node_modules/.bin holds a shell script, which Windows cannot start.
-const TSC = join(ROOT, "node_modules", "typescript", "bin", "tsc");
+const TSC = path.join(ROOT, "node_modules", "typescript", "bin", "tsc");
 
-// oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
-test("a project file in the mapper's extensions is a module that declares nothing, never a query", async () => {
-  const root = await realpath(await mkdtemp(join(tmpdir(), "reylo-project-file-")));
-  await writeFile(join(root, "package.json"), `{ "type": "module" }`);
-  await writeFile(join(root, ".env"), "DATABASE_URL=file:./app.db\n");
-  await writeFile(join(root, ".reylo.yaml"), "# the project file\nstrict_params: true\n");
-  await mkdir(join(root, "config"));
-  await writeFile(join(root, "config", "staging.reylo.yaml"), "strict_params: true\n");
-  await writeFile(join(root, "config", "local.reylo.yml"), "strict_params: true\n");
-  const db = new DatabaseSync(join(root, "app.db"));
-  db.exec("create table posts (id integer primary key, title text not null)");
-  db.close();
-  await mkdir(join(root, "node_modules", "@totto2727"), { recursive: true });
-  await symlink(ROOT, join(root, "node_modules", "@totto2727/reylo"));
-  await symlink(join(ROOT, "packages", "sqlite"), join(root, "node_modules", "@totto2727", "reylo-sqlite"));
-  const compilerOptions = { target: "esnext", module: "nodenext", lib: ["esnext"], types: [], strict: true, noEmit: true, skipLibCheck: true, allowImportingTsExtensions: true };
-  await writeFile(join(root, "tsconfig.json"), JSON.stringify({ compilerOptions, contentMappers: [{ package: "@totto2727/reylo", extensions: [".sql", ".reylo.yaml", ".reylo.yml"] }], include: ["main.ts", "config"] }));
-  await writeFile(join(root, "posts.sql"), "select id, title from posts where id > :after::integer\n");
+const writeProjectFiles = async function (root: string): Promise<void> {
+  await writeFile(path.join(root, "package.json"), `{ "type": "module" }`);
+  await writeFile(path.join(root, ".env"), "DATABASE_URL=file:./app.db\n");
+  await writeFile(path.join(root, ".reylo.yaml"), "# the project file\nstrict_params: true\n");
+  await mkdir(path.join(root, "config"));
+  await writeFile(path.join(root, "config", "staging.reylo.yaml"), "strict_params: true\n");
+  await writeFile(path.join(root, "config", "local.reylo.yml"), "strict_params: true\n");
+  await writeFile(path.join(root, "posts.sql"), "select id, title from posts where id > :after::integer\n");
   await writeFile(
-    join(root, "main.ts"),
+    path.join(root, "main.ts"),
     [
       `import posts from "./posts.sql";`,
       `import type * as project from "./.reylo.yaml";`,
@@ -51,6 +41,42 @@ test("a project file in the mapper's extensions is a module that declares nothin
       ``,
     ].join("\n"),
   );
+};
+
+const installProject = async function (root: string): Promise<void> {
+  const db = new DatabaseSync(path.join(root, "app.db"));
+  try {
+    db.exec("create table posts (id integer primary key, title text not null)");
+  } finally {
+    db.close();
+  }
+  await mkdir(path.join(root, "node_modules", "@totto2727"), { recursive: true });
+  await symlink(ROOT, path.join(root, "node_modules", "@totto2727/reylo"));
+  await symlink(path.join(ROOT, "packages", "sqlite"), path.join(root, "node_modules", "@totto2727", "reylo-sqlite"));
+};
+
+const config = {
+  compilerOptions: {
+    allowImportingTsExtensions: true,
+    lib: ["esnext"],
+    module: "nodenext",
+    noEmit: true,
+    skipLibCheck: true,
+    strict: true,
+    target: "esnext",
+    types: [],
+  },
+  contentMappers: [{ extensions: [".sql", ".reylo.yaml", ".reylo.yml"], package: "@totto2727/reylo" }],
+  include: ["main.ts", "config"],
+};
+
+// oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
+test("a project file in the mapper's extensions is a module that declares nothing, never a query", async () => {
+  const temp = await mkdtemp(path.join(tmpdir(), "reylo-project-file-"));
+  const root = await realpath(temp);
+  await writeProjectFiles(root);
+  await installProject(root);
+  await writeFile(path.join(root, "tsconfig.json"), JSON.stringify(config));
   const result = await runChild(process.execPath, [TSC, "-p", "tsconfig.json", "--runExternalCode", "--pretty", "false"], { cwd: root });
   assert.equal(result.stdout + result.stderr, "");
   assert.equal(result.status, 0);

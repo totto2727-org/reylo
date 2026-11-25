@@ -4,6 +4,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { docComment, leadingComment, statementAfter } from "#reylo-source/doc-comment.ts";
 import type { Dialect } from "#reylo-source/engine.ts";
+import { requireFixtureValue } from "./helpers.ts";
 
 const read = (sql: string, dialect?: Dialect): string[] => {
   const leading = leadingComment(sql, dialect);
@@ -42,13 +43,14 @@ test("comments are read as the dialect reads them", () => {
 test("the doc comment holds the prose, the statement in a sql block and the note, and nothing ends it early", () => {
   assert.equal(docComment("One.\nTwo.", "select 1\nfrom t", "What it is."), ["/**", " * One.", " * Two.", " *", " * ```sql", " * select 1", " * from t", " * ```", " *", " * What it is.", " */", ""].join("\n"));
   assert.equal(docComment("", "select 1", "", "  "), ["  /**", "   * ```sql", "   * select 1", "   * ```", "   */", ""].join("\n"));
+  // oxlint-disable-next-line unicorn/no-useless-undefined -- An absent SQL argument is the input under test.
   assert.equal(docComment("", undefined), "");
   // A star before a slash, in the prose or the statement, would end the comment.
   const ends = docComment("a */ b", "select 1 /* c */");
-  assert.equal(ends.match(/\*\//gu)!.length, 1);
+  assert.equal(requireFixtureValue(ends.match(/\*\//gu)).length, 1);
   assert.match(ends, /a \*\\\/ b/u);
   assert.match(ends, /select 1 \/\* c \*\\\//u);
   // The fence is longer than any run of backticks in the statement, and a fence the prose opens is closed.
-  assert.match(docComment("", "select '```' as a, '````' as b"), /^ \* `````sql$[\s\S]*^ \* `````$/m);
+  assert.match(docComment("", "select '```' as a, '````' as b"), /^ \* `````sql$[\s\S]*^ \* `````$/mu);
   assert.equal(docComment("See:\n```ts\nrun()", "select 1"), ["/**", " * See:", " * ```ts", " * run()", " * ```", " *", " * ```sql", " * select 1", " * ```", " */", ""].join("\n"));
 });

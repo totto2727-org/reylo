@@ -24,7 +24,9 @@ test("the comment ends the statement, before a closing semicolon, its file URL-e
 // oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
 test("each form runs on SQLite, its comment ignored", () => {
   const db = new DatabaseSync(":memory:");
-  for (const text of ["select 1 as n", "select 1 as n;\n", "select 1 as n -- the one\n", "select 1 as n /* already */\n"]) {
+  const statements = ["select 1 as n", "select 1 as n;\n", "select 1 as n -- the one\n", "select 1 as n /* already */\n"];
+  statements.forEach((text) => {
     assert.deepEqual({ ...db.prepare(withSqlcommenter(text, "queries/one.sql")).get() }, { n: 1 }, text);
-  }
+  });
+  db.close();
 });
