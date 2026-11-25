@@ -17,13 +17,15 @@ import { spawnSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 // oxlint-disable-next-line rules/no-node-imports -- This server-side entry point uses this built-in to resolve paths using the host platform's filesystem conventions.
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
-// oxlint-disable-next-line rules/no-node-imports -- This server-side entry point uses this built-in to convert local module URLs with the host platform's path rules.
-import { fileURLToPath } from "node:url";
 import { MissingEngine } from './engine.ts';
 import type { Engine } from './engine.ts';
 import { matchesNull, matchesUndefined } from "./native-predicates.ts";
 
-export type Dialect = "postgres" | "sqlite" | "mysql" | "duckdb";
+import { dialectOf, hclPath } from "./project-address.ts";
+import type { Dialect } from "./project-address.ts";
+
+export { dialectOf, duckdbPath, hclPath, sqlitePath } from "./project-address.ts";
+export type { Dialect } from "./project-address.ts";
 
 /** What the engine reads out of `.reylo.yaml`: the keys the library looks at. */
 export type ProjectFile = {
@@ -77,7 +79,6 @@ export const PROJECT_FILE = ".reylo.yaml";
 /** The names the project file may take; the first is the one messages name. */
 export const PROJECT_FILES = [PROJECT_FILE, ".reylo.yml"] as const;
 const DEFAULT_ENV_FILES = [".env.local", ".env"];
-const HCL_SCHEME = "hcl:";
 const FIRST_FILE_BYTE = 0;
 const FIRST_COLUMN = 1;
 const FINAL_LINE = -1;
@@ -106,25 +107,6 @@ export function findProjectFile(from: string, env: Record<string, string | undef
   const dir = packageDir(from);
   return PROJECT_FILES.map((name) => join(dir, name)).find((path) => existsSync(path));
 }
-
-/** The dialect a URL's scheme names, or undefined for a scheme reylo does not read. */
-export const dialectOf = function dialectOf(url: string): Dialect | undefined {
-  const scheme = /^(?<scheme>[A-Za-z][A-Za-z0-9+.-]*):/u.exec(url)?.groups?.scheme?.toLowerCase();
-  if (scheme === "postgres" || scheme === "postgresql") {return "postgres";}
-  if (scheme === "mysql" || scheme === "mariadb") {return "mysql";}
-  if (scheme === "file" || scheme === "sqlite") {return "sqlite";}
-  if (scheme === "duckdb") {return "duckdb";}
-  if (scheme === "hcl") {return "sqlite";}
-  return undefined;
-};
-
-/** A single local Atlas HCL schema, never a database file or a remote source. */
-export const hclPath = function hclPath(url: string, root: string): string | undefined {
-  if (!url.toLowerCase().startsWith(HCL_SCHEME)) {return undefined;}
-  const path = url.slice(HCL_SCHEME.length);
-  if (!path || path.startsWith("//") || path.includes("?") || path.includes("#") || path.includes("\0") || !path.endsWith(".hcl")) {throw new Error("An hcl: source must name one local .hcl file, for example hcl:./schema.hcl.");}
-  return resolve(root, path);
-};
 
 export const readEnvFile = function readEnvFile(path: string): Record<string, string> {
   if (!existsSync(path)) {return {};}
@@ -371,20 +353,4 @@ export const resolveProject = function resolveProject(engine: Engine | MissingEn
   }
   // This fork supports only SQLite, including cached analysis without a URL.
   return { file, root, dialect: dialect ?? "sqlite", strictParams: config.strict_params ?? true, sqlcommenter: config.sqlcommenter ?? true, cli: config.cli ?? {}, url, urlSource, refreshUrl, watched, error, notice, missingUrl };
-};
-
-/** `duckdb:./dev.duckdb`, `duckdb:///abs/dev.duckdb` → a path, relative ones resolved against baseDir; `duckdb::memory:` (or `duckdb:` alone) → `:memory:`, an empty database, for statements that read files alone. */
-export const duckdbPath = function duckdbPath(url: string, baseDir: string): string {
-  let raw = url.replace(/^duckdb:(?:\/\/)?/i, "");
-  if (raw === "" || raw === ":memory:") {return ":memory:";}
-  // On Windows, `duckdb:///C:/app.duckdb` names the drive, as a file URL does.
-  if (process.platform === "win32") {raw = raw.replace(/^\/(?=[A-Za-z]:[\\/])/u, "");}
-  return isAbsolute(raw) ? raw : resolve(baseDir, raw);
-};
-
-/** `file:./dev.db`, `file:///abs/dev.db`, `sqlite:./dev.db`, `:memory:` → a path, relative ones resolved against baseDir. */
-export const sqlitePath = function sqlitePath(url: string, baseDir: string): string {
-  if (url === ":memory:" || url === "file::memory:") {return ":memory:";}
-  const raw = url.startsWith("file://") ? fileURLToPath(url) : url.replace(/^(?:file|sqlite):(?:\/\/)?/u, "");
-  return isAbsolute(raw) ? raw : resolve(baseDir, raw);
 };
