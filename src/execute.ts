@@ -145,9 +145,10 @@ const checkParams: (query: QueryModule, input: unknown) => asserts input is Reco
  * @param {string} text - The statement after placeholder compilation.
  * @returns {string} The statement with the source comment when requested and available.
  */
-export function sentText(query: QueryModule, text: string): string {
-  return query.sqlcommenter && query.source ? withSqlcommenter(text, query.source) : text;
-}
+export const sentText = function sentText(query: QueryModule, text: string): string {
+  // oxlint-disable-next-line typescript/strict-boolean-expressions -- Keep the native optional path check and its short-circuit evaluation before writing the source comment.
+  return query.sqlcommenter === true && query.source?.length ? withSqlcommenter(text, query.source) : text;
+};
 
 /**
  * The checks a parameter needs (src/checks.ts): every build step passes them where its statement has such a parameter.
@@ -190,6 +191,9 @@ const nullElement = function nullElement(array: Readonly<unknown[]>, path = ""):
     .find((candidate) => matchesString(candidate));
 };
 
+// oxlint-disable-next-line unicorn/no-null -- Native database bindings and JSON serialization use the JavaScript null value.
+const NATIVE_NULL = null;
+
 /**
  * Whether a parameter the statement takes no null for is declared with a type that takes no null: for a JSON one, whether the schema its type carries refuses JSON's null too.
  *
@@ -200,7 +204,7 @@ const nullElement = function nullElement(array: Readonly<unknown[]>, path = ""):
 const refusesNull = function refusesNull(query: QueryModule, type: EngineType | undefined): boolean {
   if (matchesUndefined(type) || type.kind === "unknown") {return false;}
   if (type.kind !== "json") {return true;}
-  return !matchesUndefined(type.schema) && !matchesUndefined(query.checks) && !matchesUndefined(query.checks.validate(type.schema, null));
+  return !matchesUndefined(type.schema) && !matchesUndefined(query.checks) && !matchesUndefined(query.checks.validate(type.schema, NATIVE_NULL));
 };
 
 /**
@@ -215,7 +219,7 @@ const refuseNull = function refuseNull(name: string, parameterValue: unknown): n
 
 const value = function value(params: Record<string, unknown>, name: string): unknown {
   const suppliedValue = params[name];
-  return matchesUndefined(suppliedValue) ? null : suppliedValue;
+  return matchesUndefined(suppliedValue) ? NATIVE_NULL : suppliedValue;
 };
 
 // A binary parameter is typed Uint8Array, and every driver binds one as it is (pg-promise too,
@@ -230,7 +234,7 @@ const asBuffer = function asBuffer(binaryValue: unknown): unknown {
   return binaryValue instanceof Uint8Array && !matchesUndefined(NodeBuffer) && !NodeBuffer.isBuffer(binaryValue) ? NodeBuffer.from(binaryValue.buffer, binaryValue.byteOffset, binaryValue.byteLength) : binaryValue;
 };
 
-const isJson = (kind: EngineType["kind"] | undefined) => kind === "json" || kind === "object" || kind === "list" || kind === "rows";
+const isJson = (kind: EngineType["kind"] | undefined): boolean => kind === "json" || kind === "object" || kind === "list" || kind === "rows";
 
 // A JSON parameter's value is a JavaScript value, which reaches the database as its JSON text
 // (JSON.stringify), so a string is a JSON string on every driver; null is SQL NULL where the
@@ -258,7 +262,7 @@ const JSON_NULL: unique symbol = Symbol("JSON null");
  * @param {unknown} candidate - The JavaScript value or internal marker for JSON null.
  * @returns {unknown} The JavaScript value used for JSON serialization.
  */
-const jsonValue = (candidate: unknown) => (candidate === JSON_NULL ? null : candidate);
+const jsonValue = (candidate: unknown): unknown => candidate === JSON_NULL ? NATIVE_NULL : candidate;
 
 /**
  * A JSON parameter's value as the JSON text a driver binds.
@@ -314,13 +318,13 @@ const checkBinary = function checkBinary(type: EngineType | undefined, name: str
   throw new ParameterError(`Parameter "${name}" is binary data, so it takes a Uint8Array (a Buffer is one), as \`.run()\` returns one; got ${describe(parameterValue)}. ${parameterValue instanceof ArrayBuffer ? "Wrap an ArrayBuffer in one: new Uint8Array(buffer)." : "Decode base64 or hex text into one first."}`);
 };
 
-/**
- * Whether `type` is one of pgvector's dense vectors, which `.run()` returns as an array of numbers.
+/** The engine's scalar information for a dense pgvector value.
  *
  * @param {EngineType} type - The engine type to inspect.
- * @returns {boolean} True for the scalar types vector and halfvec.
+ * @returns {Extract<EngineType, { kind: "scalar" }> | undefined} The vector type if recognized.
  */
-const isVector = (type: EngineType): type is EngineType & { kind: "scalar" } => type.kind === "scalar" && (type.name === "vector" || type.name === "halfvec");
+const vectorType = (type: EngineType): Extract<EngineType, { kind: "scalar" }> | undefined =>
+  type.kind === "scalar" && (type.name === "vector" || type.name === "halfvec") ? type : undefined;
 
 /**
  * A vector's floats as the text a VECTOR's `to_vector` and pgvector's input read; JSON's, which would write NaN and ±Infinity as null, so those are refused.
@@ -361,10 +365,11 @@ const encode = function encode(type: EngineType | undefined, parameterValue: unk
     return parameterValue;
   }
   if (dialect === "mysql") {return type.kind === "array" && Array.isArray(parameterValue) ? vectorText(parameterValue, name, "a VECTOR") : parameterValue;}
-  if (type.kind === "array") {return Array.isArray(parameterValue) ? parameterValue.map((element) => encode(Array.isArray(element) && !isVector(type.of) ? type : type.of, element, dialect, name)) : parameterValue;}
-  if (isVector(type) && Array.isArray(parameterValue)) {
-    if (!parameterValue.length) {throw new ParameterError(`Parameter "${name}" is a pgvector ${type.name}, which has one dimension at least; got an empty array.`);}
-    return vectorText(parameterValue, name, `a pgvector ${type.name}`);
+  if (type.kind === "array") {return Array.isArray(parameterValue) ? parameterValue.map((element) => encode(Array.isArray(element) && matchesUndefined(vectorType(type.of)) ? type : type.of, element, dialect, name)) : parameterValue;}
+  const vector = vectorType(type);
+  if (vector && Array.isArray(parameterValue)) {
+    if (!parameterValue.length) {throw new ParameterError(`Parameter "${name}" is a pgvector ${vector.name}, which has one dimension at least; got an empty array.`);}
+    return vectorText(parameterValue, name, `a pgvector ${vector.name}`);
   }
   if (type.kind === "scalar" && type.name === "hstore" && hasObjectType(parameterValue)) {return hstoreText(parameterValue, (message) => {
     throw new ParameterError(`Parameter "${name}" ${message}`);
@@ -408,6 +413,8 @@ const FIRST_CALENDAR_MONTH = 1;
 const MINUTES_PER_HOUR = 60;
 const ZERO_ZONE_OFFSET = 0;
 
+const padClockField = (field: number, width = CLOCK_FIELD_WIDTH): string => String(field).padStart(width, "0");
+
 /**
  * Pg's `dateToString`: the local date and time to the millisecond, then the offset; BC for a year before 1.
  *
@@ -415,15 +422,14 @@ const ZERO_ZONE_OFFSET = 0;
  * @returns {string} Postgres date and time text with its local offset.
  */
 const dateText = function dateText(date: Date): string {
-  const pad = (field: number, width = CLOCK_FIELD_WIDTH): string => String(field).padStart(width, "0");
   const year = date.getFullYear();
   const offset = -date.getTimezoneOffset();
   const absoluteOffset = Math.abs(offset);
   const beforeEra = year < FIRST_AD_YEAR;
-  const yearText = pad(beforeEra ? FIRST_AD_YEAR - year : year, YEAR_FIELD_WIDTH);
-  const calendarDay = `${pad(date.getMonth() + FIRST_CALENDAR_MONTH)}-${pad(date.getDate())}`;
-  const time = `${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}.${pad(date.getMilliseconds(), MILLISECOND_FIELD_WIDTH)}`;
-  const zone = `${offset < ZERO_ZONE_OFFSET ? "-" : "+"}${pad(Math.floor(absoluteOffset / MINUTES_PER_HOUR))}:${pad(absoluteOffset % MINUTES_PER_HOUR)}`;
+  const yearText = padClockField(beforeEra ? FIRST_AD_YEAR - year : year, YEAR_FIELD_WIDTH);
+  const calendarDay = `${padClockField(date.getMonth() + FIRST_CALENDAR_MONTH)}-${padClockField(date.getDate())}`;
+  const time = `${padClockField(date.getHours())}:${padClockField(date.getMinutes())}:${padClockField(date.getSeconds())}.${padClockField(date.getMilliseconds(), MILLISECOND_FIELD_WIDTH)}`;
+  const zone = `${offset < ZERO_ZONE_OFFSET ? "-" : "+"}${padClockField(Math.floor(absoluteOffset / MINUTES_PER_HOUR))}:${padClockField(absoluteOffset % MINUTES_PER_HOUR)}`;
   return `${yearText}-${calendarDay}T${time}${zone}${beforeEra ? " BC" : ""}`;
 };
 
@@ -440,7 +446,7 @@ const postgresScalarText = (element: unknown): string => hasObjectType(element) 
  * @param {string} delim - The separator that the element type uses.
  * @returns {string} A Postgres array literal with the elements escaped.
  */
-export function arrayLiteral(array: Readonly<unknown[]>, delim = ","): string {
+export const arrayLiteral = function arrayLiteral(array: Readonly<unknown[]>, delim = ","): string {
   const text = (element: unknown): string => {
     if (matchesNullish(element)) {return "NULL";}
     if (Array.isArray(element)) {return arrayLiteral(element, delim);}
@@ -453,13 +459,13 @@ export function arrayLiteral(array: Readonly<unknown[]>, delim = ","): string {
   const items = Iterator.from(indexedElements(array))
     .reduce((out, [index, element]) => (index ? out + delim : out) + text(element), "{");
   return `${items}}`;
-}
+};
 
 // A value as Slonik's sql tag takes it, which is a string, a number, a boolean, a BigInt or null:
 // The rest as pg would write them, binary data as `\x` and its hex, an array as its literal, a
 // Date as its instant, and an object as its JSON. An omitted parameter binds NULL, as on pg.
 const slonikParam = function (parameterValue: unknown): unknown {
-  if (matchesUndefined(parameterValue) || matchesNull(parameterValue)) {return null;}
+  if (matchesNullish(parameterValue)) {return NATIVE_NULL;}
   if (parameterValue instanceof Uint8Array) {return byteaHex(parameterValue);}
   if (Array.isArray(parameterValue)) {return arrayLiteral(parameterValue);}
   if (parameterValue instanceof Date) {return parameterValue.toISOString();}
@@ -478,7 +484,7 @@ const postgresTypedArray = (values: unknown[], type: Extract<EngineType, { kind:
  * @returns {string | null} The input text accepted by Postgres, or null for SQL NULL.
  */
 const postgresText = function postgresText(query: QueryModule, name: string, parameterValue: unknown): string | null {
-  if (matchesNullish(parameterValue)) {return null;}
+  if (matchesNullish(parameterValue)) {return NATIVE_NULL;}
   const inputType = query.inputs?.[name]?.type;
   if (Array.isArray(parameterValue) && inputType?.kind === "array") {return postgresTypedArray(parameterValue, inputType);}
   if (isJsonValue(query, name, parameterValue)) {return jsonText(parameterValue);}
@@ -495,9 +501,19 @@ const FIRST_NUMBERED_PARAMETER = 1;
 const indexOf = function indexOf(query: QueryModule, placeholder: { name: string; start: number; end: number }): number {
   const index = query.params.indexOf(placeholder.name);
   // A hand-built query whose `params` misses a placeholder would bind `$0`.
+  // oxlint-disable-next-line rules/require-tagged-error -- Preserve the native error for a hand-built module whose binding list is incomplete.
   if (index === MISSING_PARAMETER) {throw new Error(`The statement's placeholder ${query.sql.slice(placeholder.start, placeholder.end)} is parameter "${placeholder.name}", which the query's params (${JSON.stringify(query.params)}) do not list.`);}
   return index;
 };
+
+interface CompiledStatement {
+  order: Readonly<string[]>;
+  text: string;
+}
+
+const compiledStatement = (text: string, order: Readonly<string[]>): CompiledStatement =>
+  // oxlint-disable-next-line eslint/sort-keys -- Preserve the compiled statement's observable text and binding order keys.
+  ({ text, order });
 
 /**
  * The statement as Reylo sends it to the database, and the parameter each placeholder binds: the
@@ -511,22 +527,22 @@ const indexOf = function indexOf(query: QueryModule, placeholder: { name: string
  * @param {QueryModule} query - The module with either raw SQL or a compiled statement.
  * @returns {{ text: string, order: Readonly<string[]> }} The statement and the parameter names in binding order.
  */
-export function compile(query: QueryModule): { text: string; order: Readonly<string[]> } {
-  if (query.text && query.order) {return { text: query.text, order: query.order };}
+export const compile = function compile(query: QueryModule): CompiledStatement {
+  // oxlint-disable-next-line typescript/strict-boolean-expressions -- Keep the cached plan's short-circuit lookup and compile raw SQL when cached text is empty.
+  if (query.text?.length && query.order) {return compiledStatement(query.text, query.order);}
   const { placeholders } = lexPlaceholders(query.sql, query.dialect);
   // Postgres and DuckDB number each distinct parameter once.
   const numbered = query.dialect === "postgres" || query.dialect === "duckdb";
-  let text = "";
-  let last = 0;
+  const rewritten = { offset: 0, text: "" };
   const order: string[] = [];
   Iterator.from(placeholders).forEach((placeholder) => {
     const index = indexOf(query, placeholder);
-    text += query.sql.slice(last, placeholder.start) + (numbered ? `$${index + FIRST_NUMBERED_PARAMETER}` : "?");
+    rewritten.text += query.sql.slice(rewritten.offset, placeholder.start) + (numbered ? `$${index + FIRST_NUMBERED_PARAMETER}` : "?");
     order.push(placeholder.name);
-    last = placeholder.end;
+    rewritten.offset = placeholder.end;
   });
-  return { text: text + query.sql.slice(last), order: numbered ? query.params : order };
-}
+  return compiledStatement(rewritten.text + query.sql.slice(rewritten.offset), numbered ? query.params : order);
+};
 
 // The rows are bound positionally in every dialect. A value left out binds NULL, as pg,
 // PGlite, better-sqlite3 and Bun.sql already do; postgres.js, mysql2, node:sqlite and libSQL
@@ -559,10 +575,10 @@ const statement = function statement(query: QueryModule, params: ParamsInput): B
         const failure = validate(schema, parameterValue);
         if (failure) {throw new ParameterError(`Parameter "${name}"${failure.path ? ` at ${failure.path}` : ""} ${failure.message}.`);}
       } else if (input?.nullable === false) {
-        if (matchesUndefined(parameterValue) || validate(schema, null)) {refuseNull(name, parameterValue);}
+        if (matchesUndefined(parameterValue) || validate(schema, NATIVE_NULL)) {refuseNull(name, parameterValue);}
         parameterValue = JSON_NULL;
       }
-      bound.values[index] = matchesUndefined(parameterValue) ? null : parameterValue;
+      bound.values[index] = matchesUndefined(parameterValue) ? NATIVE_NULL : parameterValue;
       return;
     }
     // A structured parameter is checked against its column list and written as the JSON the
