@@ -27,199 +27,303 @@ const decoder = new TextDecoder();
 const encoder = new TextEncoder();
 const text = (token: Token): string => decoder.decode(token.bytes);
 const keyword = (token: Token, word: string): boolean => token.type === 'TokenIdent' && text(token) === word;
+// oxlint-disable-next-line eslint/sort-keys -- Keep the bracket pairs grouped by opening and closing grammar tokens.
 const pairs: Record<string, string> = { TokenOBrace: 'TokenCBrace', TokenOBrack: 'TokenCBrack', TokenOParen: 'TokenCParen', TokenOQuote: 'TokenCQuote', TokenOHeredoc: 'TokenCHeredoc', TokenCBrace: 'TokenOBrace', TokenCBrack: 'TokenOBrack', TokenCParen: 'TokenOParen', TokenCQuote: 'TokenOQuote', TokenCHeredoc: 'TokenOHeredoc', TokenTemplateInterp: 'TokenTemplateSeqEnd', TokenTemplateControl: 'TokenTemplateSeqEnd', TokenTemplateSeqEnd: 'TokenTemplateInterp' };
 const opposite = (type: string): string => pairs[type] ?? 'TokenNil';
 const binaryOps: Record<string, string>[] = [
   { TokenOr: '||' }, { TokenAnd: '&&' }, { TokenEqualOp: '==', TokenNotEqual: '!=' },
   { TokenGreaterThan: '>', TokenGreaterThanEq: '>=', TokenLessThan: '<', TokenLessThanEq: '<=' },
-  { TokenPlus: '+', TokenMinus: '-' }, { TokenStar: '*', TokenSlash: '/', TokenPercent: '%' },
+  { TokenMinus: '-', TokenPlus: '+' }, { TokenPercent: '%', TokenSlash: '/', TokenStar: '*' },
 ];
-const emptyBody = (range: Range, endRange = range): Body => ({ kind: 'body', attributes: Object.create(null) as Record<string, Attribute>, blocks: [], range, endRange });
+// oxlint-disable-next-line unicorn/no-null -- HCL attributes can use object-prototype property names.
+const NO_ATTRIBUTE_PROTOTYPE = null;
+// oxlint-disable-next-line unicorn/no-null -- Missing HCL body items retain the existing parser's null sentinel.
+const NO_BODY_ITEM = null;
+const BLOCK_STARTS = new Set(["TokenOQuote", "TokenOBrace", "TokenIdent"]);
+const MULTILINE_BLOCK_STARTS = new Set(["TokenNewline", "TokenEOF", "TokenCBrace"]);
+const BLOCK_LINE_ENDS = new Set(["TokenNewline", "TokenEOF"]);
+const LAST_LABEL = -1;
+const INVALID_SINGLE_ARGUMENT = "Invalid single-argument block definition";
+const UNCLOSED_BLOCK = "There is no closing brace for this block before the end of the file. This may be caused by incorrect brace nesting elsewhere in this file.";
 
-export const parseConfig = function parseConfig(source: string | Uint8Array, filename = '', start: Pos = { line: 1, column: 1, byte: 0 }): { body: Body; diagnostics: Diagnostic[] } {
-  const result = lexConfig(matchesString(source) ? encoder.encode(source) : source, filename, start);
-  const parser = new Parser(result.tokens);
-  const body = parser.parseBody('TokenEOF');
-  parser.assertEmptyIncludeNewlinesStack();
-  return { body, diagnostics: [...result.diagnostics, ...parser.diagnostics] };
-};
-export const parseExpression = function parseExpression(source: string | Uint8Array, filename = '', start: Pos = { line: 1, column: 1, byte: 0 }): { expression: Expression; diagnostics: Diagnostic[] } {
-  const result = lexExpression(matchesString(source) ? encoder.encode(source) : source, filename, start);
-  const parser = new Parser(result.tokens);
-  parser.pushIncludeNewlines(false);
-  const expression = parser.parseExpression();
-  const next = parser.peek();
-  if (next.type !== 'TokenEOF' && !parser.recovery) {parser.diagnostics.push(error('Extra characters after expression', 'An expression was successfully parsed, but extra characters were found after it.', next.range));}
-  parser.popIncludeNewlines();
-  parser.assertEmptyIncludeNewlinesStack();
-  return { expression, diagnostics: [...result.diagnostics, ...parser.diagnostics] };
-};
-export const parseTemplate = function parseTemplate(source: string | Uint8Array, filename = '', start: Pos = { line: 1, column: 1, byte: 0 }): { expression: Expression; diagnostics: Diagnostic[] } {
-  const result = lexTemplate(matchesString(source) ? encoder.encode(source) : source, filename, start);
-  const parser = new Parser(result.tokens);
-  const expression = parser.parseTemplate('TokenEOF', false);
-  parser.assertEmptyIncludeNewlinesStack();
-  return { expression, diagnostics: [...result.diagnostics, ...parser.diagnostics] };
+interface BlockLabels {
+  labelRanges: Range[];
+  labels: string[];
+}
+
+interface BlockHeader extends BlockLabels {
+  open?: Token;
+}
+
+interface BlockContent {
+  body: Body;
+  closeRange: Range;
+  openRange: Range;
+}
+const blockAst = (ident: Token, { labelRanges, labels }: BlockLabels, { body, closeRange, openRange }: BlockContent): Block =>
+  // oxlint-disable-next-line eslint/sort-keys -- Preserve the existing block AST field order in both complete and recovered blocks.
+  ({
+    kind: "block", type: text(ident), labels, body, range: between(ident.range, closeRange),
+    typeRange: ident.range, labelRanges, openBraceRange: openRange, closeBraceRange: closeRange,
+  });
+
+const EXPECTED_BODY_ITEM = "Argument or block definition required";
+const EXPECTED_BODY_DEFINITION = 'An argument or block definition is required here. To set an argument, use the equals sign "=" to introduce the argument value.';
+const emptyBody = (range: Range, endRange = range): Body => {
+  // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- The fresh dictionary has no prototype and holds only parsed attributes.
+  const attributes = Object.create(NO_ATTRIBUTE_PROTOTYPE) as Record<string, Attribute>;
+  // oxlint-disable-next-line eslint/sort-keys -- Preserve the public configuration-body AST key order.
+  return { kind: "body", attributes, blocks: [], range, endRange };
 };
 
 const relativeTraversal = function relativeTraversal(expression: Expression, step: TraversalStep): Expression {
   if (expression.kind === 'traversal' || expression.kind === 'relativeTraversal') {
     expression.steps.push(step);
-    if (expression.kind === 'traversal') {
-      // Parts is the ergonomic adapter view. steps retains non-string/number
-      // Index keys and unknown placeholders without discarding AST information.
-      if (matchesString(step.value) || matchesNumber(step.value)) {expression.parts.push(step.value);}
+    // Preserve the ergonomic index view, with raw AST steps available for all values.
+    if (expression.kind === "traversal" && (matchesString(step.value) || matchesNumber(step.value))) {
+      expression.parts.push(step.value);
     }
     expression.range = between(expression.range, step.range); return expression;
   }
+  // oxlint-disable-next-line eslint/sort-keys -- Preserve the public traversal AST key order.
   return { kind: 'relativeTraversal', source: expression, steps: [step], range: between(expression.range, step.range) };
 };
 /** Stateful translation of the upstream recursive-descent parser. */
 export class Parser extends Peeker {
   public recovery = false;
+  // oxlint-disable-next-line rules/no-readonly -- Parser exposes a stable diagnostics list without introducing an Effect runtime dependency.
   public readonly diagnostics: Diagnostic[] = [];
   private errorsSince(index: number): boolean { return this.diagnostics.slice(index).some(diag => diag.severity === 'error') }
   private failedSince(index: number): boolean { return this.recovery && this.errorsSince(index) }
+  // oxlint-disable-next-line eslint/max-params -- Keep the HCL diagnostic message and the subject and optional context ranges separate.
   private diag(summary: string, detail: string, subject: Range, context?: Range): void { this.diagnostics.push(error(summary, detail, subject, context)) }
+
+  private includeBodyItem(body: Body): void {
+    const item = this.parseBodyItem();
+    if (item?.kind === "block") {body.blocks.push(item);}
+    if (item?.kind === "attribute") {
+      const existing = body.attributes[item.name];
+      if (existing) {
+        this.diag("Attribute redefined", `The argument ${JSON.stringify(item.name)} was already set at ${rangeString(existing.nameRange)}. Each argument may be set only once.`, item.nameRange);
+      } else {
+        body.attributes[item.name] = item;
+      }
+    }
+  }
+
+  private reportBadBodyToken(bad: Token, end: string, startRange: Range): void {
+    if (this.recovery) {return;}
+    if (bad.type === "TokenOQuote") {
+      this.diag("Invalid argument name", "Argument names must not be quoted.", bad.range);
+    } else if (bad.type !== "TokenEOF") {
+      this.diag("Argument or block definition required", "An argument or block definition is required here.", bad.range);
+    } else if (end === "TokenCBrace") {
+      this.diag("Unclosed configuration block", UNCLOSED_BLOCK, startRange);
+    } else {
+      this.diag("Unclosed configuration body", "Found end of file before the end of this configuration body.", startRange);
+    }
+  }
+
+  private recoverBodyEnd(end: string, startRange: Range): Range {
+    const bad = this.read();
+    this.reportBadBodyToken(bad, end, startRange);
+    const endRange = this.prevRange();
+    this.recover(end);
+    return endRange;
+  }
+
+  private readBodyEnd(end: string, startRange: Range, body: Body): Range {
+    // oxlint-disable-next-line rules/no-for-loops -- Each iteration advances the parser or returns at the requested closing token.
+    for (;;) {
+      const next = this.peek();
+      if (next.type === end) {
+        const endRange = this.nextRange();
+        this.read();
+        return endRange;
+      }
+      if (next.type === "TokenNewline") {this.read();}
+      else if (next.type === "TokenIdent") {this.includeBodyItem(body);}
+      else {return this.recoverBodyEnd(end, startRange);}
+    }
+  }
 
   public parseBody(end: string): Body {
     const body = emptyBody(this.prevRange());
     const startRange = this.prevRange();
-    let endRange = startRange;
-    for (;;) {
-      const next = this.peek();
-      if (next.type === end) { endRange = this.nextRange(); this.read(); break }
-      if (next.type === 'TokenNewline') { this.read(); continue }
-      if (next.type === 'TokenIdent') {
-        const item = this.parseBodyItem();
-        if (item?.kind === 'block') {body.blocks.push(item);}
-        else if (item?.kind === 'attribute') {
-          const existing = body.attributes[item.name];
-          if (existing) {this.diag('Attribute redefined', `The argument ${JSON.stringify(item.name)} was already set at ${rangeString(existing.nameRange)}. Each argument may be set only once.`, item.nameRange);}
-          else {body.attributes[item.name] = item;}
-        }
-        continue;
-      }
-      const bad = this.read();
-      if (!this.recovery) {
-        if (bad.type === 'TokenOQuote') {this.diag('Invalid argument name', 'Argument names must not be quoted.', bad.range);}
-        else if (bad.type === 'TokenEOF') {
-          if (end === 'TokenCBrace') {this.diag('Unclosed configuration block', 'There is no closing brace for this block before the end of the file. This may be caused by incorrect brace nesting elsewhere in this file.', startRange);}
-          else {this.diag('Unclosed configuration body', 'Found end of file before the end of this configuration body.', startRange);}
-        } else {this.diag('Argument or block definition required', 'An argument or block definition is required here.', bad.range);}
-      }
-      endRange = this.prevRange();
-      this.recover(end);
-      break;
-    }
+    const endRange = this.readBodyEnd(end, startRange, body);
     body.range = between(startRange, endRange);
     body.endRange = emptyRangeAt(endRange);
     return body;
   }
 
-  public parseBodyItem(): Attribute | Block | null {
+  private readBodyIdentifier(): Token | null {
     const ident = this.read();
-    if (ident.type !== 'TokenIdent') {
-      this.recoverAfterBodyItem();
-      this.diag('Argument or block definition required', 'An argument or block definition is required here.', ident.range);
-      return null;
-    }
-    const next = this.peek();
-    if (next.type === 'TokenEqual') {return this.finishParsingBodyAttribute(ident, false);}
-    if (['TokenOQuote', 'TokenOBrace', 'TokenIdent'].includes(next.type)) {return this.finishParsingBodyBlock(ident);}
+    if (ident.type === "TokenIdent") {return ident;}
     this.recoverAfterBodyItem();
-    this.diag('Argument or block definition required', 'An argument or block definition is required here. To set an argument, use the equals sign "=" to introduce the argument value.', ident.range);
-    return null;
+    this.diag(EXPECTED_BODY_ITEM, "An argument or block definition is required here.", ident.range);
+    return NO_BODY_ITEM;
+  }
+
+  private rejectBodyDefinition(ident: Token): null {
+    this.recoverAfterBodyItem();
+    this.diag(EXPECTED_BODY_ITEM, EXPECTED_BODY_DEFINITION, ident.range);
+    return NO_BODY_ITEM;
+  }
+
+  public parseBodyItem(): Attribute | Block | null {
+    const ident = this.readBodyIdentifier();
+    if (!ident) {return NO_BODY_ITEM;}
+    const next = this.peek();
+    if (next.type === "TokenEqual") {return this.finishParsingBodyAttribute(ident, false);}
+    if (BLOCK_STARTS.has(next.type)) {return this.finishParsingBodyBlock(ident);}
+    return this.rejectBodyDefinition(ident);
+  }
+
+  private rejectSingleAttribute(ident: Token, next: Token): null {
+    if (!BLOCK_STARTS.has(next.type)) {return this.rejectBodyDefinition(ident);}
+    this.recoverAfterBodyItem();
+    this.diag("Argument definition required", `A single-line block definition can contain only a single argument. If you meant to define argument ${JSON.stringify(text(ident))}, use an equals sign to assign it a value. To define a nested block, place it on a line of its own within its parent block.`, between(ident.range, next.range));
+    return NO_BODY_ITEM;
   }
 
   private parseSingleAttrBody(): Body | null {
-    const ident = this.read();
-    if (ident.type !== 'TokenIdent') {
-      this.recoverAfterBodyItem();
-      this.diag('Argument or block definition required', 'An argument or block definition is required here.', ident.range);
-      return null;
-    }
+    const ident = this.readBodyIdentifier();
+    if (!ident) {return NO_BODY_ITEM;}
     const next = this.peek();
-    if (next.type !== 'TokenEqual') {
-      this.recoverAfterBodyItem();
-      if (['TokenOQuote', 'TokenOBrace', 'TokenIdent'].includes(next.type)) {this.diag('Argument definition required', `A single-line block definition can contain only a single argument. If you meant to define argument ${JSON.stringify(text(ident))}, use an equals sign to assign it a value. To define a nested block, place it on a line of its own within its parent block.`, between(ident.range, next.range));}
-      else {this.diag('Argument or block definition required', 'An argument or block definition is required here. To set an argument, use the equals sign "=" to introduce the argument value.', ident.range);}
-      return null;
-    }
+    if (next.type !== "TokenEqual") {return this.rejectSingleAttribute(ident, next);}
     const attribute = this.finishParsingBodyAttribute(ident, true);
     const body = emptyBody(attribute.range, emptyRangeAt(attribute.range));
     body.attributes[text(ident)] = attribute;
     return body;
   }
 
+  private reportAttributeLineEnd(ident: Token, end: Token): void {
+    if (this.recovery) {return;}
+    const comma = end.type === "TokenComma";
+    this.diag(comma ? "Unexpected comma after argument" : "Missing newline after argument", `${comma ? "Argument definitions must be separated by newlines, not commas. " : ""}An argument definition must end with a newline.`, end.range, between(ident.range, end.range));
+  }
+
+  private finishAttributeLine(ident: Token): Range {
+    const end = this.peek();
+    if (end.type === "TokenNewline" || end.type === "TokenEOF") {
+      const endRange = this.prevRange();
+      this.read();
+      return endRange;
+    }
+    this.reportAttributeLineEnd(ident, end);
+    const endRange = this.prevRange();
+    this.recoverAfterBodyItem();
+    return endRange;
+  }
+
+  private attributeEnd(ident: Token, singleLine: boolean, before: number): Range {
+    const endRange = this.prevRange();
+    if (this.failedSince(before)) {
+      this.recoverAfterBodyItem();
+      return endRange;
+    }
+    return singleLine ? endRange : this.finishAttributeLine(ident);
+  }
+
   private finishParsingBodyAttribute(ident: Token, singleLine: boolean): Attribute {
     const equals = this.read();
-    if (equals.type !== 'TokenEqual') {throw new Error('finishParsingBodyAttribute called with next not equals');}
+    if (equals.type !== "TokenEqual") {
+      // oxlint-disable-next-line rules/require-tagged-error -- The internal parser invariant keeps its native Error without importing Effect.
+      throw new Error("finishParsingBodyAttribute called with next not equals");
+    }
     const before = this.diagnostics.length;
     const expression = this.parseExpression();
-    let endRange = this.prevRange();
-    if (this.failedSince(before)) {this.recoverAfterBodyItem();}
-    else if (!singleLine) {
-      const end = this.peek();
-      if (end.type !== 'TokenNewline' && end.type !== 'TokenEOF') {
-        if (!this.recovery) {
-          const comma = end.type === 'TokenComma';
-          this.diag(comma ? 'Unexpected comma after argument' : 'Missing newline after argument', `${comma ? 'Argument definitions must be separated by newlines, not commas. ' : ''}An argument definition must end with a newline.`, end.range, between(ident.range, end.range));
-        }
-        endRange = this.prevRange();
-        this.recoverAfterBodyItem();
-      } else { endRange = this.prevRange(); this.read() }
+    const endRange = this.attributeEnd(ident, singleLine, before);
+    // oxlint-disable-next-line eslint/sort-keys -- Preserve the public attribute AST key order.
+    return { kind: "attribute", name: text(ident), expression, range: between(ident.range, endRange), nameRange: ident.range, equalsRange: equals.range };
+  }
+
+  private reportBlockHeader(ident: Token, token: Token): void {
+    const { range, type } = token;
+    if (type === "TokenEqual") {
+      this.diag("Invalid block definition", 'The equals sign "=" indicates an argument definition, and must not be used when defining a block.', range, between(ident.range, range));
+    } else if (type === "TokenNewline") {
+      this.diag("Invalid block definition", 'A block definition must have block content delimited by "{" and "}", starting on the same line as the block header.', range, between(ident.range, range));
+    } else if (!this.recovery) {
+      this.diag("Invalid block definition", 'Either a quoted string block label or an opening brace ("{") is expected here.', range, between(ident.range, range));
     }
-    return { kind: 'attribute', name: text(ident), expression, range: between(ident.range, endRange), nameRange: ident.range, equalsRange: equals.range };
+  }
+
+  private readBlockLabel(token: Token): { range: Range; value: string } | null {
+    if (token.type === "TokenOQuote") {return this.parseQuotedStringLiteral();}
+    if (token.type !== "TokenIdent") {return NO_BODY_ITEM;}
+    this.read();
+    return { range: token.range, value: text(token) };
+  }
+
+  private recoverBlockHeader(ident: Token, token: Token, header: BlockHeader): BlockHeader {
+    this.reportBlockHeader(ident, token);
+    this.recoverAfterBodyItem();
+    return header;
+  }
+
+  private readBlockHeader(ident: Token): BlockHeader {
+    const header: BlockHeader = { labelRanges: [], labels: [] };
+    // oxlint-disable-next-line rules/no-for-loops -- Consume one header token at a time through the brace or the first invalid label.
+    for (;;) {
+      const token = this.peek();
+      if (token.type === "TokenOBrace") {return { ...header, open: this.read() };}
+      const label = this.readBlockLabel(token);
+      if (!label) {return this.recoverBlockHeader(ident, token, header);}
+      header.labels.push(label.value);
+      header.labelRanges.push(label.range);
+    }
+  }
+
+  private reportSingleArgumentEnd(ident: Token, open: Token, next: Token): void {
+    if (next.type === "TokenComma") {
+      this.diag(INVALID_SINGLE_ARGUMENT, "Single-line block syntax can include only one argument definition. To define multiple arguments, use the multi-line block syntax with one argument definition per line.", next.range);
+    } else if (next.type === "TokenNewline") {
+      this.diag(INVALID_SINGLE_ARGUMENT, "An argument definition on the same line as its containing block creates a single-line block definition, which must also be closed on the same line. Place the block's closing brace immediately after the argument definition.", next.range);
+    } else if (!this.recovery) {
+      if (next.type === "TokenEOF") {this.diag("Unclosed configuration block", UNCLOSED_BLOCK, open.range, between(ident.range, open.range));}
+      else {this.diag(INVALID_SINGLE_ARGUMENT, "A single-line block definition must end with a closing brace immediately after its single argument definition.", next.range);}
+    }
+  }
+
+  private singleArgumentBody(ident: Token, open: Token): Body | null {
+    const before = this.diagnostics.length;
+    const body = this.parseSingleAttrBody();
+    // Upstream emits the delimiter diagnostics before the nested-body diagnostics.
+    const bodyDiagnostics = this.diagnostics.splice(before);
+    const next = this.peek();
+    if (next.type === "TokenCBrace") {this.read();}
+    else {
+      this.reportSingleArgumentEnd(ident, open, next);
+      this.recover("TokenCBrace");
+    }
+    this.diagnostics.push(...bodyDiagnostics);
+    return body;
+  }
+
+  private finishBlockLine(ident: Token): void {
+    const eol = this.peek();
+    if (BLOCK_LINE_ENDS.has(eol.type)) {
+      this.read();
+      return;
+    }
+    if (!this.recovery) {
+      this.diag("Missing newline after block definition", "A block definition must end with a newline.", eol.range, between(ident.range, eol.range));
+    }
+    this.recoverAfterBodyItem();
   }
 
   private finishParsingBodyBlock(ident: Token): Block {
-    const labels: string[] = []; const labelRanges: Range[] = [];
-    let open: Token;
-    for (;;) {
-      const token = this.peek();
-      if (token.type === 'TokenOBrace') { open = this.read(); break }
-      if (token.type === 'TokenOQuote') {
-        const label = this.parseQuotedStringLiteral(); labels.push(label.value); labelRanges.push(label.range); continue;
-      }
-      if (token.type === 'TokenIdent') { this.read(); labels.push(text(token)); labelRanges.push(token.range); continue }
-      if (token.type === 'TokenEqual') {this.diag('Invalid block definition', 'The equals sign "=" indicates an argument definition, and must not be used when defining a block.', token.range, between(ident.range, token.range));}
-      else if (token.type === 'TokenNewline') {this.diag('Invalid block definition', 'A block definition must have block content delimited by "{" and "}", starting on the same line as the block header.', token.range, between(ident.range, token.range));}
-      else if (!this.recovery) {this.diag('Invalid block definition', 'Either a quoted string block label or an opening brace ("{") is expected here.', token.range, between(ident.range, token.range));}
-      this.recoverAfterBodyItem();
-      const endRange = labelRanges.at(-1) ?? ident.range;
-      return { kind: 'block', type: text(ident), labels, body: emptyBody(ident.range), range: between(ident.range, endRange), typeRange: ident.range, labelRanges, openBraceRange: ident.range, closeBraceRange: endRange };
+    const header = this.readBlockHeader(ident);
+    const { open } = header;
+    if (!open) {
+      const closeRange = header.labelRanges.at(LAST_LABEL) ?? ident.range;
+      return blockAst(ident, header, { body: emptyBody(ident.range), closeRange, openRange: ident.range });
     }
-    // The upstream implementation appends nested-body diagnostics after the
-    // Single-line delimiter diagnostics. Preserve that observable ordering.
-    const before = this.diagnostics.length;
-    let body: Body | null;
-    if (['TokenNewline', 'TokenEOF', 'TokenCBrace'].includes(this.peek().type)) {body = this.parseBody('TokenCBrace');}
-    else {
-      body = this.parseSingleAttrBody();
-      const bodyDiagnostics = this.diagnostics.splice(before);
-      const next = this.peek();
-      if (next.type === 'TokenCBrace') {this.read();}
-      else {
-        if (next.type === 'TokenComma') {this.diag('Invalid single-argument block definition', 'Single-line block syntax can include only one argument definition. To define multiple arguments, use the multi-line block syntax with one argument definition per line.', next.range);}
-        else if (next.type === 'TokenNewline') {this.diag('Invalid single-argument block definition', "An argument definition on the same line as its containing block creates a single-line block definition, which must also be closed on the same line. Place the block's closing brace immediately after the argument definition.", next.range);}
-        else if (!this.recovery) {
-          if (next.type === 'TokenEOF') {this.diag('Unclosed configuration block', 'There is no closing brace for this block before the end of the file. This may be caused by incorrect brace nesting elsewhere in this file.', open.range, between(ident.range, open.range));}
-          else {this.diag('Invalid single-argument block definition', 'A single-line block definition must end with a closing brace immediately after its single argument definition.', next.range);}
-        }
-        this.recover('TokenCBrace');
-      }
-      this.diagnostics.push(...bodyDiagnostics);
-    }
+    const body = MULTILINE_BLOCK_STARTS.has(this.peek().type) ? this.parseBody("TokenCBrace") : this.singleArgumentBody(ident, open);
     const closeRange = this.prevRange();
-    const eol = this.peek();
-    if (eol.type === 'TokenNewline' || eol.type === 'TokenEOF') {this.read();}
-    else {
-      if (!this.recovery) {this.diag('Missing newline after block definition', 'A block definition must end with a newline.', eol.range, between(ident.range, eol.range));}
-      this.recoverAfterBodyItem();
-    }
-    body ??= emptyBody(between(open.range, closeRange), closeRange);
-    return { kind: 'block', type: text(ident), labels, body, range: between(ident.range, closeRange), typeRange: ident.range, labelRanges, openBraceRange: open.range, closeBraceRange: closeRange };
+    this.finishBlockLine(ident);
+    return blockAst(ident, header, { body: body ?? emptyBody(between(open.range, closeRange), closeRange), closeRange, openRange: open.range });
   }
 
   public parseExpression(): Expression { return this.parseTernaryConditional() }
@@ -740,3 +844,31 @@ export class Parser extends Peeker {
 // Unicode White_Space as used by Go unicode.IsSpace. JavaScript's \s differs
 // For FEFF and NEL, so do not use String.trim() here.
 const cloneRange = (range: Range): Range => ({ filename: range.filename, start: { ...range.start }, end: { ...range.end } });
+
+export const parseConfig = function parseConfig(source: string | Uint8Array, filename = '', start?: Pos): { body: Body; diagnostics: Diagnostic[] } {
+  const result = lexConfig(matchesString(source) ? encoder.encode(source) : source, filename, start);
+  const parser = new Parser(result.tokens);
+  const body = parser.parseBody('TokenEOF');
+  parser.assertEmptyIncludeNewlinesStack();
+  return { body, diagnostics: [...result.diagnostics, ...parser.diagnostics] };
+};
+export const parseExpression = function parseExpression(source: string | Uint8Array, filename = '', start?: Pos): { expression: Expression; diagnostics: Diagnostic[] } {
+  const result = lexExpression(matchesString(source) ? encoder.encode(source) : source, filename, start);
+  const parser = new Parser(result.tokens);
+  parser.pushIncludeNewlines(false);
+  const expression = parser.parseExpression();
+  const next = parser.peek();
+  if (next.type !== 'TokenEOF' && !parser.recovery) {parser.diagnostics.push(error('Extra characters after expression', 'An expression was successfully parsed, but extra characters were found after it.', next.range));}
+  parser.popIncludeNewlines();
+  parser.assertEmptyIncludeNewlinesStack();
+  // oxlint-disable-next-line eslint/sort-keys -- Preserve parsed expression before diagnostics in the public result.
+  return { expression, diagnostics: [...result.diagnostics, ...parser.diagnostics] };
+};
+export const parseTemplate = function parseTemplate(source: string | Uint8Array, filename = '', start?: Pos): { expression: Expression; diagnostics: Diagnostic[] } {
+  const result = lexTemplate(matchesString(source) ? encoder.encode(source) : source, filename, start);
+  const parser = new Parser(result.tokens);
+  const expression = parser.parseTemplate('TokenEOF', false);
+  parser.assertEmptyIncludeNewlinesStack();
+  // oxlint-disable-next-line eslint/sort-keys -- Preserve parsed expression before diagnostics in the public result.
+  return { expression, diagnostics: [...result.diagnostics, ...parser.diagnostics] };
+};
