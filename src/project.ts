@@ -77,6 +77,10 @@ export const PROJECT_FILE = ".reylo.yaml";
 /** The names the project file may take; the first is the one messages name. */
 export const PROJECT_FILES = [PROJECT_FILE, ".reylo.yml"] as const;
 const DEFAULT_ENV_FILES = [".env.local", ".env"];
+const HCL_SCHEME = "hcl:";
+const FIRST_FILE_BYTE = 0;
+const FIRST_COLUMN = 1;
+const FINAL_LINE = -1;
 
 /** The package directory: the nearest one at or above `from` that holds a `package.json`, else `from`. */
 export const packageDir = function packageDir(from: string): string {
@@ -105,7 +109,7 @@ export function findProjectFile(from: string, env: Record<string, string | undef
 
 /** The dialect a URL's scheme names, or undefined for a scheme reylo does not read. */
 export const dialectOf = function dialectOf(url: string): Dialect | undefined {
-  const scheme = /^([a-z][a-z0-9+.-]*):/i.exec(url)?.[1]?.toLowerCase();
+  const scheme = /^(?<scheme>[A-Za-z][A-Za-z0-9+.-]*):/u.exec(url)?.groups?.scheme?.toLowerCase();
   if (scheme === "postgres" || scheme === "postgresql") {return "postgres";}
   if (scheme === "mysql" || scheme === "mariadb") {return "mysql";}
   if (scheme === "file" || scheme === "sqlite") {return "sqlite";}
@@ -116,8 +120,8 @@ export const dialectOf = function dialectOf(url: string): Dialect | undefined {
 
 /** A single local Atlas HCL schema, never a database file or a remote source. */
 export const hclPath = function hclPath(url: string, root: string): string | undefined {
-  if (!url.toLowerCase().startsWith("hcl:")) {return undefined;}
-  const path = url.slice(4);
+  if (!url.toLowerCase().startsWith(HCL_SCHEME)) {return undefined;}
+  const path = url.slice(HCL_SCHEME.length);
   if (!path || path.startsWith("//") || path.includes("?") || path.includes("#") || path.includes("\0") || !path.endsWith(".hcl")) {throw new Error("An hcl: source must name one local .hcl file, for example hcl:./schema.hcl.");}
   return resolve(root, path);
 };
@@ -126,17 +130,20 @@ export const readEnvFile = function readEnvFile(path: string): Record<string, st
   if (!existsSync(path)) {return {};}
   const out: Record<string, string> = {};
   Iterator.from(readFileSync(path, "utf8").split("\n")).forEach((line) => {
-    const regexMatch = /^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*?)\s*$/.exec(line);
-    if (regexMatch) {out[regexMatch[1]!] = regexMatch[2]!.replace(/^(["'])(.*)\1$/, "$2");}
+    const assignment = /^\s*(?:export\s+)?(?<name>[A-Za-z_][A-Za-z0-9_]*)\s*=\s*(?<value>.*?)\s*$/u.exec(line)?.groups;
+    const name = assignment?.name;
+    if (!matchesUndefined(name)) {
+      out[name] = (assignment?.value ?? "").replace(/^(?<quote>["'])(?<text>.*)\k<quote>$/u, "$<text>");
+    }
   });
   return out;
 };
 
 /** 1-based line and column of a byte offset, for a message that names the place in the file. */
 const place = function (text: string, offset: number): string {
-  const before = Buffer.from(text, "utf8").subarray(0, offset).toString("utf8");
+  const before = Buffer.from(text, "utf8").subarray(FIRST_FILE_BYTE, offset).toString("utf8");
   const lines = before.split("\n");
-  return `${lines.length}:${lines.at(-1)!.length + 1}`;
+  return `${lines.length}:${(lines.at(FINAL_LINE) ?? "").length + FIRST_COLUMN}`;
 };
 
 /**
@@ -231,7 +238,7 @@ const commandOutput = function (command: string, cwd: string, env: Record<string
     const timedOut = (run.error as NodeJS.ErrnoException).code === "ETIMEDOUT";
     outcome = { error: timedOut ? `which did not finish within ${COMMAND_TIMEOUT_MS / 1000} s` : `which could not start: ${run.error.message}` };
   } else if (run.status === 0) {
-    const value = run.stdout.replace(/(\r?\n)+$/u, "");
+    const value = run.stdout.replace(/(?:\r?\n)+$/u, "");
     outcome = value ? { value } : { error: "which printed nothing" };
   } else {
     outcome = { error: `which ${matchesNull(run.status) ? `ended on ${run.signal}` : `exited with code ${run.status}`}${said ? `: ${said}` : ""}` };
@@ -310,7 +317,7 @@ export const resolveProject = function resolveProject(engine: Engine | MissingEn
       // The `.env` files'.
       const texts = parts.map((part) =>
         "text" in part
-          ? part.text.replace(/\$\{([A-Za-z_][A-Za-z0-9_]*)\}/gu, (_, name: string) => {
+          ? part.text.replace(/\$\{(?<name>[A-Za-z_][A-Za-z0-9_]*)\}/gu, (_, name: string) => {
               const hit = lookup(name);
               if (!hit) {missing.push(name);}
               else {sources.push(hit.source);}
@@ -368,7 +375,7 @@ export const resolveProject = function resolveProject(engine: Engine | MissingEn
 
 /** `duckdb:./dev.duckdb`, `duckdb:///abs/dev.duckdb` → a path, relative ones resolved against baseDir; `duckdb::memory:` (or `duckdb:` alone) → `:memory:`, an empty database, for statements that read files alone. */
 export const duckdbPath = function duckdbPath(url: string, baseDir: string): string {
-  let raw = url.replace(/^duckdb:(\/\/)?/i, "");
+  let raw = url.replace(/^duckdb:(?:\/\/)?/i, "");
   if (raw === "" || raw === ":memory:") {return ":memory:";}
   // On Windows, `duckdb:///C:/app.duckdb` names the drive, as a file URL does.
   if (process.platform === "win32") {raw = raw.replace(/^\/(?=[A-Za-z]:[\\/])/u, "");}
@@ -378,6 +385,6 @@ export const duckdbPath = function duckdbPath(url: string, baseDir: string): str
 /** `file:./dev.db`, `file:///abs/dev.db`, `sqlite:./dev.db`, `:memory:` → a path, relative ones resolved against baseDir. */
 export const sqlitePath = function sqlitePath(url: string, baseDir: string): string {
   if (url === ":memory:" || url === "file::memory:") {return ":memory:";}
-  const raw = url.startsWith("file://") ? fileURLToPath(url) : url.replace(/^(file|sqlite):(\/\/)?/u, "");
+  const raw = url.startsWith("file://") ? fileURLToPath(url) : url.replace(/^(?:file|sqlite):(?:\/\/)?/u, "");
   return isAbsolute(raw) ? raw : resolve(baseDir, raw);
 };
