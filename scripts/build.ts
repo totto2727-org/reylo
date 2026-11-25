@@ -21,6 +21,18 @@ const root = join(import.meta.dirname, "..");
 const dist = join(root, "dist");
 const js = (sourcePath: string): string => sourcePath.replace(/\.ts$/u, ".js");
 const DATABASES = ["sqlite"] as const;
+const JSON_INDENT = 2;
+const EMPTY_BYTES = 0;
+const NO_FILES = 0;
+
+const json = (value: object): string => `${JSON.stringify(value, undefined, JSON_INDENT)}\n`;
+
+const verify = (valid: boolean, message: () => string): void => {
+  if (!valid) {
+    // oxlint-disable-next-line rules/require-tagged-error -- Keep the native build entry point's original Error and exit behavior.
+    throw new Error(message());
+  }
+};
 
 await rm(dist, { force: true, recursive: true });
 const reylo = join(dist, "reylo");
@@ -47,7 +59,7 @@ await copyFile(join(root, "docs/effect.md"), join(reylo, "docs/effect.md"));
 // oxlint-disable-next-line import/no-relative-parent-imports -- Read the checkout's source manifest to publish the runtime.
 const { default: pkg } = await import("../package.json", { with: { type: "json" } });
 Object.entries(pkg.optionalDependencies).forEach(([name, version]) => {
-  if (version !== ENGINE_VERSION) {throw new Error(`package.json: the upstream engine ${name} is ${version}, expected ${ENGINE_VERSION}`);}
+  verify(version === ENGINE_VERSION, () => `package.json: the upstream engine ${name} is ${version}, expected ${ENGINE_VERSION}`);
 });
 const { private: _private, scripts: _scripts, devDependencies: _dev, imports: _developmentImports, bin, exports, typescript, ...rest } = pkg;
 // SQLite tooling is a peer at reylo's own fork version (src/engine-package.ts).
@@ -58,77 +70,110 @@ const peers: {
 Iterator.from(DATABASES).forEach((db) => {
   const name = `@totto2727/reylo-${db}`;
   const version = peers.peerDependencies?.[name];
-  if (version !== pkg.version) {throw new Error(`package.json: the peer ${name} is ${version}, and reylo is ${pkg.version}; they move together`);}
-  if (!peers.peerDependenciesMeta?.[name]?.optional) {throw new Error(`package.json: the peer ${name} must be optional, since a project installs only its databases' engines`);}
+  verify(version === pkg.version, () => `package.json: the peer ${name} is ${version}, and reylo is ${pkg.version}; they move together`);
+  verify(peers.peerDependenciesMeta?.[name]?.optional === true, () => `package.json: the peer ${name} must be optional, since a project installs only its databases' engines`);
 });
 const built = {
   ...rest,
   // A bin path without its "./", as npm writes it: npm rewrites `./src/cli.js` to `src/cli.js` at
   // Publish and warns that the script "was invalid and removed", which it was not (0.0.1's stage).
   bin: Object.fromEntries(Object.entries(bin).map(([name, sourcePath]) => [name, js(sourcePath).replace(/^\.\//u, "")])),
-  exports: Object.fromEntries(Object.entries(exports).map(([key, sourcePath]) => [key, { types: sourcePath.replace(/\.ts$/u, ".d.ts"), default: js(sourcePath) }])),
+  exports: Object.fromEntries(Object.entries(exports).map(([key, sourcePath]) => [key, Object.fromEntries([
+    // TypeScript resolves the first matching condition, so types must precede default.
+    ["types", sourcePath.replace(/\.ts$/u, ".d.ts")],
+    ["default", js(sourcePath)],
+  ])])),
   typescript: { ...typescript, contentMapper: { ...typescript.contentMapper, exec: typescript.contentMapper.exec.map(js) } },
 };
-await writeFile(join(reylo, "package.json"), `${JSON.stringify(built, null, 2)  }\n`);
+await writeFile(join(reylo, "package.json"), json(built));
 
 // Nothing TypeScript ships but declarations, and no engine ships inside reylo.
 const files = await readdir(reylo, { encoding: "utf8", recursive: true });
 const source = files.filter((currentFile) => /\.(?:c|m)?ts$/u.test(currentFile) && !/\.d\.(?:c|m)?ts$/u.test(currentFile));
-if (source.length) {throw new Error(`dist/reylo holds TypeScript sources: ${source.join(", ")}`);}
+verify(source.length === NO_FILES, () => `dist/reylo holds TypeScript sources: ${source.join(", ")}`);
 const wasm = files.filter((currentFile) => currentFile.endsWith(".wasm"));
-if (wasm.length) {throw new Error(`dist/reylo holds an engine: ${wasm.join(", ")}`);}
+verify(wasm.length === NO_FILES, () => `dist/reylo holds an engine: ${wasm.join(", ")}`);
 // Nor any of the build-time half, which a run-time module would drag in by importing it.
 const tooling = files.filter((currentFile) => /^src\/(?:tooling|analyze|engine|engine-core|engine-worker|component|loader|commands|mapper-server|play)\.js$/u.test(currentFile));
-if (tooling.length) {throw new Error(`dist/reylo holds the engine packages' build steps: ${tooling.join(", ")}`);}
-console.log(`dist/reylo: ${files.length} files, package ${built.name}@${built.version}`);
+verify(tooling.length === NO_FILES, () => `dist/reylo holds the engine packages' build steps: ${tooling.join(", ")}`);
+process.stdout.write(`dist/reylo: ${files.length} files, package ${built.name}@${built.version}\n`);
 
 // Each engine package's JavaScript is bundled into a few files with everything it reads, which also
 // Leaves out the comments.
-const bundled = { bundle: true, platform: "node", format: "esm", target: "node24", legalComments: "inline", logLevel: "warning", metafile: true } as const;
+const bundled = { bundle: true, format: "esm", legalComments: "inline", logLevel: "warning", metafile: true, platform: "node", target: "node24" } as const;
 
 const packageSize = async (packagePath: string): Promise<number> => {
   const info = await stat(packagePath);
   if (info.isDirectory()) {
     const items = await readdir(packagePath);
-    const sizes = await Promise.all(items.map((item) => packageSize(join(packagePath, item))));
-    // oxlint-disable-next-line unicorn/no-array-reduce -- Report the total bytes across this package directory.
-    return sizes.reduce((total, bytes) => total + bytes, 0);
+    const sizes = await Promise.all(items.map(async (item) => packageSize(join(packagePath, item))));
+    return sizes.reduce((total, bytes) => total + bytes, EMPTY_BYTES);
   }
   return info.size;
 };
 
-await Promise.all(DATABASES.map(async (db) => {
-  const from = join(root, "packages", db);
-  const to = join(dist, db);
-  await mkdir(to);
+interface PublishedEngine {
+  files: string[];
+  name: string;
+  optionalDependencies: Record<string, string>;
+  version: string;
+}
+
+const stageToolingFiles = async (directory: string, manifest: PublishedEngine & { exports: Record<string, string>; license: string }): Promise<void> => {
+  manifest.license = "MIT AND MPL-2.0";
+  manifest.files = [...manifest.files, "licenses"];
+  await writeFile(join(directory, "package.json"), json(manifest));
+  await cp(join(root, "licenses"), join(directory, "licenses"), { recursive: true });
+};
+
+const verifyStagedVersions = async (database: string, directory: string, engine: PublishedEngine): Promise<void> => {
+  const versionsMatch = JSON.stringify(engine.optionalDependencies) === JSON.stringify(pkg.optionalDependencies);
+  verify(versionsMatch, () => `packages/${database}: upstream native engine versions must match the root manifest`);
+  await copyFile(join(root, "packages", database, "README.md"), join(directory, "README.md"));
+};
+
+const stageEngineManifest = async (database: string, directory: string): Promise<PublishedEngine> => {
+  await mkdir(directory);
   // oxlint-disable-next-line import/no-relative-parent-imports -- Read the checkout's source manifest to publish the SQLite tooling.
   const { default: engineManifest } = await import("../packages/sqlite/package.json", { with: { type: "json" } });
   const { private: _enginePrivate, exports: entries, devDependencies: _engineDev, ...engine }:
     typeof engineManifest & { devDependencies?: Record<string, string> } = engineManifest;
-  if (engine.version !== pkg.version) {throw new Error(`packages/${db}/package.json is ${engine.version}, and reylo is ${pkg.version}; they move together`);}
+  verify(engine.version === pkg.version, () => `packages/${database}/package.json is ${engine.version}, and reylo is ${pkg.version}; they move together`);
   const exported = Object.fromEntries(Object.entries(entries).map(([key, sourcePath]) => [key, js(sourcePath)]));
   // The tooling bundle includes the MPL-covered native HCL parser port alongside MIT code.
-  await writeFile(join(to, "package.json"), `${JSON.stringify({ ...engine, license: "MIT AND MPL-2.0", files: [...engine.files, "licenses"], exports: exported }, null, 2)  }\n`);
-  await cp(join(root, "licenses"), join(to, "licenses"), { recursive: true });
-  if (JSON.stringify(engine.optionalDependencies) !== JSON.stringify(pkg.optionalDependencies)) {throw new Error(`packages/${db}: upstream native engine versions must match the root manifest`);}
-  await copyFile(join(from, "README.md"), join(to, "README.md"));
-  const half = await bundle({ ...bundled, entryPoints: [join(root, "src/tooling.ts")], outfile: join(to, "tooling.js") });
+  await stageToolingFiles(directory, { ...engine, exports: exported });
+  await verifyStagedVersions(database, directory, engine);
+  return engine;
+};
+
+const buildTooling = async (database: string, directory: string): Promise<void> => {
+  const half = await bundle({ ...bundled, entryPoints: [join(root, "src/tooling.ts")], outfile: join(directory, "tooling.js") });
   // Reylo's entry points load it with a `require` (src/engine-package.ts), which refuses an ES
   // Module with a top-level await.
-  const toolingModule: unknown = createRequire(import.meta.url)(join(to, "tooling.js"));
+  const toolingModule: unknown = createRequire(import.meta.url)(join(directory, "tooling.js"));
   const tool = isRecord(toolingModule) ? toolingModule.default : undefined;
-  if (!isRecord(tool) || !hasFunctionType(tool.sqlModule)) {throw new Error(`dist/${db}/tooling.js does not load with a require`);}
+  verify(isRecord(tool) && hasFunctionType(tool.sqlModule), () => `dist/${database}/tooling.js does not load with a require`);
   // The engine connects to its database itself, or DuckDB's through the app's own driver: no
   // Driver, and nothing native, is bundled.
   const native = Object.keys(half.metafile.inputs).filter((input) => /node_modules\/(?:postgres|mysql2|@duckdb|@bytecodealliance\/jco-node-fs)\//u.test(input));
-  if (native.length) {throw new Error(`dist/${db}/tooling.js bundles a driver or a native addon: ${native.join(", ")}`);}
+  verify(native.length === NO_FILES, () => `dist/${database}/tooling.js bundles a driver or a native addon: ${native.join(", ")}`);
+};
+
+const buildWorkerAndReport = async (database: string, directory: string, engine: PublishedEngine): Promise<void> => {
   // The D1 client starts this worker beside the tooling module.
-  await bundle({ ...bundled, entryPoints: [join(root, "src/d1-proxy.ts")], outfile: join(to, "d1-proxy.js") });
-  const shipped = await readdir(to);
+  await bundle({ ...bundled, entryPoints: [join(root, "src/d1-proxy.ts")], outfile: join(directory, "d1-proxy.js") });
+  const shipped = await readdir(directory);
   const missing = engine.files.filter((file) => !shipped.includes(file));
-  if (missing.length) {throw new Error(`dist/${db} is missing what its package.json lists: ${missing.join(", ")}`);}
+  verify(missing.length === NO_FILES, () => `dist/${database} is missing what its package.json lists: ${missing.join(", ")}`);
   const sizes = await Promise.all(shipped
     .filter((file) => file !== "package.json" && file !== "README.md")
-    .map(async (file) => `${file} ${await packageSize(join(to, file))} bytes`));
-  console.log(`dist/${db}: package ${engine.name}@${engine.version}, ${sizes.join(", ")}`);
+    .map(async (file) => `${file} ${await packageSize(join(directory, file))} bytes`));
+  process.stdout.write(`dist/${database}: package ${engine.name}@${engine.version}, ${sizes.join(", ")}\n`);
+};
+
+await Promise.all(DATABASES.map(async (database) => {
+  const directory = join(dist, database);
+  const engine = await stageEngineManifest(database, directory);
+  await buildTooling(database, directory);
+  await buildWorkerAndReport(database, directory, engine);
 }));
