@@ -21,180 +21,30 @@
 // - DuckDB: @duckdb/node-api throws a plain Error whose message names the kind of error first
 //   (`Constraint Error: Duplicate key …`), DuckDB's exception type, and nothing else.
 import type { Dialect } from "./execute.ts";
-import type { POSTGRES_CODES } from "./error-codes-postgres.ts";
-import type { MYSQL_CODES } from "./error-codes-mysql.ts";
 import { SQLITE_CODES } from "./error-codes-sqlite.ts";
 import { hasObjectType, matchesNull, matchesNumber, matchesString, matchesUndefined } from "./native-predicates.ts";
 
-/** A SQLSTATE Postgres defines, as `"23505"`. */
-export type PostgresCode = keyof typeof POSTGRES_CODES;
-/** The condition name of a SQLSTATE Postgres defines, as `"unique_violation"`. */
-export type PostgresCondition = (typeof POSTGRES_CODES)[PostgresCode];
-/** The name of an error MySQL sends a client, as `"ER_DUP_ENTRY"`. */
-export type MysqlCode = (typeof MYSQL_CODES)[number][1][number];
-/** The name of a SQLite result code of an error, primary or extended, as `"SQLITE_CONSTRAINT_UNIQUE"`. */
-export type SqliteCode = keyof typeof SQLITE_CODES;
+import { DUCKDB_CODES } from "./query-error-types.ts";
+import type { DuckdbCode, DuckdbQueryError, MysqlQueryError, PostgresQueryError, QueryError, SqliteCode, SqliteQueryError } from "./query-error-types.ts";
 
-/** What an error Postgres raised holds beside its code. */
-export interface PostgresErrorFields extends Error {
-  readonly name: "QueryError";
-  /** `ERROR`, `FATAL` (the session ended) or `PANIC` (the server stopped), in the server's language with pg. */
-  readonly severity: string;
-  /** The server's message, as `duplicate key value violates unique constraint "users_email_key"`. */
-  readonly message: string;
-  readonly detail: string | undefined;
-  readonly hint: string | undefined;
-  /** Where in the statement the error is: a character's place, from 1. */
-  readonly position: number | undefined;
-  /** The functions the error was raised in, innermost first. */
-  readonly where: string | undefined;
-  readonly schema: string | undefined;
-  readonly table: string | undefined;
-  readonly column: string | undefined;
-  readonly dataType: string | undefined;
-  readonly constraint: string | undefined;
-  /** The driver's own error. */
-  readonly cause: unknown;
-}
-
-/**
- * The names each field of an error may hold, by the error's code: what a statement that runs only
- * the server's own code writes through (its constraints, tables, columns and domains).
- */
-export type PostgresNarrowing = Readonly<Partial<Record<PostgresCode, Readonly<{ constraint?: string; table?: string; column?: string; dataType?: string }>>>>;
-
-/** An error of one of the codes `C`, with the names `F` narrows its fields to. */
-type PostgresMember<C extends PostgresCode, F> = Omit<PostgresErrorFields, keyof F> & Readonly<{
-  /** The SQLSTATE, as `"23505"`. */
-  code: C;
-  /** The code's condition name, as `"unique_violation"`. */
-  condition: (typeof POSTGRES_CODES)[C];
-}> & { readonly [K in keyof F]: F[K] | undefined };
-
-/**
- * An error Postgres raised. A statement that may run a user's code (a trigger, a function) may raise
- * any code: `code` is any string, and `condition` the strict union, undefined for a code Postgres
- * does not define. Where a statement runs only the server's own code, its module narrows the type
- * with `N`: a code Postgres defines, and for each code `N` lists, the names its fields may hold.
- */
-export type PostgresQueryError<N extends PostgresNarrowing | undefined = undefined> = [N] extends [PostgresNarrowing]
-  ? { [C in keyof N & PostgresCode]: PostgresMember<C, N[C]> }[keyof N & PostgresCode] | PostgresMember<Exclude<PostgresCode, keyof N>, {}>
-  : PostgresErrorFields & Readonly<{
-      /**
-       * The SQLSTATE, as `"23505"`: one Postgres defines, or one a function raised itself
-       * (`raise ... using errcode`), which no list holds.
-       */
-      code: PostgresCode | (string & {});
-      /** The code's condition name, as `"unique_violation"`; undefined for a code Postgres does not define. */
-      condition: PostgresCondition | undefined;
-    }>;
-
-/** What an error MySQL raised holds beside its code. */
-export interface MysqlErrorFields extends Error {
-  readonly name: "QueryError";
-  /** The error's number, as `1062`. */
-  readonly errno: number;
-  /** The SQLSTATE, as `"23000"`. */
-  readonly sqlState: string;
-  /** The server's message, as `Duplicate entry 'ada@example.com' for key 'users.email'`. */
-  readonly message: string;
-  /** The key a duplicate entry is for, as the message names it: `users.email`, its table and its name. */
-  readonly key: string | undefined;
-  /** The foreign key or check constraint the row fails. */
-  readonly constraint: string | undefined;
-  /** The table of the foreign key a row fails. */
-  readonly table: string | undefined;
-  /** The column a value does not fit, or a null or a missing value is refused for. */
-  readonly column: string | undefined;
-  /** The driver's own error. */
-  readonly cause: unknown;
-}
-
-/** The names each field of an error may hold, by the error's name: what a statement that runs no trigger and no stored function writes through. */
-export type MysqlNarrowing = Readonly<Partial<Record<MysqlCode, Readonly<{ key?: string; constraint?: string; table?: string; column?: string }>>>>;
-
-/** An error of one of the names `C`, with the names `F` narrows its fields to. */
-type MysqlMember<C extends MysqlCode | undefined, F> = Omit<MysqlErrorFields, keyof F> & Readonly<{
-  /** The error's name, as `"ER_DUP_ENTRY"`; undefined for a number MySQL does not define. */
-  code: C;
-}> & { readonly [K in keyof F]: F[K] | undefined };
-
-/**
- * An error MySQL raised: its name from MySQL's own list, undefined for a number the list lacks, as
- * one a `signal` statement sets. Where a statement runs no trigger and no stored function, its
- * module narrows the type with `N`: for each name `N` lists, the names its fields may hold.
- */
-export type MysqlQueryError<N extends MysqlNarrowing | undefined = undefined> = [N] extends [MysqlNarrowing]
-  ? { [C in keyof N & MysqlCode]: MysqlMember<C, N[C]> }[keyof N & MysqlCode] | MysqlMember<Exclude<MysqlCode, keyof N> | undefined, {}>
-  : MysqlMember<MysqlCode | undefined, {}>;
-
-/** What an error SQLite raised holds beside its code. */
-export interface SqliteErrorFields extends Error {
-  readonly name: "QueryError";
-  /** The result code's number, as `2067`. */
-  readonly errcode: number | undefined;
-  /** SQLite's message, as `UNIQUE constraint failed: users.email`. */
-  readonly message: string;
-  /** The table of the columns a unique, not-null or type constraint fails on. */
-  readonly table: string | undefined;
-  /** The columns a unique, not-null or type constraint fails on. */
-  readonly columns: Readonly<string[]> | undefined;
-  /** The check constraint the row fails (its expression, where it has no name), or the index of an expression a unique row fails. */
-  readonly constraint: string | undefined;
-  /** The driver's own error. */
-  readonly cause: unknown;
-}
-
-/** The names each field of an error may hold, by the result code's name: what a statement that fires no trigger writes through. */
-export type SqliteNarrowing = Readonly<Partial<Record<SqliteCode, Readonly<{ table?: string; columns?: Readonly<string[]>; constraint?: string }>>>>;
-
-/** An error of one of the codes `C`, with the names `F` narrows its fields to. */
-type SqliteMember<C extends SqliteCode | undefined, F> = Omit<SqliteErrorFields, keyof F> & Readonly<{
-  /**
-   * The result code's name: the extended code, as `"SQLITE_CONSTRAINT_UNIQUE"`, where the driver
-   * gives it; the primary code, as `"SQLITE_CONSTRAINT"`, from sqlite3 and the sqlite package,
-   * which give only that; undefined where the driver gives none, as Turso's engine.
-   */
-  code: C;
-}> & { readonly [K in keyof F]: F[K] | undefined };
-
-/**
- * An error SQLite raised. Where a statement fires no trigger, its module narrows the type with
- * `N`: for each code `N` lists, the names its fields may hold.
- */
-export type SqliteQueryError<N extends SqliteNarrowing | undefined = undefined> = [N] extends [SqliteNarrowing]
-  ? { [C in keyof N & SqliteCode]: SqliteMember<C, N[C]> }[keyof N & SqliteCode] | SqliteMember<Exclude<SqliteCode, keyof N> | undefined, {}>
-  : SqliteMember<SqliteCode | undefined, {}>;
-
-/**
- * The kinds of error DuckDB raises, by its exception type: the words its message starts with,
- * `Constraint Error: …` being `CONSTRAINT`.
- */
-const DUCKDB_CODES = {
-  Invalid: "INVALID", "Out of Range": "OUT_OF_RANGE", Conversion: "CONVERSION", "Unknown Type": "UNKNOWN_TYPE", Decimal: "DECIMAL", "Mismatch Type": "MISMATCH_TYPE", "Divide by Zero": "DIVIDE_BY_ZERO",
-  "Object Size": "OBJECT_SIZE", "Invalid type": "INVALID_TYPE", Serialization: "SERIALIZATION", TransactionContext: "TRANSACTION", "Not implemented": "NOT_IMPLEMENTED", Expression: "EXPRESSION",
-  Catalog: "CATALOG", Parser: "PARSER", Planner: "PLANNER", Scheduler: "SCHEDULER", Executor: "EXECUTOR", Constraint: "CONSTRAINT", Index: "INDEX", Stat: "STAT", Connection: "CONNECTION",
-  Syntax: "SYNTAX", Settings: "SETTINGS", Binder: "BINDER", Network: "NETWORK", Optimizer: "OPTIMIZER", NullPointer: "NULL_POINTER", IO: "IO", INTERRUPT: "INTERRUPT", FATAL: "FATAL",
-  INTERNAL: "INTERNAL", "Invalid Input": "INVALID_INPUT", "Out of Memory": "OUT_OF_MEMORY", Permission: "PERMISSION", "Parameter Not Resolved": "PARAMETER_NOT_RESOLVED",
-  "Parameter Not Allowed": "PARAMETER_NOT_ALLOWED", Dependency: "DEPENDENCY", HTTP: "HTTP", "Missing Extension": "MISSING_EXTENSION", "Extension Autoloading": "AUTOLOAD", Sequence: "SEQUENCE",
-  "Invalid Configuration": "INVALID_CONFIGURATION",
-} as const;
-
-/** The kind of an error DuckDB raised, as `"CONSTRAINT"`. */
-export type DuckdbCode = (typeof DUCKDB_CODES)[keyof typeof DUCKDB_CODES];
-
-/** An error DuckDB raised: its kind, undefined for one this list does not name, and its message. */
-export interface DuckdbQueryError extends Error {
-  readonly name: "QueryError";
-  readonly code: DuckdbCode | undefined;
-  /** DuckDB's message, as `Constraint Error: Duplicate key "id: 1" violates primary key constraint.` */
-  readonly message: string;
-  /** The driver's own error. */
-  readonly cause: unknown;
-}
-
-/** The error a database of the dialect raised. */
-export type QueryError<D extends Dialect = Dialect> = D extends "postgres" ? PostgresQueryError : D extends "mysql" ? MysqlQueryError : D extends "duckdb" ? DuckdbQueryError : SqliteQueryError;
+export type {
+  DuckdbCode,
+  DuckdbQueryError,
+  MysqlCode,
+  MysqlErrorFields,
+  MysqlNarrowing,
+  MysqlQueryError,
+  PostgresCode,
+  PostgresCondition,
+  PostgresErrorFields,
+  PostgresNarrowing,
+  PostgresQueryError,
+  QueryError,
+  SqliteCode,
+  SqliteErrorFields,
+  SqliteNarrowing,
+  SqliteQueryError,
+} from "./query-error-types.ts";
 
 class DatabaseError extends Error {
   public constructor(message: string, cause: unknown, fields: Record<string, unknown>) {
