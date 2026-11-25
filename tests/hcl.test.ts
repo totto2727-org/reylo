@@ -2,12 +2,8 @@
 import { test } from "node:test";
 // oxlint-disable-next-line rules/no-node-imports -- Nub's Node suite uses native assertions for driver, CLI, and protocol results.
 import assert from "node:assert/strict";
-// oxlint-disable-next-line rules/no-node-imports -- The Nub integration fixtures use this built-in to launch the real programs whose stdout, stderr and status are consumed.
-import { spawnSync } from "node:child_process";
-// oxlint-disable-next-line rules/no-node-imports -- The Nub integration fixtures use this built-in to inspect or write files through the host filesystem.
-import { mkdirSync, mkdtempSync, readdirSync, writeFileSync } from "node:fs";
-// oxlint-disable-next-line rules/no-node-imports -- The Nub integration fixtures use this built-in to await writes and reads through the host filesystem.
-import { rm, writeFile } from "node:fs/promises";
+// oxlint-disable-next-line rules/no-node-imports -- The Nub integration fixtures use this built-in to await temporary fixture setup and file inspection.
+import { mkdir, mkdtemp, readdir, rm, writeFile } from "node:fs/promises";
 // oxlint-disable-next-line rules/no-node-imports -- The Nub integration fixtures use this built-in to resolve paths using the host platform's filesystem conventions.
 import { join } from "node:path";
 // oxlint-disable-next-line rules/no-node-imports -- The Nub integration fixtures use this built-in to convert local module URLs with the host platform's path rules.
@@ -20,6 +16,8 @@ import { mapperHandlers } from "#reylo-source/mapper-server.ts";
 import { hclPath } from "#reylo-source/project.ts";
 import { hclCatalog } from "#reylo-source/hcl.ts";
 import { engine } from "#reylo-source/engine.ts";
+import { isRecord, matchesBoolean, matchesString } from "#reylo-source/native-predicates.ts";
+import { importSqliteQueryFixture, requireFixtureValue, runChild } from "./helpers.ts";
 
 const tmp = fileURLToPath(new URL("../tmp/", import.meta.url));
 const INDEX = new URL("../src/index.ts", import.meta.url).href;
@@ -41,13 +39,29 @@ table "users" {
 }
 `;
 
-const project = function (): string {
-  mkdirSync(tmp, { recursive: true });
-  const root = mkdtempSync(join(tmp, "reylo-hcl-"));
-  writeFileSync(join(root, "package.json"), "{}");
-  writeFileSync(join(root, ".reylo.yaml"), "direct_url: hcl:./schema.hcl\n");
-  writeFileSync(join(root, "schema.hcl"), schema());
+const project = async function (): Promise<string> {
+  await mkdir(tmp, { recursive: true });
+  const root = await mkdtemp(join(tmp, "reylo-hcl-"));
+  await writeFile(join(root, "package.json"), "{}");
+  await writeFile(join(root, ".reylo.yaml"), "direct_url: hcl:./schema.hcl\n");
+  await writeFile(join(root, "schema.hcl"), schema());
   return root;
+};
+
+const hasDatabaseFiles = async (root: string): Promise<boolean> => {
+  const files = await readdir(root);
+  return files.some((name) => /\.(?:db|sqlite)(?:-|$)/u.test(name));
+};
+
+const analyzedColumns = (output: string): [string, boolean][] => {
+  const result: unknown = JSON.parse(output);
+  assert.ok(isRecord(result) && result.ok === true, output);
+  const { analysis } = result;
+  assert.ok(isRecord(analysis) && Array.isArray(analysis.columns), output);
+  return analysis.columns.map((column: unknown) => {
+    assert.ok(isRecord(column) && matchesString(column.name) && matchesBoolean(column.nullable), output);
+    return [column.name, column.nullable];
+  });
 };
 
 // oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
@@ -60,7 +74,7 @@ test("HCL sources accept only one local .hcl file", () => {
 
 // oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
 test("HCL supplies only static schema rows and embedded function defaults to the engine", async () => {
-  const root = project();
+  const root = await project();
   const catalog = hclCatalog(join(root, "schema.hcl"), await engine("sqlite"));
   try {
     const ddl = "select sql from sqlite_schema where sql is not null and type in ('table', 'view', 'index', 'trigger') order by rowid";
@@ -78,7 +92,7 @@ test("HCL supplies only static schema rows and embedded function defaults to the
 
 // oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
 test("invalid static declarations fail before the engine receives a catalog", async () => {
-  const root = project();
+  const root = await project();
   const wasm = await engine("sqlite");
   try {
     await writeFile(join(root, "schema.hcl"), schema().replace("type = text", "type = unknown_type"));
@@ -88,13 +102,13 @@ test("invalid static declarations fail before the engine receives a catalog", as
     const catalog = hclCatalog(join(root, "schema.hcl"), wasm);
     assert.deepEqual((await catalog.analyze(SELECT)).diagnostics, []);
     await catalog.close();
-    assert.ok(!readdirSync(root).some((name) => /\.(?:db|sqlite)(?:-|$)/u.test(name)));
+    assert.equal(await hasDatabaseFiles(root), false);
   } finally { await rm(root, { force: true, recursive: true }); }
 });
 
 // oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
 test("Atlas HCL feeds the real SQLite engine and invalidates warm caches immediately", async () => {
-  const root = project();
+  const root = await project();
   const session = await Session.open(root, {});
   try {
     assert.equal(session.project.dialect, "sqlite");
@@ -108,7 +122,7 @@ test("Atlas HCL feeds the real SQLite engine and invalidates warm caches immedia
     const cached = await session.analyze(SELECT);
     assert.ok(cached.ok);
     assert.equal(cached.source, "cache");
-    const child = spawnSync(process.execPath, ["--input-type=module", "-e", `
+    const child = await runChild(process.execPath, ["--input-type=module", "-e", `
       import { registerHooks } from 'node:module';
       registerHooks({ resolve(specifier, context, nextResolve) {
         if (specifier === 'node:sqlite') throw new Error('Host SQLite is forbidden during HCL analysis');
@@ -128,11 +142,9 @@ test("Atlas HCL feeds the real SQLite engine and invalidates warm caches immedia
       const session = await Session.open(${JSON.stringify(root)}, {});
       try { console.log(JSON.stringify(await session.analyze(${JSON.stringify(SELECT)}))); }
       finally { for (const opened of Session.opened()) await opened.close(); }
-    `], { env: { ...process.env, PATH: "" }, encoding: "utf8" });
+    `], { cwd: process.cwd(), env: { ...process.env, PATH: "" } });
     assert.equal(child.status, 0, child.stderr);
-    const noAtlas = JSON.parse(child.stdout);
-    assert.equal(noAtlas.ok, true, JSON.stringify(noAtlas));
-    assert.deepEqual(noAtlas.analysis.columns.map(({ name, nullable }: { name: string; nullable: boolean }) => [name, nullable]), [["id", false], ["name", false]]);
+    assert.deepEqual(analyzedColumns(child.stdout), [["id", false], ["name", false]]);
     await writeFile(join(root, "schema.hcl"), schema(true));
     const changed = await session.analyze(SELECT);
     assert.ok(changed.ok, JSON.stringify(changed));
@@ -150,7 +162,7 @@ test("Atlas HCL feeds the real SQLite engine and invalidates warm caches immedia
     const restored = await session.analyze(SELECT);
     assert.ok(restored.ok, JSON.stringify(restored));
     assert.equal(restored.analysis.columns[1]!.nullable, false);
-    assert.ok(!readdirSync(root).some((name) => /\.(?:db|sqlite)(?:-|$)/u.test(name)));
+    assert.equal(await hasDatabaseFiles(root), false);
   } finally {
     await session.close();
     await rm(root, { force: true, recursive: true });
@@ -159,7 +171,7 @@ test("Atlas HCL feeds the real SQLite engine and invalidates warm caches immedia
 
 // oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
 test("the mapper and runtime loader consume HCL directly without running migrations", async () => {
-  const root = project();
+  const root = await project();
   const handlers = mapperHandlers();
   const handle = `hcl-${root}`;
   const db = new DatabaseSync(":memory:");
@@ -183,9 +195,10 @@ test("the mapper and runtime loader consume HCL directly without running migrati
     assert.ok(built.watched.includes(join(root, "schema.hcl")));
     const out = join(root, "get.mjs");
     await writeFile(out, built.code.replace('from "@totto2727/reylo"', `from ${JSON.stringify(INDEX)}`));
-    const query = (await import(pathToFileURL(out).href)).default;
+    const query = await importSqliteQueryFixture(pathToFileURL(out).href, "maybeOne");
     // The application owns its schema and migrations. The loader did not create this table.
-    assert.equal(db.prepare("select count(*) as n from sqlite_schema where name = 'users'").get()!.n, 0);
+    const catalogBefore = requireFixtureValue(db.prepare("select count(*) as n from sqlite_schema where name = 'users'").get());
+    assert.equal(catalogBefore.n, 0);
     db.exec("create table users (id integer not null primary key, name text not null); insert into users values (1, 'Ada')");
     assert.deepEqual({ ...await query.run(db, { id: 1 }) }, { id: 1, name: "Ada" });
     await writeFile(join(root, "schema.hcl"), schema(true));
@@ -195,7 +208,7 @@ test("the mapper and runtime loader consume HCL directly without running migrati
     assert.match(updated.text, /name: string \| null/u);
     await writeFile(join(root, "schema.hcl"), "invalid HCL");
     await assert.rejects(sqlModule(join(root, "get.sql"), SELECT), /Cannot evaluate HCL schema/u);
-    assert.ok(!readdirSync(root).some((name) => /\.(?:db|sqlite)(?:-|$)/u.test(name)));
+    assert.equal(await hasDatabaseFiles(root), false);
   } finally {
     db.close();
     await handlers.closeProject!({ projectHandle: handle });
