@@ -4,23 +4,34 @@
 // Load it is an answer and not a silent worker.
 // oxlint-disable-next-line rules/no-node-imports -- This server-side entry point uses this built-in to run the engine in the native worker channel.
 import { parentPort } from "node:worker_threads";
-// oxlint-disable-next-line rules/no-node-imports -- This server-side entry point uses this built-in to run the engine in the native worker channel.
-import type { MessagePort } from "node:worker_threads";
-// oxlint-disable-next-line rules/no-node-imports -- This server-side entry point uses this built-in to resolve paths using the host platform's filesystem conventions.
-import { dirname } from "node:path";
+// oxlint-disable-next-line rules/no-node-imports -- This worker locates the build engine relative to the project's SQL file.
+import path from "node:path";
+import { COMPLETE, SIGNAL_INDEX } from "./bridge-protocol.ts";
+import type { SqlModuleReply, SqlModuleRequest } from "./bridge-protocol.ts";
 import { tooling } from "./engine-package.ts";
 
-interface Request { path: string; source: string; port: MessagePort; done: Int32Array }
-
-parentPort!.on("message", async ({ path, source, port, done }: Request) => {
-  let reply: { code: string } | { error: string };
+const buildSql = async function buildSql(request: SqlModuleRequest): Promise<SqlModuleReply> {
   try {
-    reply = { code: (await (await tooling(dirname(path))).sqlModule(path, source)).code };
+    const engine = await tooling(path.dirname(request.path));
+    const { code } = await engine.sqlModule(request.path, request.source);
+    return { code };
   } catch (error) {
-    reply = { error: (error as Error).message };
+    // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- Serializing the engine's native Error preserves the worker protocol's message.
+    return { error: (error as Error).message };
   }
+};
+
+const respond = async function respond(request: SqlModuleRequest): Promise<void> {
+  const reply = await buildSql(request);
+  const { port, done } = request;
   port.postMessage(reply);
   port.close();
-  Atomics.store(done, 0, 1);
-  Atomics.notify(done, 0);
+  Atomics.store(done, SIGNAL_INDEX, COMPLETE);
+  Atomics.notify(done, SIGNAL_INDEX);
+};
+
+// oxlint-disable-next-line typescript/no-non-null-assertion -- Only the native bridge starts this worker entry point, with its parent port.
+parentPort!.on("message", (request: SqlModuleRequest) => {
+  // oxlint-disable-next-line eslint/no-void -- The Node listener returns void and the reply travels through the requested port.
+  void respond(request);
 });

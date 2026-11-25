@@ -7,22 +7,52 @@ import { readFileSync } from "node:fs";
 // oxlint-disable-next-line rules/no-node-imports -- This server-side entry point uses this built-in to run the engine in the native worker channel.
 import { MessageChannel, receiveMessageOnPort, Worker } from "node:worker_threads";
 
-let worker: Worker | undefined;
+import { SIGNAL_INDEX, WAITING } from "./bridge-protocol.ts";
+import type { SqlModuleRequest } from "./bridge-protocol.ts";
+import { isRecord, matchesString } from "./native-predicates.ts";
 
-export const sqlModuleSync = function sqlModuleSync(path: string): string {
+interface WorkerState {
+  worker?: Worker;
+}
+
+const workerState: WorkerState = {};
+const WORKER_TIMEOUT_MS = 120_000;
+
+const buildWorker = function buildWorker(): Worker {
   // The worker is this file's sibling, compiled (`.js`) or not (`.ts`).
   const extension = import.meta.url.slice(import.meta.url.lastIndexOf("."));
-  worker ??= new Worker(new URL(`./register-worker${extension}`, import.meta.url), { workerData: { reyloWorker: true } });
-  worker.unref();
-  const done = new Int32Array(new SharedArrayBuffer(4));
+  workerState.worker ??= new Worker(new URL(`register-worker${extension}`, import.meta.url), { workerData: { reyloWorker: true } });
+  workerState.worker.unref();
+  return workerState.worker;
+};
+
+const unwrapReply = function unwrapReply(path: string, waited: string, reply: unknown): string {
+  if (isRecord(reply)) {
+    if ("error" in reply && matchesString(reply.error)) {
+      // oxlint-disable-next-line rules/require-tagged-error -- Synchronous module hosts expect the worker's failure as a native Error.
+      throw new Error(reply.error);
+    }
+    if (matchesString(reply.code)) {return reply.code;}
+  }
+  // oxlint-disable-next-line rules/require-tagged-error -- Report a stopped worker without loading Effect in the native module host.
+  throw new Error(`${path}: reylo's worker ${waited === "timed-out" ? "did not answer in 120 s" : "ended without an answer"}.`);
+};
+
+const awaitReply = function awaitReply(path: string, worker: Worker): string {
+  // oxlint-disable-next-line node/no-sync -- Jest and the native require hook need the SQL result before this call returns.
+  const source = readFileSync(path, "utf8");
+  const done = new Int32Array(new SharedArrayBuffer(Int32Array.BYTES_PER_ELEMENT));
   const { port1, port2 } = new MessageChannel();
-  worker.postMessage({ path, source: readFileSync(path, "utf8"), port: port2, done }, [port2]);
-  // The analysis is bounded by the driver's own timeouts (10 s to connect); this one only ends the
-  // Wait on a worker that died.
-  const waited = Atomics.wait(done, 0, 0, 120_000);
-  const reply = receiveMessageOnPort(port1)?.message as { code: string } | { error: string } | undefined;
+  // oxlint-disable-next-line eslint/sort-keys -- Keep the fields in the shared native message order.
+  const request: SqlModuleRequest = { path, source, port: port2, done };
+  worker.postMessage(request, [port2]);
+  // The driver bounds analysis. This timeout only ends a wait on a worker that stopped.
+  const waited = Atomics.wait(done, SIGNAL_INDEX, WAITING, WORKER_TIMEOUT_MS);
+  const reply: unknown = receiveMessageOnPort(port1)?.message;
   port1.close();
-  if (!reply) {throw new Error(`${path}: reylo's worker ${waited === "timed-out" ? "did not answer in 120 s" : "ended without an answer"}.`);}
-  if ("error" in reply) {throw new Error(reply.error);}
-  return reply.code;
+  return unwrapReply(path, waited, reply);
+};
+
+export const sqlModuleSync = function sqlModuleSync(path: string): string {
+  return awaitReply(path, buildWorker());
 };

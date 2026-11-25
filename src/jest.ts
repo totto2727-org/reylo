@@ -19,6 +19,7 @@ const built = new Map<string, string>();
 // Otherwise; a migration changes the module (its row count, its rewritten statement) and not the
 // Source, so the key is the module itself.
 const getCacheKey = function (_source: string, path: string, options: Options): string {
+  // oxlint-disable-next-line node/no-sync -- Jest requests its cache key synchronously.
   const code = sqlModuleSync(path);
   built.set(path, code);
   return createHash("sha256").update(code).update(String(options.supportsStaticESM)).update(options.configString).digest("hex");
@@ -28,17 +29,22 @@ const getCacheKey = function (_source: string, path: string, options: Options): 
 // One line, since the values are JSON.
 const commonJs = function commonJs(path: string, code: string): string {
   const out = code
-    .replace(/^import \{ (defineQuery(?:, checks)?) \} from "@totto2727\/reylo";$/mu, (_, names: string) => `const { ${names} } = require("@totto2727/reylo");`)
-    .replaceAll(/^export const (\w+) = /gmu, "const $1 = exports.$1 = ")
+    .replace(/^import \{ (?<names>defineQuery(?:, checks)?) \} from "@totto2727\/reylo";$/mu, (_match, names: string) => `const { ${names} } = require("@totto2727/reylo");`)
+    .replaceAll(/^export const (?<name>\w+) = /gmu, "const $<name> = exports.$<name> = ")
     .replace(/^export default /mu, "exports.default = ");
+  // oxlint-disable-next-line rules/prefer-schema-format-validation, rules/require-tagged-error -- Assert Reylo's generated JavaScript contract and preserve Jest's native synchronous error.
   if (/^(?:import|export) /mu.test(out)) {throw new Error(`${path}: reylo's module has a shape reylo/jest cannot make CommonJS.`);}
   return `Object.defineProperty(exports, "__esModule", { value: true });\n${out}`;
 };
 
 const transform = function (_source: string, path: string, options: Options): { code: string } {
+  // oxlint-disable-next-line node/no-sync -- Jest invokes this transform synchronously and expects the source now.
   const code = built.get(path) ?? sqlModuleSync(path);
   built.delete(path);
   return { code: options.supportsStaticESM ? code : commonJs(path, code) };
 };
 
-export default { getCacheKey, process: transform };
+const transformer = { getCacheKey, process: transform };
+
+// oxlint-disable-next-line import/no-default-export -- Jest loads the default transformer from existing configuration.
+export default transformer;
