@@ -1,4 +1,7 @@
-import { hasObjectType, matchesNull, matchesUndefined } from "./native-predicates.ts";
+import { isEmptyString, matchesUndefined } from "./native-predicates.ts";
+
+export { differences } from "./fresh-catalog.ts";
+export { sqliteDefault } from "./fresh-sqlite-default.ts";
 
 // The schema freshness check at run time (wiki/structured-params.md §6):
 // Any change fails. A module a build step writes carries the catalog facts its
@@ -37,154 +40,37 @@ const checked = new WeakMap<object, number>();
 // On every page that ran a query (examples/nextjs, Next.js 16.4). It is reached through
 // `globalThis`, typed here, since a project that type-checks Reylo's sources need not have the
 // DOM's types or Node's, which declare it (the labs' type checks failed with "Cannot find name").
+// oxlint-disable-next-line typescript/no-unsafe-type-assertion -- Node and Bun provide the monotonic performance clock without a runtime import.
 const clock = (globalThis as unknown as { performance: { now: () => number } }).performance;
 
-/** Whether `query` is due for a check now. */
+/**
+ * Report whether a catalog check is due.
+ * @param {object} query - The compiled query identity.
+ * @param {number} now - Monotonic time by default.
+ * @returns {boolean} Whether the previous check has expired.
+ */
 export const due = function due(query: object, now = clock.now()): boolean {
   const at = checked.get(query);
   return matchesUndefined(at) || now - at >= FRESH_FOR;
 };
 
-/** Records a check of `query` that passed, or that could not run. */
+/**
+ * Record a check that passed or could not run.
+ * @param {object} query - The compiled query identity.
+ * @param {number} now - Monotonic time by default.
+ */
 export const passed = function passed(query: object, now = clock.now()): void {
   checked.set(query, now);
 };
 
-const yes = (value: string | undefined): boolean => value === "true" || value === "1";
-const describe = (row: Readonly<string[]>): string => `${row[2]}${yes(row[3]) ? " not null" : ""}${yes(row[4]) ? " with a default" : ""}`;
-const table = (name: string): string => name.replaceAll(/^"|"$/gu, "").replaceAll('"."', ".");
-
-const asciiUpper = (text: string): string => text.replaceAll(/[a-z]+/gu, (letters) => letters.toUpperCase());
-
-/** SQLite folds the case of ASCII letters alone. */
-const asciiLower = (text: string): string => text.replaceAll(/[A-Z]+/gu, (letters) => letters.toLowerCase());
-
-/** The catalog query's columns, as upstream engine/core/src/fresh.rs names them; the sixth on Postgres and SQLite. */
-const COLUMNS = ["fresh_table", "fresh_column", "fresh_type", "fresh_not_null", "fresh_default", "fresh_expr"] as const;
-
 /**
- * The differences between the facts the build saw and the rows the catalog query returns now, one
- * line each; none when the schema still holds what the query relied on, and `undefined` when the
- * rows are not the catalog query's: each is an object with its five or six columns, as many as
- * the module's facts have, or an array of as many values where a driver hands rows back as arrays.
- * A default the statement copied is compared by its text.
- *
- * A SQLite type is compared without its case, as SQLite reads a declared type: SQLite's
- * `pragma_table_xinfo` upper-cases the type names it knows (`integer` is `INTEGER`) and Turso's
- * engine gives them as declared, so a build on one and a run on the other saw the same schema. A
- * Postgres or MySQL type is compared exactly: a quoted Postgres type name keeps its case.
+ * Create the query failure that tells callers to rebuild against the new schema.
+ * @param {string | undefined} source - The compiled query location, when available.
+ * @param {Readonly<string[]>} lines - The catalog differences in source order.
+ * @returns {Error} The existing native query failure.
  */
-export const differences = function differences(fresh: Fresh, rows: Readonly<unknown[]>, dialect?: "postgres" | "mysql" | "sqlite" | "duckdb"): string[] | undefined {
-  const now = new Map<string, string[]>();
-  const width = fresh.rows[0]?.length === 6 ? 6 : 5;
-  const columns = COLUMNS.slice(0, width);
-  for (const row of rows) {
-    if (matchesNull(row) || !hasObjectType(row)) {return undefined;}
-    const raw: unknown[] | undefined = Array.isArray(row) ? (row.length === width ? row : undefined) : (Object.keys(row).length === width && columns.every((column) => column in row) ? columns.map((column) => (row as Record<string, unknown>)[column]) : undefined);
-    if (matchesUndefined(raw)) {return undefined;}
-    const values = raw.map((field) => (matchesNull(field) || matchesUndefined(field) ? "" : String(field)));
-    now.set(`${values[0]}\u0000${values[1]}`, values);
-  }
-  const sameType = dialect === "sqlite" ? (current: string, previous: string) => current === previous || asciiLower(current) === asciiLower(previous) : (current: string, previous: string) => current === previous;
-  const sameDefault = dialect === "sqlite" ? (current: string, previous: string) => current === previous || sqliteDefault(current) === sqliteDefault(previous) : (current: string, previous: string) => current === previous;
-  const out: string[] = [];
-  const seen = new Set<string>();
-  const copied = new Set((fresh.defaults ?? []).map((column) => `${column[0]}\u0000${column[1]}`));
-  Iterator.from(fresh.rows).forEach((was) => {
-    const key = `${was[0]}\u0000${was[1]}`;
-    seen.add(key);
-    const is = now.get(key);
-    if (!is) {out.push(`${table(was[0]!)}.${was[1]} was ${describe(was)} and no longer exists`);}
-    else if (!sameType(is[2]!, was[2]!) || yes(is[3]) !== yes(was[3]) || yes(is[4]) !== yes(was[4])) {out.push(`${table(was[0]!)}.${was[1]} was ${describe(was)} and is now ${describe(is)}`);}
-    // The insert writes the default as the build read it, for a row that leaves the key out.
-    else if (copied.has(key) && !sameDefault(is[5]!, was[5]!)) {out.push(`${table(was[0]!)}.${was[1]} had ${was[5] ? `the default ${was[5]}` : "no default"}, which the insert writes for a row that leaves its key out, and now has ${is[5] ? `the default ${is[5]}` : "none"}`);}
-  });
-  // A column an insert must now fill, which the build did not see.
-  Iterator.from(now).forEach(([key, is]) => {
-    if (!seen.has(key) && fresh.inserts.includes(is[0]!) && yes(is[3]) && !yes(is[4])) {out.push(`${table(is[0]!)}.${is[1]} is now ${describe(is)}, which the insert does not write`);}
-  });
-  return out;
-};
-
-const TEXT_START = 0;
-const CODE_UNIT_WIDTH = 1;
-const DOUBLED_QUOTE_WIDTH = 2;
-const DEPTH_STEP = 1;
-const NO_NESTING = 0;
-const NO_CLOSING_PAREN = -1;
-
-const closingQuote = (text: string, opening: number): number => {
-  let offset = opening + CODE_UNIT_WIDTH;
-  while (offset < text.length) {
-    if (text[offset] === "'") {
-      if (text[offset + CODE_UNIT_WIDTH] !== "'") {return offset;}
-      offset += DOUBLED_QUOTE_WIDTH;
-    } else {offset += CODE_UNIT_WIDTH;}
-  }
-  return offset;
-};
-
-/** Where the opening parenthesis in the expression closes, with quoted strings skipped. */
-const closes = function closes(text: string): number {
-  let depth = NO_NESTING;
-  for (let offset = TEXT_START; offset < text.length; offset += CODE_UNIT_WIDTH) {
-    const character = text[offset];
-    if (character === "'") {offset = closingQuote(text, offset);}
-    else if (character === "(") {depth += DEPTH_STEP;}
-    else if (character === ")") {
-      depth -= DEPTH_STEP;
-      if (depth === NO_NESTING) {return offset;}
-    }
-  }
-  return NO_CLOSING_PAREN;
-};
-
-// Bare identifiers retain the scanner's original range, including lone surrogates and astral code points.
-const SQLITE_IDENTIFIER = /^(?:"(?<doubleQuoted>(?:[^"]|"")*)"|`(?<backtickQuoted>(?:[^`]|``)*)`|\[(?<bracketed>[^\]]*)\]|(?<bare>[A-Za-z_\u0080-\u{10FFFF}][\w$\u0080-\u{10FFFF}]*))$/u;
-const SQLITE_DEFAULT_KEYWORD = /^(?:true|false|null|current_time|current_date|current_timestamp)$/u;
-
-const quoteSqliteIdentifier = (name: string): string => `'${name.replaceAll("'", "''")}'`;
-
-/**
- * A SQLite default's text in one spelling, since engines that read the same schema write it
- * differently: `pragma_table_xinfo` gives the text as written on SQLite (`member`,
- * `lower(hex(randomblob(4)))`, `-7`, `current_timestamp`), and Turso's engine writes it again
- * (`'member'`, `(lower (hex (randomblob (4))))`, `- 7`, `CURRENT_TIMESTAMP`), which evaluates the
- * same (wiki/structured-params/default-extraction.md). Outside its strings the text loses its
- * spaces and its ASCII case and the parentheses around it all, and a lone identifier is the string
- * SQLite stores for it, as the upstream engine copies it (engine/core/src/structured.rs).
- */
-export function sqliteDefault(text: string): string {
-  const trimmed = text.trim();
-  const identifier = SQLITE_IDENTIFIER.exec(trimmed)?.groups;
-  if (!matchesUndefined(identifier)) {
-    const { doubleQuoted, backtickQuoted, bracketed, bare } = identifier;
-    if (!matchesUndefined(doubleQuoted)) {return quoteSqliteIdentifier(doubleQuoted.replaceAll('""', '"'));}
-    if (!matchesUndefined(backtickQuoted)) {return quoteSqliteIdentifier(backtickQuoted.replaceAll("``", "`"));}
-    if (!matchesUndefined(bracketed)) {return quoteSqliteIdentifier(bracketed);}
-    if (!matchesUndefined(bare) && !SQLITE_DEFAULT_KEYWORD.test(asciiLower(bare))) {return quoteSqliteIdentifier(bare);}
-  }
-  let out = "";
-  let offset = TEXT_START;
-  while (offset < trimmed.length) {
-    const character = trimmed.charAt(offset);
-    if (character === "'") {
-      const next = closingQuote(trimmed, offset) + CODE_UNIT_WIDTH;
-      out += trimmed.slice(offset, next);
-      offset = next;
-    } else {
-      if (!/\s/u.test(character)) {out += asciiUpper(character);}
-      offset += CODE_UNIT_WIDTH;
-    }
-  }
-  // Parentheses around the whole text, as many as there are.
-  while (out.startsWith("(") && out.endsWith(")") && closes(out) === out.length - CODE_UNIT_WIDTH) {
-    out = out.slice(CODE_UNIT_WIDTH, -CODE_UNIT_WIDTH);
-  }
-  return out;
-}
-
-/** The error a call fails with when the schema changed under its query. */
 export const staleError = function staleError(source: string | undefined, lines: Readonly<string[]>): Error {
-  return new Error(`The database changed after ${source ? `${source} was built` : "this query was built"}: ${lines.join("; ")}. Build it again (the type check, or reylo generate) and deploy the new build.`);
+  const subject = matchesUndefined(source) || isEmptyString(source) ? "this query" : source;
+  // oxlint-disable-next-line rules/require-tagged-error -- Preserve the runtime's native stale schema error without loading Effect.
+  return new Error(`The database changed after ${subject} was built: ${lines.join("; ")}. Build it again (the type check, or reylo generate) and deploy the new build.`);
 };
