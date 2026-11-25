@@ -5,7 +5,10 @@
     "types": ["node"],
     "strict": true,
     "noEmit": true,
-    "skipLibCheck": true
+    "skipLibCheck": true,
+    "paths": {
+      "#reylo-example-types": ["./node_modules/@totto2727/reylo/src/index.d.ts", "../../src/index.ts"]
+    }
   },
   "contentMappers": [
     {
@@ -13,5 +16,5 @@
       "extensions": [".sql", ".reylo.yaml", ".reylo.yml"]
     }
   ],
-  "include": ["main.ts"]
+  "include": ["main.ts", "sql-types.d.ts"]
 }

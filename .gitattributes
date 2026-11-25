@@ -1,0 +1,7 @@
+# The SQL mapper records source bytes in declarations that lint checks for drift.
+examples/bun/queries/*.d.sql.ts text eol=lf
+examples/bun/queries/*.sql text eol=lf
+examples/hcl/get_user.sql text eol=lf
+examples/hcl/sql-types.d.ts text eol=lf
+examples/nub/queries/*.sql text eol=lf
+examples/nub/src/sql-types.d.ts text eol=lf

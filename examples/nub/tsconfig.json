@@ -6,7 +6,10 @@
     "types": ["node"],
     "strict": true,
     "noEmit": true,
-    "skipLibCheck": true
+    "skipLibCheck": true,
+    "paths": {
+      "#reylo-example-types": ["./node_modules/@totto2727/reylo/src/index.d.ts", "../../src/index.ts"]
+    }
   },
   "contentMappers": [
     {

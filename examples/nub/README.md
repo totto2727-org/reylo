@@ -43,6 +43,8 @@ Each run of `start` adds a post; `nub run setup` starts over. The tests roll the
 
 ## Notes
 
+- From the repository root, run `nub scripts/native-example-types.ts --write` after changing a query or `setup.sql`. Root lint checks that `src/sql-types.d.ts` matches the content mapper output. The example type check runs the mapper with `--runExternalCode`.
+
 - Setting `NODE_COMPAT=1` in the environment makes nub run as plain Node, which skips `nub.jsonc`: a `.sql` import then fails with `ERR_UNKNOWN_FILE_EXTENSION`. A process started under nub's `node` shim passes it on, so unset it if a `.sql` import stops loading.
 - The preload analyzes each `.sql` file as it loads, against `DATABASE_URL` in `.env` or the environment, as the type check does.
 - SQLite infers no literal union from a `check` constraint, so `role` is a `string` here.

@@ -1,4 +1,6 @@
-// Vitest runs the ESM test unchanged through @totto2727/reylo/vite; `globals` provides Jest's test and expect.
+// Vitest runs the ESM test unchanged through @totto2727/reylo/vite; `globals` provides the shared test registration.
 import reylo from "@totto2727/reylo/vite";
 
-export default { plugins: [reylo()], test: { include: ["query.test.mjs"], globals: true } };
+const config = { plugins: [reylo()], test: { globals: true, include: ["query.test.mjs"] } };
+// oxlint-disable-next-line import/no-default-export -- Vitest loads this configuration as the default export.
+export default config;

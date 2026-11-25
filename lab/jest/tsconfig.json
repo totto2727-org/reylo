@@ -1,0 +1,18 @@
+{
+  "compilerOptions": {
+    "allowImportingTsExtensions": true,
+    "allowJs": true,
+    "checkJs": true,
+    "lib": ["esnext"],
+    "module": "nodenext",
+    "noEmit": true,
+    "paths": {
+      "@totto2727/reylo/vite": ["./node_modules/@totto2727/reylo/src/vite.ts", "../../src/vite.ts"]
+    },
+    "skipLibCheck": true,
+    "strict": true,
+    "target": "esnext",
+    "types": ["node"]
+  },
+  "include": ["*.cjs", "*.mjs", "*.d.ts"]
+}

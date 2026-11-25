@@ -8,11 +8,24 @@ export default defineConfig({
   ignorePatterns: [
     // The SQL content mapper generates these declarations, and the lint command checks their bytes.
     'examples/bun/queries/*.d.sql.ts',
+    'examples/hcl/sql-types.d.ts',
+    'examples/nub/src/sql-types.d.ts',
     // The HCL scanner generator owns these transition tables.
     'src/hclsyntax/scanner-tables.ts',
     'src/hclsyntax/string-literal-tables.ts',
   ],
   overrides: [
+    {
+      // Jest loads these .cjs files through CommonJS. The declaration defines an ambient SQL module for the lab.
+      files: [
+        'lab/jest/fixture.cjs',
+        'lab/jest/jest.cjs.config.cjs',
+        'lab/jest/jest.esm.config.cjs',
+        'lab/jest/query.d.ts',
+        'lab/jest/query.test.cjs',
+      ],
+      rules: { 'import/unambiguous': 'off' },
+    },
     {
       // The upstream generator uses the MySQL protocol number that starts each run.
       files: ['src/error-codes-mysql.ts'],

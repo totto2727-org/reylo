@@ -24,4 +24,6 @@ The project file selects `direct_url: hcl:./schema.hcl` for the content mapper a
 The runtime preload is `@totto2727/reylo/register`.
 The package links point at `dist/reylo` and `dist/sqlite`, so rebuild the root after changing Reylo's source.
 In another project, replace the links with matching published versions of `@totto2727/reylo` and `@totto2727/reylo-sqlite`.
+After changing `get_user.sql` or `schema.hcl`, run `nub scripts/native-example-types.ts --write` from the repository root.
+Root lint checks the generated `sql-types.d.ts` against the content mapper output. The example type check runs the mapper with `--runExternalCode`.
 See the [root setup](../../README.md#setup) for installation.

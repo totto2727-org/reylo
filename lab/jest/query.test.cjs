@@ -1,11 +1,10 @@
-// CommonJS: Jest's own require() loads the .sql file.
-const { DatabaseSync } = require("node:sqlite");
-const { join } = require("node:path");
-const query = require("./query.sql").default;
+// oxlint-disable-next-line import/no-commonjs, typescript/no-require-imports, typescript/no-var-requires -- Resolve the native fixture path during the CommonJS test.
+const path = require("node:path");
 
-test("a .sql file required by a CommonJS test runs", async () => {
-  const db = new DatabaseSync(join(__dirname, "lab.db"));
-  expect(query.cardinality).toBe("maybeOne");
-  expect(await query.run(db, { id: 1 })).toEqual({ id: 1, name: "ada", email: "ada@example.com" });
-  expect(await query.run(db, { id: 99 })).toBe(null);
-});
+// oxlint-disable-next-line import/no-commonjs, typescript/no-require-imports, typescript/no-var-requires -- Jest loads this fixture in its CommonJS module graph.
+const { registerQueryTest } = require("./fixture.cjs");
+/** @type {{ default: unknown }} */
+// oxlint-disable-next-line import/no-commonjs, typescript/no-require-imports, typescript/no-var-requires -- The lab verifies the transformer through Jest's actual CommonJS require.
+const moduleResult = require("./query.sql");
+
+registerQueryTest("a .sql file required by a CommonJS test runs", path.join(__dirname, "lab.db"), moduleResult.default);

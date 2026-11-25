@@ -45,7 +45,7 @@
   },
   "scripts": {
     "build": "nub scripts/build.ts",
-    "lint": "node scripts/bun-example-types.ts && oxlint --config .oxlintrc.mjs",
+    "lint": "node scripts/bun-example-types.ts && node scripts/native-example-types.ts && oxlint --config .oxlintrc.mjs",
     "typecheck": "tsc --noEmit --runExternalCode",
     "test": "node --test 'tests/**/*.test.ts'"
   },
