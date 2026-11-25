@@ -23,6 +23,7 @@
 // A type the database created (an enum, a domain's array, an extension's type) has the kind the
 // Module gives its column; for a query defined by hand, one catalog query per client reads which of
 // Those oids are arrays, cached in a WeakMap keyed by the app's object.
+import { bunRows } from "./decode-bun.ts";
 import { coerce, DecodeError, scalarKind, textDecoder, utf8 } from './values.ts';
 import type { Columns, Decoder, Kind, ScalarKind } from './values.ts';
 import { lexPlaceholders } from "./lex.ts";
@@ -485,48 +486,6 @@ export const postgresJs = async function postgresJs(client: Record<string, unkno
 };
 
 // ---------------------------------------------------------------------------------------------
-// Bun.sql (Postgres and MySQL): Bun decodes in native code, so its values are converted to Reylo's.
-
-/**
- * The kinds Bun.sql can give in another form: a BIGINT as its digits (a BigInt with `bigint: true`),
- * a date and a timestamp as a Date read as UTC, a timestamptz as a Date, an int4[] and float4[] as a
- * typed array, an array of a type Bun does not parse (an enum's, uuid, name, a range) as its text,
- * a pgvector vector and an hstore as their text, MySQL's TINYINT(1) and a comparison as a number or
- * a BIGINT's digits, and its BIT(1) as a boolean; and an interval as Postgres's text, which Reylo writes as
- * an ISO 8601 duration.
- */
-const BUN_KINDS = /^(bool|int8|date|timestamp|timestamptz|interval|bytes|vector|hstore)$|\[\]$|\|/u;
-
-/** A value whose kind is not known: a typed array an array, and a Date, which no kind is, the instant's text. */
-const byType = function byType(v: unknown, name: string): unknown {
-  if (v instanceof Date) {return coerce("timestamptz", v, name);}
-  if (ArrayBuffer.isView(v) && !(v instanceof Uint8Array) && !(v instanceof DataView)) {return coerce("float[]", v, name);}
-  return v;
-};
-
-/** A value of `kind` as Bun.sql gave it: an either's digits are a MySQL BIGINT's, which Bun gives as a string. */
-const bunValue = function bunValue(kind: Kind, v: unknown, name: string, delim?: string): unknown {
-  if (matchesString(v) && kind.includes("|") && kind.split("|").includes("int8") && /^[+-]?\d+$/u.test(v)) {return BigInt(v);}
-  return coerce(kind, v, name, delim);
-};
-
-export function bunRows(rows: unknown[], columns: Columns | undefined): unknown[] {
-  if (!Array.isArray(rows) || !rows.length) {return Array.isArray(rows) ? rows : [];}
-  const first = rows[0] as Record<string, unknown>;
-  // A query defined by hand carries no kinds: only what Bun's own types say is converted.
-  const work: (Readonly<[string, Kind, string?]>)[] = columns ? columns.filter(([, kind]) => BUN_KINDS.test(kind)) : Object.keys(first).map((name) => [name, "unknown"] as const);
-  if (!work.length) {return rows;}
-  Iterator.from(rows as Record<string, unknown>[]).forEach((row) => {
-    Iterator.from(work).forEach(([name, kind, delim]) => {
-      const v = row[name];
-      if (matchesNull(v) || matchesUndefined(v)) {return;}
-      row[name] = kind === "unknown" ? byType(v, name) : bunValue(kind, v, name, delim);
-    });
-  });
-  return rows;
-}
-
-// ---------------------------------------------------------------------------------------------
 // Slonik: its query() runs only the queries its `sql` tag builds, and its type parsers are set on
 // The pool's connections, where they turn a numeric into a float, a timestamp into epoch
 // Milliseconds and an interval into seconds. A tag made by the app's own `createSqlTag` with
@@ -681,4 +640,5 @@ function slonikValue(kind: Kind, v: unknown, name: string, delim?: string): unkn
 const refuseSlonikRows = () =>
   new TypeError(`Reylo cannot run on this Slonik client: one of its interceptors rewrites every row (transformRow or transformRowAsync, such as slonik-interceptor-field-name-transformation), Reylo's too, so they would not have the columns the query declares. Run Reylo's queries on a pool made without that interceptor.`);
 
+export { bunRows } from "./decode-bun.ts";
 export { DecodeError, parseArray } from "./values.ts";
