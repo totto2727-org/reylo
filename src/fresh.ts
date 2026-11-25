@@ -50,8 +50,8 @@ export const passed = function passed(query: object, now = clock.now()): void {
   checked.set(query, now);
 };
 
-const yes = (v: string) => v === "true" || v === "1";
-const describe = (r: Readonly<string[]>): string => `${r[2]}${yes(r[3]!) ? " not null" : ""}${yes(r[4]!) ? " with a default" : ""}`;
+const yes = (value: string | undefined): boolean => value === "true" || value === "1";
+const describe = (row: Readonly<string[]>): string => `${row[2]}${yes(row[3]) ? " not null" : ""}${yes(row[4]) ? " with a default" : ""}`;
 const table = (name: string): string => name.replaceAll(/^"|"$/gu, "").replaceAll('"."', ".");
 
 const asciiUpper = (text: string): string => text.replaceAll(/[a-z]+/gu, (letters) => letters.toUpperCase());
@@ -82,26 +82,26 @@ export const differences = function differences(fresh: Fresh, rows: Readonly<unk
     if (matchesNull(row) || !hasObjectType(row)) {return undefined;}
     const raw: unknown[] | undefined = Array.isArray(row) ? (row.length === width ? row : undefined) : (Object.keys(row).length === width && columns.every((column) => column in row) ? columns.map((column) => (row as Record<string, unknown>)[column]) : undefined);
     if (matchesUndefined(raw)) {return undefined;}
-    const values = raw.map((v) => (matchesNull(v) || matchesUndefined(v) ? "" : String(v)));
+    const values = raw.map((field) => (matchesNull(field) || matchesUndefined(field) ? "" : String(field)));
     now.set(`${values[0]}\u0000${values[1]}`, values);
   }
-  const sameType = dialect === "sqlite" ? (a: string, b: string) => a === b || asciiLower(a) === asciiLower(b) : (a: string, b: string) => a === b;
-  const sameDefault = dialect === "sqlite" ? (a: string, b: string) => a === b || sqliteDefault(a) === sqliteDefault(b) : (a: string, b: string) => a === b;
+  const sameType = dialect === "sqlite" ? (current: string, previous: string) => current === previous || asciiLower(current) === asciiLower(previous) : (current: string, previous: string) => current === previous;
+  const sameDefault = dialect === "sqlite" ? (current: string, previous: string) => current === previous || sqliteDefault(current) === sqliteDefault(previous) : (current: string, previous: string) => current === previous;
   const out: string[] = [];
   const seen = new Set<string>();
-  const copied = new Set((fresh.defaults ?? []).map((d) => `${d[0]}\u0000${d[1]}`));
+  const copied = new Set((fresh.defaults ?? []).map((column) => `${column[0]}\u0000${column[1]}`));
   Iterator.from(fresh.rows).forEach((was) => {
     const key = `${was[0]}\u0000${was[1]}`;
     seen.add(key);
     const is = now.get(key);
     if (!is) {out.push(`${table(was[0]!)}.${was[1]} was ${describe(was)} and no longer exists`);}
-    else if (!sameType(is[2]!, was[2]!) || yes(is[3]!) !== yes(was[3]!) || yes(is[4]!) !== yes(was[4]!)) {out.push(`${table(was[0]!)}.${was[1]} was ${describe(was)} and is now ${describe(is)}`);}
+    else if (!sameType(is[2]!, was[2]!) || yes(is[3]) !== yes(was[3]) || yes(is[4]) !== yes(was[4])) {out.push(`${table(was[0]!)}.${was[1]} was ${describe(was)} and is now ${describe(is)}`);}
     // The insert writes the default as the build read it, for a row that leaves the key out.
     else if (copied.has(key) && !sameDefault(is[5]!, was[5]!)) {out.push(`${table(was[0]!)}.${was[1]} had ${was[5] ? `the default ${was[5]}` : "no default"}, which the insert writes for a row that leaves its key out, and now has ${is[5] ? `the default ${is[5]}` : "none"}`);}
   });
   // A column an insert must now fill, which the build did not see.
   Iterator.from(now).forEach(([key, is]) => {
-    if (!seen.has(key) && fresh.inserts.includes(is[0]!) && yes(is[3]!) && !yes(is[4]!)) {out.push(`${table(is[0]!)}.${is[1]} is now ${describe(is)}, which the insert does not write`);}
+    if (!seen.has(key) && fresh.inserts.includes(is[0]!) && yes(is[3]) && !yes(is[4])) {out.push(`${table(is[0]!)}.${is[1]} is now ${describe(is)}, which the insert does not write`);}
   });
   return out;
 };
