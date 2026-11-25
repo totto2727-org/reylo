@@ -1,8 +1,8 @@
 import { checkArray } from "./json-schema-arrays.ts";
-import { basicFailure, pointer, regex } from "./json-schema-constraints.ts";
+import { basicFailure, pointer } from "./json-schema-constraints.ts";
 import { fillDefaults } from "./json-schema-defaults.ts";
-
-import { hasObjectType, isRecord, matchesNumber, matchesUndefined } from "./native-predicates.ts";
+import { checkObject } from "./json-schema-objects.ts";
+import { isRecord, matchesUndefined } from "./native-predicates.ts";
 
 export { cloneJson } from "./json-schema-defaults.ts";
 
@@ -47,54 +47,17 @@ function check(schema: unknown, value: unknown, path: string, out: Failure[]): E
     path,
     probe: (subschema, item) => check(subschema, item, path, []) !== false,
   })) {return false;}
-  if (isRecord(value)) {
-    const o = value;
-    const keys = Object.keys(o);
-    if (matchesNumber(s.maxProperties) && keys.length > s.maxProperties) {return fail(out, path, `must have at most ${s.maxProperties} keys`);}
-    if (matchesNumber(s.minProperties) && keys.length < s.minProperties) {return fail(out, path, `must have at least ${s.minProperties} keys`);}
-    // A key is the object's own: `toString` and `__proto__` are keys only where the value has them.
-    const has = (key: string): boolean => Object.hasOwn(o, key);
-    if (Array.isArray(s.required)) {for (const key of s.required as string[]) {if (!has(key)) {return fail(out, path, `must have the key "${key}"`);}}}
-    if (s.dependentRequired && hasObjectType(s.dependentRequired)) {
-      for (const [key, needs] of Object.entries(s.dependentRequired as Record<string, string[]>)) {
-        if (has(key)) {for (const need of needs) {if (!has(need)) {return fail(out, path, `must have the key "${need}" beside "${key}"`);}}}
-      }
-    }
-    const properties = (s.properties ?? {}) as Record<string, Schema>;
-    const patterns = Object.entries((s.patternProperties ?? {}) as Record<string, Schema>).map(([key, sub]) => [regex(key), sub] as const);
-    for (const key of keys) {
-      const at = `${path}/${pointer(key)}`;
-      let named = false;
-      if (Object.hasOwn(properties, key)) {
-        named = true;
-        if (check(properties[key]!, o[key], at, out) === false) {return false;}
-      }
-      for (const [re, sub] of patterns) {
-        if (re.test(key)) {
-          named = true;
-          if (check(sub, o[key], at, out) === false) {return false;}
-        }
-      }
-      if (named) {evaluated.add(key);}
-      else if (!matchesUndefined(s.additionalProperties)) {
-        if (check(s.additionalProperties as Schema, o[key], at, out) === false) {
-          if (s.additionalProperties !== false) {return false;}
-          out.length = EMPTY_FAILURES;
-          return fail(out, at, "is a key the schema does not allow");
-        }
-        evaluated.add(key);
-      }
-      if (!matchesUndefined(s.propertyNames) && check(s.propertyNames as Schema, key, at, []) === false) {return fail(out, at, `is a key whose name the schema does not allow`);}
-    }
-    if (s.dependentSchemas && hasObjectType(s.dependentSchemas)) {
-      for (const [key, sub] of Object.entries(s.dependentSchemas as Record<string, Schema>)) {
-        if (!has(key)) {continue;}
-        const result = check(sub, value, path, out);
-        if (result === false) {return false;}
-        result.forEach((k) => evaluated.add(k));
-      }
-    }
-  }
+  if (isRecord(value) && !checkObject(s, value, {
+    check: (subschema, candidate, position) => check(subschema, candidate, position, out),
+    evaluated,
+    fail: (position, reason) => fail(out, position, reason),
+    path,
+    probe: (subschema, candidate, position) => check(subschema, candidate, position, []) !== false,
+    replace: (position, reason) => {
+      out.length = EMPTY_FAILURES;
+      return fail(out, position, reason);
+    },
+  })) {return false;}
 
   // The applicators: a subschema's evaluated keys count only where it passed.
   if (Array.isArray(s.allOf)) {

@@ -1,5 +1,5 @@
 import { matchesJsonFormat } from "./json-formats.ts";
-import { hasObjectType, isRecord, matchesBoolean, matchesNull, matchesNumber, matchesString, matchesUndefined } from "./native-predicates.ts";
+import { hasFunctionType, hasObjectType, isRecord, matchesBoolean, matchesNull, matchesNumber, matchesString, matchesUndefined } from "./native-predicates.ts";
 
 type Keywords = Readonly<Record<string, unknown>>;
 
@@ -16,6 +16,19 @@ export const regex = (pattern: string): RegExp => {
   regexes.set(pattern, compiled);
   return compiled;
 };
+
+export const entriesOf = (value: unknown): [string, unknown][] => Object.entries(value ?? {});
+
+export const memberOf = (source: unknown, key: string): unknown => {
+  const boxed: unknown = new Object(source);
+  if ((!matchesNull(boxed) && hasObjectType(boxed)) || hasFunctionType(boxed)) {return Reflect.get(boxed, key);}
+  return undefined;
+};
+
+export type Pattern = [RegExp, unknown];
+
+export const patternsOf = (value: unknown): Pattern[] =>
+  entriesOf(value).map(([pattern, subschema]): Pattern => [regex(pattern), subschema]);
 
 const is = (type: unknown, value: unknown): boolean => {
   switch (type) {

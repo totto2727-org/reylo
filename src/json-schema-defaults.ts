@@ -1,18 +1,9 @@
-import { regex } from "./json-schema-constraints.ts";
-import { hasFunctionType, hasObjectType, isRecord, matchesNull, matchesUndefined } from "./native-predicates.ts";
+import type { Pattern } from "./json-schema-constraints.ts";
+import { entriesOf, memberOf, patternsOf } from "./json-schema-constraints.ts";
+import { hasObjectType, isRecord, matchesNull, matchesUndefined } from "./native-predicates.ts";
 
 type Keywords = Readonly<Record<string, unknown>>;
 type Matches = (schema: unknown, value: unknown) => boolean;
-type Pattern = [RegExp, unknown];
-
-const entriesOf = (value: unknown): [string, unknown][] => Object.entries(value ?? {});
-
-const property = (source: unknown, key: string): unknown => {
-  const boxed: unknown = new Object(source);
-  if ((!matchesNull(boxed) && hasObjectType(boxed)) || hasFunctionType(boxed)) {return Reflect.get(boxed, key);}
-  return undefined;
-};
-
 /**
  * Copies a JSON value, including a schema default that may be reused between calls.
  * @param {T} value The JSON value.
@@ -72,7 +63,7 @@ class Defaults {
         if (!matchesUndefined(fallback)) {result[key] = cloneJson(fallback.value);}
       }
     });
-    const patterns = entriesOf(schema.patternProperties).map(([key, sub]): Pattern => [regex(key), sub]);
+    const patterns = patternsOf(schema.patternProperties);
     const keywords = { patterns, properties, schema };
     Object.keys(result).forEach((name) => {this.#member(name, result, keywords);});
     this.#dependencies(schema.dependentSchemas, result);
@@ -81,7 +72,7 @@ class Defaults {
 
   #member(name: string, result: Record<string, unknown>, { patterns, properties, schema }: ObjectKeywords): void {
     const matched = { named: Object.hasOwn(properties, name) };
-    if (matched.named) {result[name] = this.fill(property(properties, name), result[name]);}
+    if (matched.named) {result[name] = this.fill(memberOf(properties, name), result[name]);}
     Iterator.from(patterns).forEach(([pattern, subschema]) => {
       if (pattern.test(name)) {
         matched.named = true;
