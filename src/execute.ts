@@ -844,42 +844,66 @@ export const rawStatement = function rawStatement(query: QueryModule, params: un
 };
 
 const accepted: Record<Dialect, string> = {
-  postgres: "query(text, values) as on pg, PGlite, Neon and pg-promise; unsafe(text, values) as on postgres.js and Bun.sql; Neon's neon() function; a Slonik pool, connection or transaction; or a Drizzle database over one of them",
-  mysql: "execute(text, values) as on mysql2 and PlanetScale; query(text, values) as on mariadb's pool or connection, from its promise or callback API; unsafe(text, values) as on Bun.sql; a mysql2 callback pool or connection; or a Drizzle database over one of them",
-  sqlite: "prepare(sql) as on better-sqlite3, node:sqlite, bun:sqlite, Turso's @tursodatabase/database and Cloudflare D1; exec(sql, ...values) as on a Durable Object's ctx.storage.sql; execute({ sql, args }) as on @libsql/client; all(sql, params) as on sqlite3 and sqlite; unsafe(text, values) as on Bun.sql; or a Drizzle database over one of them",
   duckdb: "runAndReadAll(sql, values) as on @duckdb/node-api's DuckDBConnection",
+  mysql: "execute(text, values) as on mysql2 and PlanetScale; query(text, values) as on mariadb's pool or connection, from its promise or callback API; unsafe(text, values) as on Bun.sql; a mysql2 callback pool or connection; or a Drizzle database over one of them",
+  postgres: "query(text, values) as on pg, PGlite, Neon and pg-promise; unsafe(text, values) as on postgres.js and Bun.sql; Neon's neon() function; a Slonik pool, connection or transaction; or a Drizzle database over one of them",
+  sqlite: "prepare(sql) as on better-sqlite3, node:sqlite, bun:sqlite, Turso's @tursodatabase/database and Cloudflare D1; exec(sql, ...values) as on a Durable Object's ctx.storage.sql; execute({ sql, args }) as on @libsql/client; all(sql, params) as on sqlite3 and sqlite; unsafe(text, values) as on Bun.sql; or a Drizzle database over one of them",
 };
 
 const MAX_DRIVER_METHODS_IN_DIAGNOSTIC = 12;
 
-const unsupported = function unsupported(candidate: unknown, dialect: Dialect): TypeError {
-  let seen: string;
-  if (matchesNull(candidate) || (!hasObjectType(candidate) && !hasFunctionType(candidate))) {seen = String(candidate);}
-  else {
-    const names = new Set<string>();
-    for (let prototype: object | null = candidate; prototype && prototype !== Object.prototype && prototype !== Function.prototype; prototype = Reflect.getPrototypeOf(prototype)) {
-      Iterator.from(Object.getOwnPropertyNames(prototype)).forEach((key) => {
-        const property = Object.getOwnPropertyDescriptor(prototype, key);
-        if (key !== "constructor" && hasFunctionType(property?.value)) {names.add(key);}
-      });
-    }
-    seen = names.size ? `an object with ${Iterator.from(names).take(MAX_DRIVER_METHODS_IN_DIAGNOSTIC).toArray().join(", ")}${names.size > MAX_DRIVER_METHODS_IN_DIAGNOSTIC ? ", ..." : ""}` : "an object with no methods";
+const clientMethods = (candidate: object): Set<string> => {
+  const names = new Set<string>();
+  const chain: { current: object | null } = { current: candidate };
+  while (chain.current && chain.current !== Object.prototype && chain.current !== Function.prototype) {
+    const { current } = chain;
+    Iterator.from(Object.getOwnPropertyNames(current)).forEach((key) => {
+      const property = Object.getOwnPropertyDescriptor(current, key);
+      if (key !== "constructor" && hasFunctionType(property?.value)) {names.add(key);}
+    });
+    chain.current = Reflect.getPrototypeOf(current);
   }
-  // Node:sqlite's tag store keeps its database on db. Kysely and Prisma decode every value of a
-  // Raw query themselves, by their own rules or the driver's parsers, before it returns.
-  // Neither hands out a transaction's connection.
-  const clientMembers = matchesNullish(candidate) ? undefined : inspectClient<{ db?: { prepare?: unknown } }>(candidate);
-  const inTx = " and does not hand out its transaction's connection: take the transaction from the driver's client instead.";
-  const hint =
-    dialect !== "duckdb" && isDuckdb(inspectClient(candidate))
-      ? ` It is a DuckDB connection, and the statement is typed for ${dialect}: set the project's URL to the DuckDB database (duckdb:./app.duckdb).`
-      : hasFunctionType(clientMembers?.db?.prepare)
-      ? " A tag store is not a client: pass its database, store.db."
-      : hasFunctionType(clientMembers?.selectFrom) && hasFunctionType(clientMembers.executeQuery)
-        ? ` Kysely decodes the values of its queries itself${clientMembers.isTransaction === true ? inTx : ": pass the pool or database its dialect was made with."}`
-        : hasFunctionType(clientMembers?.$queryRawUnsafe)
-          ? ` Prisma decodes the values of its queries itself${hasFunctionType(clientMembers.$transaction) ? ": pass a client of your database's driver, such as the pool its driver adapter was made with." : inTx}`
-          : "";
+  return names;
+};
+
+const seenClient = (candidate: unknown): string => {
+  if (matchesNull(candidate) || (!hasObjectType(candidate) && !hasFunctionType(candidate))) {return String(candidate);}
+  const names = clientMethods(candidate);
+  if (!names.size) {return "an object with no methods";}
+  const preview = Iterator.from(names).take(MAX_DRIVER_METHODS_IN_DIAGNOSTIC).toArray().join(", ");
+  const more = names.size > MAX_DRIVER_METHODS_IN_DIAGNOSTIC ? ", ..." : "";
+  return `an object with ${preview}${more}`;
+};
+
+const ORM_TRANSACTION_HINT = " and does not hand out its transaction's connection: take the transaction from the driver's client instead.";
+
+const ormHint = (client: ClientMembers | undefined): string => {
+  // Kysely and Prisma decode raw query values and keep their transaction connections private.
+  if (hasFunctionType(client?.selectFrom) && hasFunctionType(client.executeQuery)) {
+    const hint = client.isTransaction === true ? ORM_TRANSACTION_HINT : ": pass the pool or database its dialect was made with.";
+    return ` Kysely decodes the values of its queries itself${hint}`;
+  }
+  if (hasFunctionType(client?.$queryRawUnsafe)) {
+    const hint = hasFunctionType(client.$transaction) ? ": pass a client of your database's driver, such as the pool its driver adapter was made with." : ORM_TRANSACTION_HINT;
+    return ` Prisma decodes the values of its queries itself${hint}`;
+  }
+  return "";
+};
+
+const clientHint = (candidate: unknown, dialect: Dialect): string => {
+  const client = matchesNullish(candidate) ? undefined : inspectClient<{ db?: { prepare?: unknown } }>(candidate);
+  if (dialect !== "duckdb" && isDuckdb(inspectClient(candidate))) {
+    return ` It is a DuckDB connection, and the statement is typed for ${dialect}: set the project's URL to the DuckDB database (duckdb:./app.duckdb).`;
+  }
+  // Node:sqlite's tag store keeps its native database on db.
+  if (hasFunctionType(client?.db?.prepare)) {return " A tag store is not a client: pass its database, store.db.";}
+  return ormHint(client);
+};
+
+const unsupported = (candidate: unknown, dialect: Dialect): TypeError => {
+  const seen = seenClient(candidate);
+  const hint = clientHint(candidate, dialect);
+  // oxlint-disable-next-line rules/require-tagged-error -- Preserve the native TypeError for unsupported clients without loading Effect.
   return new TypeError(`reylo cannot run a ${dialect} statement on ${seen}. It takes a client with ${accepted[dialect]}.${hint}`);
 };
 
