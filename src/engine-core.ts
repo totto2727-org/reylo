@@ -2,20 +2,24 @@
 // That hands each round's needs to an `EngineIo` until the analysis is done, for a host that answers
 // Them over a connection of its own. src/engine.ts runs it over the published native engine.
 import { Unreachable } from "./connection.ts";
-import type { EngineType } from "./engine-type.ts";
+import { AnswerCache } from "./engine-answer-cache.ts";
+import type { EngineType, JsonSchema } from "./engine-type.ts";
 import { matchesUndefined } from "./native-predicates.ts";
 
+export { AnswerCache } from "./engine-answer-cache.ts";
 export type { EngineType } from "./engine-type.ts";
 export type Dialect = "postgres" | "sqlite" | "mysql" | "duckdb";
 
+// oxlint-disable-next-line typescript/consistent-type-definitions -- Preserve the public protocol type alias and its structural assignability.
 export type Diagnostic = { message: string; start: number; length: number; code: number };
 
+// oxlint-disable-next-line typescript/consistent-type-definitions -- Preserve the public protocol type alias and its structural assignability.
 export type Analysis = {
   kind: string;
   /** `nullable`: the statement lets the caller pass null, or leave the parameter out (it casts the parameter to `nullable(…)`, or writes it whole and bare, with no cast, to a column that may hold null). */
   /** `cast`: a `::type` written on MySQL or SQLite, which the run time checks a value against (src/rows.ts). */
   /** `comment`: the comment the database keeps on the column a parameter is written to (or, on MySQL, compared with), and on the table column a result column reads as it is; the declaration prints it as the field's doc comment. */
-  params: { name: string; type: EngineType; type_name: string; nullable: boolean; schema?: import("./engine-type.ts").JsonSchema; cast?: string; comment?: string }[];
+  params: { name: string; type: EngineType; type_name: string; nullable: boolean; schema?: JsonSchema; cast?: string; comment?: string }[];
   columns: { name: string; type: EngineType; nullable: boolean; type_name: string; comment?: string }[];
   cardinality: "one" | "maybeOne" | "many" | "none";
   cardinalityReason?: string;
@@ -36,6 +40,7 @@ export type Analysis = {
   errors?: Record<string, Record<string, string[]>>;
 };
 
+// oxlint-disable-next-line typescript/consistent-type-definitions -- Preserve the public protocol type alias and its structural assignability.
 export type Lexed = {
   params: string[];
   placeholders: { name: string; start: number; end: number }[];
@@ -48,13 +53,18 @@ export type Need =
   | { kind: "describe"; id: string; sql: string }
   | { kind: "query"; id: string; sql: string; params: unknown[]; scope: "session" | "statement" };
 
+// oxlint-disable-next-line typescript/consistent-type-definitions -- Preserve the public protocol type alias and its structural assignability.
 export type Described = { params: { oid: number }[]; columns: { name: string; oid: number; table: number; attnum: number }[] };
 /** MySQL's prepare metadata: the protocol type code, the flags (bit 1 is NOT NULL), the charset (63 is binary), the display length and the table the column is one of (empty for an expression). */
+// oxlint-disable-next-line typescript/consistent-type-definitions -- Preserve the public protocol type alias and its structural assignability.
 export type MysqlDescribed = { kind: "mysql"; columns: { name: string; type: number; flags: number; charset: number; length: number; org_table: string; org_name: string }[]; params: { type: number; flags: number; charset: number }[] };
 /** A DuckDB logical type as the upstream engine reads it (engine/duckdb/src/api.rs): its id, its text, and what the id says more of. */
+// oxlint-disable-next-line typescript/consistent-type-definitions -- Preserve the public protocol type alias and its structural assignability.
 export type DuckdbType = { id: string; text: string; alias?: string; width?: number; scale?: number; child?: DuckdbType; size?: number; fields?: { name: string; type: DuckdbType }[]; key?: DuckdbType; value?: DuckdbType; values?: string[] };
 /** What DuckDB's prepared statement reports: its statement type, each parameter's type (null where DuckDB cannot tell it), each result column's name and type. */
+// oxlint-disable-next-line typescript/consistent-type-definitions -- Preserve the public protocol type alias and its structural assignability.
 export type DuckdbDescribed = { kind: "duckdb"; statement: string; params: { name: string; type: DuckdbType | null }[]; columns: { name: string; type: DuckdbType }[] };
+// oxlint-disable-next-line typescript/consistent-type-definitions -- Preserve the public protocol type alias and its structural assignability.
 export type DbError = { message: string; code?: string; position?: number };
 export type Answer =
   | { describe: { params: number[]; columns: Described["columns"] } }
@@ -66,8 +76,10 @@ export type Answer =
 /** What the host does for the engine: describe a statement, run a catalog query. */
 export interface EngineIo {
   /** Postgres: Parse/Describe. MySQL: a server prepare. DuckDB: a prepared statement. SQLite needs none: the engine prepares inside its own SQLite. */
+  // oxlint-disable-next-line typescript/method-signature-style -- Preserve the public host adapter method type and its existing variance.
   describe(sql: string): Promise<Described | MysqlDescribed | DuckdbDescribed>;
   /** Rows as arrays of values, in column order. */
+  // oxlint-disable-next-line typescript/method-signature-style -- Preserve the public host adapter method type and its existing variance.
   query(sql: string, params: unknown[]): Promise<unknown[][]>;
 }
 
@@ -83,23 +95,57 @@ export type Response =
 /** An engine's request function: one JSON request in, its answer out. */
 export type EngineCall = (request: string) => string;
 
-const fulfil = async function fulfil(need: Need, io: EngineIo): Promise<Answer> {
-  try {
-    if (need.kind === "describe") {
-      const d = await io.describe(need.sql);
-      if ("kind" in d && d.kind === "duckdb") {return { describe: { statement: d.statement, params: d.params, columns: d.columns } };}
-      if ("kind" in d) {return { mysql: { columns: d.columns, params: d.params } };}
-      return { describe: { params: d.params.map((parameter) => parameter.oid), columns: d.columns } };
-    }
-    return { rows: await io.query(need.sql, need.params) };
-  } catch (error_) {
-    if (error_ instanceof Unreachable) {throw error_;}
-    const err = error_ as Error & { code?: string; position?: string | number };
-    const error: DbError = { message: err.message };
-    if (err.code) {error.code = err.code;}
-    if (!matchesUndefined(err.position)) {error.position = Number(err.position);}
-    return { error };
+const FIRST_ROUND = 0;
+const NEXT_ROUND = 1;
+const ROUND_LIMIT = 16;
+
+const described = (reply: Described | MysqlDescribed | DuckdbDescribed): Answer => {
+  if ("kind" in reply && reply.kind === "duckdb") {
+    // oxlint-disable-next-line eslint/sort-keys -- Keep the engine protocol's existing field order.
+    return { describe: { statement: reply.statement, params: reply.params, columns: reply.columns } };
   }
+  if ("kind" in reply) {return { mysql: { columns: reply.columns, params: reply.params } };}
+  // oxlint-disable-next-line eslint/sort-keys -- Keep the engine protocol's existing field order.
+  return { describe: { params: reply.params.map((parameter) => parameter.oid), columns: reply.columns } };
+};
+
+const databaseFailure = (failure: unknown): DbError => {
+  // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- Driver errors already supply these native diagnostic fields. Preserve their original coercions.
+  const driver = failure as Error & { code?: string; position?: string | number };
+  const error: DbError = { message: driver.message };
+  const hasCode = Boolean(driver.code);
+  if (hasCode) {
+    // oxlint-disable-next-line typescript/no-non-null-assertion -- The driver's successful code check supplies a string. Read property getters as before.
+    error.code = driver.code!;
+  }
+  if (!matchesUndefined(driver.position)) {error.position = Number(driver.position);}
+  return error;
+};
+
+const fulfil = async (need: Need, io: EngineIo): Promise<Answer> => {
+  try {
+    if (need.kind === "describe") {return described(await io.describe(need.sql));}
+    return { rows: await io.query(need.sql, need.params) };
+  } catch (error) {
+    if (error instanceof Unreachable) {throw error;}
+    return { error: databaseFailure(error) };
+  }
+};
+
+const unexpected = (reply: Response): Error =>
+  // oxlint-disable-next-line rules/require-tagged-error -- The synchronous and asynchronous engine calls expose a native protocol Error.
+  new Error(reply.status === "error" ? reply.message : `unexpected ${reply.status}`);
+
+interface RoundHost {
+  answers: Record<string, Answer>;
+  cache: AnswerCache;
+  io: EngineIo;
+}
+
+const supply = async ({ answers, cache, io }: RoundHost, needs: Need[]): Promise<void> => {
+  await Promise.all(needs.map(async (need) => {
+    answers[need.id] = await cache.get(need, async () => fulfil(need, io));
+  }));
 };
 
 /**
@@ -115,58 +161,49 @@ export class EngineCore {
   }
 
   public call(request: object): Response {
-    return JSON.parse(this.#call(JSON.stringify(request)));
+    const reply: unknown = JSON.parse(this.#call(JSON.stringify(request)));
+    // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- The engine serializes its published response union over this native boundary.
+    return reply as Response;
   }
 
-  /** A request whose answer may wait: each round of `analyze`. Here the call itself; a host whose engine answers over a channel sends it there. */
+  /**
+   * Send one request that may wait on a native host's channel.
+   * @param {object} request - One engine operation and its current answers.
+   * @returns {Promise<Response>} The engine's response.
+   */
+  // oxlint-disable-next-line typescript/require-await -- This host responds synchronously, but ask must turn a thrown engine error into a rejected Promise.
   protected async ask(request: object): Promise<Response> {
     return this.call(request);
   }
 
   public lex(sql: string, dialect: Dialect): Lexed {
-    const r = this.call({ op: "lex", sql, dialect });
-    if (r.status !== "lexed") {throw new Error(r.status === "error" ? r.message : `unexpected ${r.status}`);}
-    return r.lexed;
+    // oxlint-disable-next-line eslint/sort-keys -- Keep the existing request field order for native engine callers.
+    const reply = this.call({ op: "lex", sql, dialect });
+    if (reply.status !== "lexed") {throw unexpected(reply);}
+    return reply.lexed;
   }
 
-  /** Analyze one statement, fulfilling the engine's needs through `io` until it answers. */
+  /**
+   * Analyze one statement and replay the engine's requests to the host.
+   * @param {string} sql - The statement to analyze.
+   * @param {Dialect} dialect - The database dialect.
+   * @param {EngineIo} io - The connection used to answer engine requests.
+   * @param {AnswerCache} cache - The answers that can be reused across rounds.
+   * @returns {Promise<Analysis>} The completed statement analysis.
+   */
+  // oxlint-disable-next-line eslint/max-params -- Keep the public analysis signature used by external engine hosts.
   public async analyze(sql: string, dialect: Dialect, io: EngineIo, cache = new AnswerCache()): Promise<Analysis> {
-    const answers: Record<string, Answer> = {};
-    for (let round = 0; round < 16; round++) {
-      const r = await this.ask({ op: "analyze", sql, dialect, answers });
-      if (r.status === "analysis") {return r.analysis;}
-      if (r.status !== "need") {throw new Error(r.status === "error" ? r.message : `unexpected ${r.status}`);}
-      await Promise.all(r.needs.map(async (need) => { answers[need.id] = await cache.get(need, () => fulfil(need, io)); }));
+    const state: RoundHost & { round: number } = { answers: {}, cache, io, round: FIRST_ROUND };
+    while (state.round < ROUND_LIMIT) {
+      // oxlint-disable-next-line eslint/no-await-in-loop, eslint/sort-keys -- Rounds depend on earlier answers. Keep the native request order.
+      const reply = await this.ask({ op: "analyze", sql, dialect, answers: state.answers });
+      if (reply.status === "analysis") {return reply.analysis;}
+      if (reply.status !== "need") {throw unexpected(reply);}
+      // oxlint-disable-next-line eslint/no-await-in-loop -- The next engine call requires all of this round's answers.
+      await supply(state, reply.needs);
+      state.round += NEXT_ROUND;
     }
+    // oxlint-disable-next-line rules/require-tagged-error -- Keep the replay loop's native protocol error after exhausting the round limit.
     throw new Error("the analysis engine did not converge");
-  }
-}
-
-/**
- * Answers the host may reuse. A session answer is about the database as a whole (which
- * operators return sets, which built-ins are shadowed); a statement answer is about a
- * statement's relations and types. Both go stale when the schema changes, so both expire:
- * a migration shows up within seconds, and a transform of the same text a moment later
- * costs no round trip.
- */
-export class AnswerCache {
-  #entries = new Map<string, { at: number; answer: Answer }>();
-  #ttl: { session: number; statement: number };
-  public constructor(ttl = { session: 60_000, statement: 5000 }) {
-    this.#ttl = ttl;
-  }
-
-  public async get(need: Need, fetch: () => Promise<Answer>): Promise<Answer> {
-    const ttl = need.kind === "query" && need.scope === "session" ? this.#ttl.session : this.#ttl.statement;
-    const hit = this.#entries.get(need.id);
-    if (hit && Date.now() - hit.at < ttl) {return hit.answer;}
-    const answer = await fetch();
-    // A failure is not knowledge: the next transform asks again.
-    if (!("error" in answer)) {this.#entries.set(need.id, { at: Date.now(), answer });}
-    return answer;
-  }
-
-  public clear(): void {
-    this.#entries.clear();
   }
 }
