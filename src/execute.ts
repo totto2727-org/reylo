@@ -339,6 +339,18 @@ const checksFor = function checksFor(query: QueryModule, name: string): Checks {
   throw new ParameterError(`Parameter "${name}" is a typed JSON, structured or cast parameter, which the run time checks with Reylo's checks; a query defined by hand passes them: defineQuery({ …, checks }) with checks from "@totto2727/reylo".`);
 };
 
+const FIRST_ARRAY_INDEX = 0;
+const ARRAY_INDEX_STEP = 1;
+
+const indexedElements = function* (array: Readonly<unknown[]>): Generator<[number, unknown]> {
+  const cursor = { index: FIRST_ARRAY_INDEX };
+  // Read the live length and each indexed value, including holes and inherited properties.
+  while (cursor.index < array.length) {
+    yield [cursor.index, array[cursor.index]];
+    cursor.index += ARRAY_INDEX_STEP;
+  }
+};
+
 /**
  * Where an array, or an array inside it (a multidimensional one), holds null or undefined: `[2]`, `[1][0]`.
  *
@@ -347,15 +359,13 @@ const checksFor = function checksFor(query: QueryModule, name: string): Checks {
  * @returns {string | undefined} The first null or undefined element's index path, or undefined.
  */
 const nullElement = function nullElement(array: Readonly<unknown[]>, path = ""): string | undefined {
-  for (let arrayIndex = 0; arrayIndex < array.length; arrayIndex++) {
-    const element = array[arrayIndex];
-    if (matchesNullish(element)) {return `${path}[${arrayIndex}]`;}
-    if (Array.isArray(element)) {
-      const inner = nullElement(element, `${path}[${arrayIndex}]`);
-      if (!matchesUndefined(inner)) {return inner;}
-    }
-  }
-  return undefined;
+  return Iterator.from(indexedElements(array))
+    .map(([index, element]): string | undefined => {
+      const location = `${path}[${index}]`;
+      if (matchesNullish(element)) {return location;}
+      return Array.isArray(element) ? nullElement(element, location) : undefined;
+    })
+    .find((candidate) => matchesString(candidate));
 };
 
 /**
@@ -589,6 +599,8 @@ const dateText = function dateText(date: Date): string {
   return `${yearText}-${calendarDay}T${time}${zone}${beforeEra ? " BC" : ""}`;
 };
 
+const postgresScalarText = (element: unknown): string => hasObjectType(element) ? JSON.stringify(element) : String(element);
+
 /**
  * A Postgres array literal, written as pg writes one (`arrayString` in pg/lib/utils.js): a nested
  * array in braces, null and undefined as NULL, binary data as `\\x` and its hex, and every other
@@ -601,16 +613,18 @@ const dateText = function dateText(date: Date): string {
  * @returns {string} A Postgres array literal with the elements escaped.
  */
 export function arrayLiteral(array: Readonly<unknown[]>, delim = ","): string {
-  let out = "{";
-  for (let arrayIndex = 0; arrayIndex < array.length; arrayIndex++) {
-    const element = array[arrayIndex];
-    if (arrayIndex) {out += delim;}
-    if (matchesNullish(element)) {out += "NULL";}
-    else if (Array.isArray(element)) {out += arrayLiteral(element, delim);}
-    else if (ArrayBuffer.isView(element)) {out += `\\${  byteaHex(new Uint8Array(element.buffer, element.byteOffset, element.byteLength))}`;}
-    else {out += `"${(element instanceof Date ? dateText(element) : (hasObjectType(element) ? JSON.stringify(element) : String(element))).replaceAll(/[\\"]/gu, String.raw`\$&`)}"`;}
-  }
-  return `${out  }}`;
+  const text = (element: unknown): string => {
+    if (matchesNullish(element)) {return "NULL";}
+    if (Array.isArray(element)) {return arrayLiteral(element, delim);}
+    if (ArrayBuffer.isView(element)) {
+      return `\\${byteaHex(new Uint8Array(element.buffer, element.byteOffset, element.byteLength))}`;
+    }
+    const scalar = element instanceof Date ? dateText(element) : postgresScalarText(element);
+    return `"${scalar.replaceAll(/[\\"]/gu, String.raw`\$&`)}"`;
+  };
+  const items = Iterator.from(indexedElements(array))
+    .reduce((out, [index, element]) => (index ? out + delim : out) + text(element), "{");
+  return `${items}}`;
 }
 
 // A value as Slonik's sql tag takes it, which is a string, a number, a boolean, a BigInt or null:
@@ -641,8 +655,7 @@ const postgresText = function postgresText(query: QueryModule, name: string, par
   if (parameterValue instanceof Uint8Array) {return byteaHex(parameterValue);}
   if (matchesBoolean(parameterValue)) {return parameterValue ? "t" : "f";}
   if (parameterValue instanceof Date) {return dateText(parameterValue);}
-  if (hasObjectType(parameterValue)) {return JSON.stringify(parameterValue);}
-  return String(parameterValue);
+  return postgresScalarText(parameterValue);
 };
 
 const MISSING_PARAMETER = -1;
