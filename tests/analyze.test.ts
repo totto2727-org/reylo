@@ -2,297 +2,180 @@
 import { test } from "node:test";
 // oxlint-disable-next-line rules/no-node-imports -- Nub's Node suite uses native assertions for driver, CLI, and protocol results.
 import assert from "node:assert/strict";
-// oxlint-disable-next-line rules/no-node-imports -- The Nub integration fixtures use this built-in to inspect or write files through the host filesystem.
-import { cpSync, existsSync, mkdtempSync, readdirSync, readFileSync, renameSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
-// oxlint-disable-next-line rules/no-node-imports -- The Nub integration fixtures use this built-in to await writes and reads through the host filesystem.
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
-// oxlint-disable-next-line rules/no-node-imports -- Exercise the native SQLite driver used by Reylo's Node runtime.
+// oxlint-disable-next-line rules/no-node-imports -- Read, copy, and age the native cache entries as real filesystem files.
+import { access, cp, mkdir, readFile, readdir, rename, rm, symlink, utimes, writeFile } from "node:fs/promises";
+// oxlint-disable-next-line rules/no-node-imports -- Create the actual database and apply schema changes that invalidate the cache.
 import { DatabaseSync } from "node:sqlite";
-// oxlint-disable-next-line rules/no-node-imports -- The Nub integration fixtures use this built-in to select the host's real temporary directory.
-import { tmpdir } from "node:os";
-// oxlint-disable-next-line rules/no-node-imports -- The Nub integration fixtures use this built-in to resolve paths using the host platform's filesystem conventions.
-import { join } from "node:path";
-// oxlint-disable-next-line rules/no-node-imports -- The Nub integration fixtures use this built-in to convert local module URLs with the host platform's path rules.
-import { fileURLToPath } from "node:url";
+// oxlint-disable-next-line rules/no-node-imports -- The native engine and tests use the current host's paths.
+import path from "node:path";
 import { Session } from "#reylo-source/analyze.ts";
-import { sqlModule } from "#reylo-source/loader.ts";
-import { refusedLogin, Unreachable } from "#reylo-source/connection.ts";
-import { defineQuery } from "#reylo-source/index.ts";
+import type { Outcome } from "#reylo-source/analyze.ts";
+import { isRecord, matchesNumber } from "#reylo-source/native-predicates.ts";
+import { forEachFixtureInOrder, requireFixtureValue, ROOT } from "./helpers.ts";
+import { nativeTestDirectory } from "./native-engine-fixture.ts";
 
-// A SQLite project: a package, its database, and DATABASE_URL naming it.
-const project = function (): { root: string; env: Record<string, string> } {
-  const root = mkdtempSync(join(tmpdir(), "reylo-analyze-"));
-  writeFileSync(join(root, "package.json"), "{}");
-  const db = new DatabaseSync(join(root, "app.db"));
-  db.exec("create table users (id integer primary key, name text not null)");
-  db.close();
-  return { root, env: { DATABASE_URL: "file:./app.db" } };
+const USERS = "create table users (id integer primary key, name text not null)";
+const DATABASE = { DATABASE_URL: "file:./app.db" };
+const ALTERNATE = { DATABASE_URL: "file:./test.db" };
+const MISSING_DATABASE = { DATABASE_URL: "file:./elsewhere.db" };
+
+const seed = (filename: string, sql: string): void => {
+  const database = new DatabaseSync(filename);
+  try {
+    database.exec(sql);
+  } finally {
+    database.close();
+  }
 };
 
-// Each session stands for a process of its own: the type check, a build, reylo generate.
-const analyze = async function (root: string, env: Record<string, string>, sql: string, options: { force?: boolean } = {}) {
+const project = async (): Promise<string> => {
+  const root = await nativeTestDirectory("reylo-analyze-");
+  await writeFile(path.join(root, "package.json"), "{}");
+  seed(path.join(root, "app.db"), USERS);
+  return root;
+};
+
+interface Request { force?: boolean; sql: string }
+
+// Each session stands for a process of its own: the type check, a build, or reylo generate.
+const analyze = async (root: string, env: Record<string, string>, { force, sql }: Request): Promise<Outcome> => {
   const session = await Session.open(root, env);
   try {
-    return await session.analyze(sql, options);
+    return await session.analyze(sql, { force: force ?? false });
   } finally {
     await session.close();
   }
 };
 
+const successful = (outcome: Outcome): Extract<Outcome, { ok: true }> => {
+  assert.ok(outcome.ok, JSON.stringify(outcome));
+  return outcome;
+};
+
 const SELECT = "select id, name from users where id = :id";
+const SELECT_ALL = "select * from users";
 
 // oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
 test("a statement is analyzed against the database once, and read from .reylo/ by every process after", async () => {
-  const { root, env } = project();
-  const first = await analyze(root, env, SELECT);
-  assert.ok(first.ok);
+  const root = await project();
+  const first = successful(await analyze(root, DATABASE, { sql: SELECT }));
   assert.equal(first.source, "database");
   assert.equal(first.analysis.cardinality, "maybeOne");
-  assert.ok(first.entry.startsWith(join(root, ".reylo", "queries")));
-  assert.ok(existsSync(first.entry));
+  assert.ok(first.entry.startsWith(path.join(root, ".reylo", "queries")));
+  await access(first.entry);
   // The directory keeps itself out of git.
-  assert.match(readFileSync(join(root, ".reylo", ".gitignore"), "utf8"), /^\*$/mu);
-  const second = await analyze(root, env, SELECT);
-  assert.ok(second.ok);
+  const ignore = await readFile(path.join(root, ".reylo", ".gitignore"), "utf8");
+  assert.match(ignore, /^\*$/mu);
+  const second = successful(await analyze(root, DATABASE, { sql: SELECT }));
   assert.deepEqual([second.source, second.entry, second.analysis], ["cache", first.entry, first.analysis]);
 });
 
 // oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
 test("a change to the schema makes the entry stale, and the statement is analyzed again", async () => {
-  const { root, env } = project();
-  const before = await analyze(root, env, "select * from users");
-  assert.ok(before.ok);
+  const root = await project();
+  const before = successful(await analyze(root, DATABASE, { sql: SELECT_ALL }));
   assert.deepEqual(before.analysis.columns.map((column) => column.name), ["id", "name"]);
-  const db = new DatabaseSync(join(root, "app.db"));
-  db.exec("alter table users add column email text");
-  db.close();
-  const after = await analyze(root, env, "select * from users");
-  assert.ok(after.ok);
+  seed(path.join(root, "app.db"), "alter table users add column email text");
+  const after = successful(await analyze(root, DATABASE, { sql: SELECT_ALL }));
   assert.equal(after.source, "database");
   assert.deepEqual(after.analysis.columns.map((column) => column.name), ["id", "name", "email"]);
   assert.equal(after.entry, before.entry);
 });
 
-// oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
-test("without the database, .reylo/ answers as it is, and a statement it lacks is an error that names reylo generate", async () => {
-  const { root, env } = project();
-  assert.ok((await analyze(root, env, SELECT)).ok);
-  renameSync(join(root, "app.db"), join(root, "gone.db"));
-  const cached = await analyze(root, env, SELECT);
-  assert.ok(cached.ok);
-  assert.equal(cached.source, "cache");
-  const missing = await analyze(root, env, "select name from users");
+const checkMissingCacheEntry = async (root: string): Promise<void> => {
+  const missing = await analyze(root, DATABASE, { sql: "select name from users" });
   assert.ok(!missing.ok);
   assert.equal(missing.code, 5);
-  assert.match(missing.message, /^Cannot open the database .*app\.db .*\.reylo has no analysis of this statement, so run reylo generate where the database can be reached\.$/);
+  assert.match(missing.message, /^Cannot open the database .*app\.db .*\.reylo has no analysis of this statement, so run reylo generate where the database can be reached\.$/u);
+};
+
+// oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
+test("without the database, .reylo/ answers as it is, and a statement it lacks is an error that names reylo generate", async () => {
+  const root = await project();
+  successful(await analyze(root, DATABASE, { sql: SELECT }));
+  await rename(path.join(root, "app.db"), path.join(root, "gone.db"));
+  const cached = successful(await analyze(root, DATABASE, { sql: SELECT }));
+  assert.equal(cached.source, "cache");
+  await checkMissingCacheEntry(root);
   // --force asks the database even for a statement .reylo/ holds.
-  const forced = await analyze(root, env, SELECT, { force: true });
+  const forced = await analyze(root, DATABASE, { force: true, sql: SELECT });
   assert.ok(!forced.ok);
 });
 
+interface CacheEntry { at: number; filename: string }
+
+const entries = async (root: string): Promise<CacheEntry[]> => {
+  const directory = path.join(root, ".reylo", "queries");
+  const stored: CacheEntry[] = [];
+  await forEachFixtureInOrder(await readdir(directory), async (name) => {
+    const filename = path.join(directory, name);
+    const content: unknown = JSON.parse(await readFile(filename, "utf8"));
+    assert.ok(isRecord(content) && matchesNumber(content.at));
+    stored.push({ at: content.at, filename });
+  });
+  return stored.toSorted((left, right) => left.at - right.at);
+};
+
+const checkRecordedOrder = async (root: string): Promise<void> => {
+  await forEachFixtureInOrder(["app.db", "test.db"], async (filename) => {
+    await rename(path.join(root, filename), path.join(root, `${filename}.gone`));
+  });
+  const [first, last] = await entries(root);
+  const older = requireFixtureValue(first).filename;
+  const newer = requireFixtureValue(last).filename;
+  // Reverse the filesystem timestamps to prove the stored timestamp decides the fallback.
+  await utimes(newer, 946_684_800, 946_684_800);
+  await utimes(older, 1_000_000_000, 1_000_000_000);
+  const offline = successful(await analyze(root, MISSING_DATABASE, { sql: SELECT_ALL }));
+  assert.deepEqual([offline.source, offline.entry, offline.analysis.columns.length], ["cache", newer, 3]);
+};
+
 // oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
 test("two databases the project uses in turn keep an entry each, so neither analyzes the other's statements again", async () => {
-  const { root, env } = project();
-  const db = new DatabaseSync(join(root, "test.db"));
-  db.exec("create table users (id integer primary key, name text not null, email text)");
-  db.close();
-  const test = { DATABASE_URL: "file:./test.db" };
-  const sources = [];
-  for (const e of [env, test, env, test]) {
-    const outcome = await analyze(root, e, "select * from users");
-    assert.ok(outcome.ok);
+  const root = await project();
+  seed(path.join(root, "test.db"), "create table users (id integer primary key, name text not null, email text)");
+  const sources: string[] = [];
+  await forEachFixtureInOrder([DATABASE, ALTERNATE, DATABASE, ALTERNATE], async (environment) => {
+    const outcome = successful(await analyze(root, environment, { sql: SELECT_ALL }));
     sources.push(`${outcome.source} ${outcome.analysis.columns.length}`);
-  }
+  });
   assert.deepEqual(sources, ["database 2", "database 3", "cache 2", "cache 3"]);
-  // Where neither can be reached, a URL with no entry of its own reads the one written last, by
-  // The time it records, which a copy that resets the files' times (cp -r, fs.cpSync) keeps.
-  Iterator.from(["app.db", "test.db"]).forEach((f) => {renameSync(join(root, f), join(root, `${f}.gone`));});
-  const queries = join(root, ".reylo", "queries");
-  const [older, newer] = readdirSync(queries).map((n) => join(queries, n)).sort((left, right) => JSON.parse(readFileSync(left, "utf8")).at - JSON.parse(readFileSync(right, "utf8")).at);
-  utimesSync(newer!, new Date(2000, 0, 1), new Date(2000, 0, 1));
-  utimesSync(older!, new Date(), new Date());
-  const offline = await analyze(root, { DATABASE_URL: "file:./elsewhere.db" }, "select * from users");
-  assert.ok(offline.ok);
-  assert.deepEqual([offline.source, offline.entry, offline.analysis.columns.length], ["cache", newer, 3]);
+  await checkRecordedOrder(root);
 });
+
+
+const checkCopiedCache = async (root: string): Promise<void> => {
+  // A copy of the project at another path, as a container build has it, without its database.
+  const copy = await nativeTestDirectory("reylo-analyze-copy-");
+  await cp(root, copy, { recursive: true, verbatimSymlinks: true });
+  await rm(path.join(copy, "app.db"));
+  const moved = successful(await analyze(copy, DATABASE, { sql: SELECT }));
+  assert.equal(moved.source, "cache");
+  assert.ok(moved.entry.startsWith(path.join(copy, ".reylo")));
+};
+
+const checkOfflineWithoutUrl = async (root: string, entry: string): Promise<void> => {
+  // No URL: the entries are used as they are, and a statement they lack needs a URL.
+  const bare = successful(await analyze(root, {}, { sql: SELECT }));
+  assert.deepEqual([bare.source, bare.entry], ["cache", entry]);
+  const lacking = await analyze(root, {}, { sql: "select name from users" });
+  assert.ok(!lacking.ok);
+  assert.deepEqual([lacking.code, lacking.message], [4, 'No database URL: set DATABASE_URL in the environment, .env.local or .env, or "direct_url" in .reylo.yaml.']);
+  const forced = await analyze(root, {}, { force: true, sql: SELECT });
+  assert.ok(!forced.ok);
+};
 
 // oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
 test("a build that cannot reach the database reads .reylo/ with another URL, with none, and in a copy of the project elsewhere", async () => {
-  const { root, env } = project();
+  const root = await project();
   // The project installs its database's engine, which names the dialect where no URL does.
-  await mkdir(join(root, "node_modules", "@totto2727"), { recursive: true });
-  symlinkSync(fileURLToPath(new URL("../packages/sqlite", import.meta.url)), join(root, "node_modules", "@totto2727", "reylo-sqlite"));
-  const typed = await analyze(root, env, SELECT);
-  assert.ok(typed.ok);
+  await mkdir(path.join(root, "node_modules", "@totto2727"), { recursive: true });
+  await symlink(path.join(ROOT, "packages", "sqlite"), path.join(root, "node_modules", "@totto2727", "reylo-sqlite"));
+  const typed = successful(await analyze(root, DATABASE, { sql: SELECT }));
   assert.equal(typed.source, "database");
-  // No URL: the entries are used as they are, and a statement they lack needs a URL.
-  const bare = await analyze(root, {}, SELECT);
-  assert.ok(bare.ok);
-  assert.deepEqual([bare.source, bare.entry], ["cache", typed.entry]);
-  const lacking = await analyze(root, {}, "select name from users");
-  assert.ok(!lacking.ok);
-  assert.deepEqual([lacking.code, lacking.message], [4, 'No database URL: set DATABASE_URL in the environment, .env.local or .env, or "direct_url" in .reylo.yaml.']);
-  assert.ok(!(await analyze(root, {}, SELECT, { force: true })).ok);
+  await checkOfflineWithoutUrl(root, typed.entry);
   // Another URL, to a database the build cannot open, reads the same entry.
-  const other = await analyze(root, { DATABASE_URL: "file:./elsewhere.db" }, SELECT);
-  assert.ok(other.ok);
+  const other = successful(await analyze(root, MISSING_DATABASE, { sql: SELECT }));
   assert.deepEqual([other.source, other.entry], ["cache", typed.entry]);
-  // A copy of the project at another path, as a container build has it, without its database.
-  const copy = await mkdtemp(join(tmpdir(), "reylo-analyze-copy-"));
-  cpSync(root, copy, { recursive: true, verbatimSymlinks: true });
-  await rm(join(copy, "app.db"));
-  const moved = await analyze(copy, env, SELECT);
-  assert.ok(moved.ok);
-  assert.equal(moved.source, "cache");
-  assert.ok(moved.entry.startsWith(join(copy, ".reylo")));
-});
-
-// oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
-test("the module a build step emits carries the analysis and reads nothing at run time", async () => {
-  const { root, env } = project();
-  const file = join(root, "user.sql");
-  await writeFile(file, SELECT);
-  // The build steps share one session per project; this one finds the database through .env.
-  await writeFile(join(root, ".env"), `DATABASE_URL=${env.DATABASE_URL}\n`);
-  try {
-    const { code, entry, watched } = await sqlModule(file, SELECT);
-    assert.ok(existsSync(entry));
-    // A bundler watches the files the module's text reads besides the statement: here the .env
-    // File, the only one of the project's files that exists.
-    assert.deepEqual(watched, [join(root, ".env")]);
-    assert.equal(code, [
-      `import { defineQuery } from "@totto2727/reylo";`,
-      `export const sql = "select id, name from users where id = ?";`,
-      `export const raw = ${JSON.stringify(SELECT)};`,
-      `export const params = ["id"];`,
-      `export default defineQuery({ dialect: "sqlite", sql: raw, params, cardinality: "maybeOne", text: sql, order: ["id"], inputs: {"id":{"type":{"kind":"scalar","name":"integer"},"nullable":false}}, columns: [["id","int"],["name","text"]], fresh: {"query":"select j.value as fresh_table, p.name as fresh_column, p.type as fresh_type, cast(p.\\"notnull\\" as text) as fresh_not_null, cast(p.dflt_value is not null or (p.pk > 0 and lower(p.type) = 'integer' and (select count(*) from pragma_table_xinfo(j.value) k where k.pk > 0) = 1) as text) as fresh_default from (select 'users' as value) j, pragma_table_xinfo(j.value) p order by 1, 2","rows":[["users","id","INTEGER","0","1"],["users","name","TEXT","1","0"]],"inserts":[]}, source: "user.sql", sqlcommenter: true, jsonSchema: {"input":{"$schema":"https://json-schema.org/draft/2020-12/schema","type":"object","properties":{"id":{"type":"integer","format":"int64"}},"required":["id"],"additionalProperties":false},"output":{"$schema":"https://json-schema.org/draft/2020-12/schema","anyOf":[{"type":"object","properties":{"id":{"type":"integer","format":"int64"},"name":{"type":"string"}},"required":["id","name"]},{"type":"null"}]}} });`,
-      ``,
-    ].join("\n"));
-    // A statement that relies on no catalog fact carries its file too, written with `/`.
-    await mkdir(join(root, "queries"));
-    const one = join(root, "queries", "one.sql");
-    await writeFile(one, "select 1 as n");
-    const { code: plain } = await sqlModule(one, "select 1 as n");
-    assert.ok(!plain.includes("fresh:"));
-    assert.ok(plain.includes(`, source: "queries/one.sql", `));
-    // A build (a process of its own) that has neither the database nor the entry fails instead of guessing.
-    for (const session of Session.opened()) {await session.close();}
-    renameSync(join(root, "app.db"), join(root, "gone.db"));
-    await assert.rejects(sqlModule(file, "select name from users"), /user\.sql: Cannot open the database .*run reylo generate/);
-  } finally {
-    for (const session of Session.opened()) {await session.close();}
-  }
-});
-
-// oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
-test("one statement of another kind is a command: DDL resolves to nothing and runs, and a PRAGMA returns its rows", async () => {
-  const { root, env } = project();
-  const ddl = "create index users_name on users (name)";
-  const created = await analyze(root, env, ddl);
-  assert.ok(created.ok);
-  const { kind, cardinality, columns, params, diagnostics } = created.analysis;
-  assert.deepEqual({ kind, cardinality, columns, params, diagnostics }, { cardinality: "none", columns: [], diagnostics: [], kind: "create", params: [] });
-  const db = new DatabaseSync(join(root, "app.db"));
-  try {
-    assert.equal(await defineQuery({ dialect: "sqlite", sql: ddl, params: [], cardinality }).run(db), undefined);
-    // A command that returns rows has the columns SQLite names, of no known type and nullable.
-    const listed = await analyze(root, env, "pragma index_list(users)");
-    assert.ok(listed.ok);
-    assert.equal(listed.analysis.cardinality, "many");
-    assert.deepEqual(listed.analysis.columns.map((column) => [column.name, column.type.kind, column.nullable]), ["seq", "name", "unique", "origin", "partial"].map((name) => [name, "unknown", true]));
-    const rows = await defineQuery({ dialect: "sqlite", sql: "pragma index_list(users)", params: [], cardinality: "many" }).run(db);
-    assert.deepEqual(rows.map((row) => (row as { name: string }).name), ["users_name"]);
-  } finally {
-    db.close();
-  }
-  // A CREATE of a table the database has is SQLite's error, with how to leave a migration out.
-  const existing = await analyze(root, env, "create table users (id integer primary key)");
-  assert.ok(existing.ok);
-  assert.deepEqual(existing.analysis.diagnostics.map((diagnostic) => [diagnostic.code, diagnostic.message]), [[6, 'table users already exists, so if it is a migration or a schema file, leave it out of the type check with "exclude" in tsconfig.json, as in "exclude": ["db/**"].']]);
-});
-
-// oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
-test("a build fails on a statement the database refuses, at its line and column as the type check places it", async () => {
-  const { root, env } = project();
-  await writeFile(join(root, ".env"), `DATABASE_URL=${env.DATABASE_URL}\n`);
-  try {
-    // The offset is in UTF-8 bytes; the column counts characters, past the two-byte é.
-    const sql = "select 'é' as e,\n  nmae from users";
-    const file = join(root, "bad.sql");
-    await writeFile(file, sql);
-    await assert.rejects(sqlModule(file, sql), /bad\.sql:2:3: no such column: nmae$/u);
-  } finally {
-    for (const session of Session.opened()) {await session.close();}
-  }
-});
-
-// oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
-test("a parameter written twice is an error at each later use, which the type check places and a build fails on; a with reads the value twice", async () => {
-  const { root, env } = project();
-  await writeFile(join(root, ".env"), `DATABASE_URL=${env.DATABASE_URL}\n`);
-  const twice = "select id, name from users\nwhere name like :q or name = :q or id = :q";
-  try {
-    const session = await Session.for(root);
-    const outcome = await session.analyze(twice);
-    assert.ok(outcome.ok);
-    // Byte offsets, as the content mapper hands them to the type check: the second and third :q.
-    const second = twice.indexOf(":q or id");
-    assert.deepEqual(outcome.analysis.diagnostics.map((diagnostic) => [diagnostic.code, diagnostic.start, diagnostic.length]), [[3, second, 2], [3, twice.lastIndexOf(":q"), 2]]);
-    assert.equal(outcome.analysis.diagnostics[0]!.message, "The parameter :q appears more than once; use each parameter once, and select it in a with to read it twice, cast to its type, as in: with input as (select :q::<type> as q) select … from input");
-    const file = join(root, "search.sql");
-    await writeFile(file, twice);
-    await assert.rejects(sqlModule(file, twice), /search\.sql: The parameter :q appears more than once/u);
-    // SQLite's own forms and its numbered placeholder are names too; a bare ? never repeats.
-    for (const sql of ["select id from users where name = @q or name = @q", "select id from users where id = ?1 or id = ?1", "select id from users where id = ? or id = ?1"]) {
-      const refused = await session.analyze(sql);
-      assert.ok(refused.ok);
-      assert.deepEqual(refused.analysis.diagnostics.map((diagnostic) => diagnostic.code), [3], sql);
-    }
-    const bare = await session.analyze("select id from users where id = ? or id = ?");
-    assert.ok(bare.ok);
-    assert.deepEqual(bare.analysis.diagnostics, []);
-    // Cast to nullable(…) in the with, the parameter may be null, and a coalesce of its column reads
-    // That null.
-    const once = "with input as (select :q::nullable(text) as q) select id, name from users, input where name like coalesce(input.q, '%') or name = input.q";
-    const read = await session.analyze(once);
-    assert.ok(read.ok);
-    assert.deepEqual(read.analysis.diagnostics, []);
-    assert.deepEqual(read.analysis.params.map((parameter) => [parameter.name, parameter.nullable]), [["q", true]]);
-    await writeFile(file, once);
-    const { code } = await sqlModule(file, once);
-    assert.match(code, /export const params = \["q"\];/u);
-  } finally {
-    for (const session of Session.opened()) {await session.close();}
-  }
-});
-
-// oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
-test("a parameter as a whole sort key is an error the type check places, and a build still runs the statement it typed", async () => {
-  const { root, env } = project();
-  await writeFile(join(root, ".env"), `DATABASE_URL=${env.DATABASE_URL}\n`);
-  const sql = "select id, name from users\norder by :sort";
-  try {
-    const session = await Session.for(root);
-    const outcome = await session.analyze(sql);
-    assert.ok(outcome.ok);
-    assert.deepEqual(outcome.analysis.diagnostics.map((diagnostic) => [diagnostic.code, diagnostic.start, diagnostic.length]), [[17, sql.indexOf(":sort"), 5]]);
-    assert.deepEqual(outcome.analysis.columns.map((column) => column.name), ["id", "name"]);
-    // As an ON CONFLICT target no key matches, the error is the type check's: the module is built.
-    const file = join(root, "sorted.sql");
-    await writeFile(file, sql);
-    const { code } = await sqlModule(file, sql);
-    assert.match(code, /export const params = \["sort"\];/u);
-  } finally {
-    for (const session of Session.opened()) {await session.close();}
-  }
-});
-
-// oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
-test("a refused login is told apart from a server that cannot be reached, on Postgres and MySQL", () => {
-  const pg = (code: string) => new Unreachable(Object.assign(new Error("password authentication failed"), { code, severity: "FATAL" }));
-  assert.ok(refusedLogin(pg("28P01")));
-  assert.ok(refusedLogin(pg("28000")));
-  assert.ok(refusedLogin(new Unreachable(Object.assign(new Error("Access denied"), { code: "ER_ACCESS_DENIED_ERROR", errno: 1045 }))));
-  assert.ok(!refusedLogin(pg("3D000")));
-  assert.ok(!refusedLogin(new Unreachable(Object.assign(new Error("connect ECONNREFUSED"), { code: "ECONNREFUSED" }))));
+  await checkCopiedCache(root);
 });

@@ -2,126 +2,119 @@
 import { test } from "node:test";
 // oxlint-disable-next-line rules/no-node-imports -- Nub's Node suite uses native assertions for driver, CLI, and protocol results.
 import assert from "node:assert/strict";
-// oxlint-disable-next-line rules/no-node-imports -- The Nub integration fixtures use this built-in to launch the real programs whose stdout, stderr and status are consumed.
-import { spawnSync } from "node:child_process";
-// oxlint-disable-next-line rules/no-node-imports -- The Nub integration fixtures use this built-in to inspect or write files through the host filesystem.
-import { writeFileSync } from "node:fs";
-// oxlint-disable-next-line rules/no-node-imports -- The Nub integration fixtures use this built-in to await writes and reads through the host filesystem.
-import { mkdtemp } from "node:fs/promises";
-// oxlint-disable-next-line rules/no-node-imports -- The Nub integration fixtures use this built-in to select the host's real temporary directory.
-import { tmpdir } from "node:os";
-// oxlint-disable-next-line rules/no-node-imports -- The Nub integration fixtures use this built-in to resolve paths using the host platform's filesystem conventions.
-import { join, resolve } from "node:path";
-// oxlint-disable-next-line rules/no-node-imports -- The Nub integration fixtures use this built-in to use native sockets and their close events.
-import { connect, createServer } from 'node:net';
-// oxlint-disable-next-line rules/no-node-imports -- The Nub integration fixtures use this built-in to type the host's native address and socket.
-import type { AddressInfo, Server } from 'node:net';
-import { engine, reason, Unreachable } from "#reylo-source/engine.ts";
+// oxlint-disable-next-line rules/no-node-imports -- Resolve certificate and Unix socket paths as the native engine does.
+import path from "node:path";
+import { reason, refusedLogin, Unreachable } from "#reylo-source/connection.ts";
 import { hostUrl } from "#reylo-source/host-url.ts";
+import { matchesUndefined } from "#reylo-source/native-predicates.ts";
+import { runChild } from "./helpers.ts";
 import { mysqlStandIn } from "./mysql-stand-in.ts";
+import { closeServer, knock, postgresSocket, socketFor } from "./unix-socket-fixture.ts";
 
-// Node listens on no Unix socket on Windows, where a path names a named pipe.
 const noUnixSockets = process.platform === "win32" && "Node opens no Unix socket on Windows";
 
-/** A Unix socket in a directory of its own that pipes each connection to the TCP server `url` names, as a server listening on its socket. */
-const socketFor = async function (url: string, name: string): Promise<{ dir: string; path: string; server: Server }> {
-  const { hostname, port } = new URL(url);
-  const dir = await mkdtemp(join(tmpdir(), "reylo-sock-"));
-  const path = join(dir, name);
-  const server = createServer((client) => {
-    const upstream = connect(Number(port), hostname);
-    client.on("error", () => upstream.destroy());
-    upstream.on("error", () => client.destroy());
-    client.pipe(upstream).pipe(client);
-  });
-  await new Promise<void>((done) => server.listen(path, done));
-  return { dir, path, server };
+const nativeError = (message: string): Error =>
+  // oxlint-disable-next-line rules/require-tagged-error -- Simulate the exact untagged native socket errors consumed by the connection reporter.
+  new Error(message);
+
+const aggregateRefusal = (): AggregateError => {
+  const errors = [nativeError("connect ECONNREFUSED ::1:1"), nativeError("connect ECONNREFUSED 127.0.0.1:1")];
+  // oxlint-disable-next-line rules/require-tagged-error, unicorn/error-message -- The native aggregate has an empty message, so reporting must use the causes.
+  return new AggregateError(errors, "");
 };
 
 // oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
 test("reason reads a refused connection, an AggregateError with no message of its own", () => {
-  const refused = Object.assign(new AggregateError([new Error("connect ECONNREFUSED ::1:1"), new Error("connect ECONNREFUSED 127.0.0.1:1")], ""), { code: "ECONNREFUSED" });
+  const refused = Object.assign(aggregateRefusal(), { code: "ECONNREFUSED" });
   assert.equal(reason(refused), "connect ECONNREFUSED ::1:1; connect ECONNREFUSED 127.0.0.1:1");
-  assert.equal(reason(Object.assign(new Error(""), { code: "ETIMEDOUT" })), "ETIMEDOUT");
+  const timeout = Object.assign(nativeError(""), { code: "ETIMEDOUT" });
+  assert.equal(reason(timeout), "ETIMEDOUT");
 });
 
 // oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
 test("the files a Postgres URL names are resolved from the working directory for the native engine", async () => {
   const { url } = await hostUrl("postgres://u@h/d?sslmode=verify-ca&sslrootcert=certs/root.pem&sslcert=%2Fabs%2Fc.pem&sslkey=k.pem&application_name=a+b");
   const params = new URLSearchParams(url.slice(url.indexOf("?") + 1));
-  assert.equal(params.get("sslrootcert"), resolve("certs/root.pem"));
-  assert.equal(params.get("sslcert"), resolve("/abs/c.pem"));
-  assert.equal(params.get("sslkey"), resolve("k.pem"));
+  assert.equal(params.get("sslrootcert"), path.resolve("certs/root.pem"));
+  assert.equal(params.get("sslcert"), path.resolve("/abs/c.pem"));
+  assert.equal(params.get("sslkey"), path.resolve("k.pem"));
   // Every other parameter is passed on as written.
   assert.match(url, /&application_name=a\+b$/u);
-  assert.equal((await hostUrl("postgres://u@h/d?sslrootcert=system")).url, "postgres://u@h/d?sslrootcert=system");
-  assert.equal((await hostUrl("mysql://root@h/d?ssl=true")).url, "mysql://root@h/d?ssl=true");
+  const system = await hostUrl("postgres://u@h/d?sslrootcert=system");
+  assert.equal(system.url, "postgres://u@h/d?sslrootcert=system");
+  const mysql = await hostUrl("mysql://root@h/d?ssl=true");
+  assert.equal(mysql.url, "mysql://root@h/d?ssl=true");
 });
 
 // oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
-test("the native engine works when Node's watch dependency reporting is enabled", () => {
+test("the native engine works when Node's watch dependency reporting is enabled", async () => {
   // Watch mode sets this variable. A native engine must not report modules to the parent.
   const script = `const { engine } = await import(${JSON.stringify(new URL("../src/engine.ts", import.meta.url).href)});
 const c = await (await engine("sqlite")).open(":memory:");
 console.log((await c.analyze("select 1 as x")).columns[0].name);
 await c.close();`;
-  const run = spawnSync(process.execPath, ["--input-type=module", "-e", script], { env: { ...process.env, WATCH_REPORT_DEPENDENCIES: "1" }, encoding: "utf8", timeout: 30_000 });
+  // oxlint-disable-next-line node/no-process-env -- Reproduce Node's actual watch child environment.
+  const env = { ...process.env, WATCH_REPORT_DEPENDENCIES: "1" };
+  const run = await runChild(process.execPath, ["--input-type=module", "-e", script], { cwd: process.cwd(), env, timeout: 30_000 });
   assert.equal(run.stderr, "");
   assert.equal(run.stdout.trim(), "x");
 });
 
-/** A connection to `url`'s host and port that writes `bytes`, and resolves with what it read once the bridge closed it. */
-const knock = async function (url: string, bytes: Buffer): Promise<Buffer> {
-  const { hostname, port } = new URL(url.replace(/^[a-z]+:/u, "http:"));
-  const socket = connect(Number(port), hostname);
-  const read: Buffer[] = [];
-  socket.on("data", (chunk: Buffer) => read.push(chunk));
-  socket.on("error", () => {});
-  socket.write(bytes);
-  await new Promise((done) => socket.on("close", done));
-  return Buffer.concat(read);
-};
+interface SocketObservation { connections: number }
 
-// oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
-test("the bridge to a Unix socket closes a connection that does not carry its token, before the server reads it", { skip: noUnixSockets }, async () => {
-  // Postgres: the socket is not even opened for a connection that does not open with the token.
-  const dir = await mkdtemp(join(tmpdir(), "reylo-sock-"));
-  let reached = 0;
-  const pgSocket = createServer((socket) => {
-    reached++;
-    socket.destroy();
-  });
-  await new Promise<void>((done) => pgSocket.listen(join(dir, ".s.PGSQL.5432"), done));
-  // MySQL: the server speaks first, so the stand-in is reached, but no login reaches it.
-  const standIn = await mysqlStandIn({ version: "8.4.6" });
-  const my = await socketFor(`mysql://root@127.0.0.1:${standIn.port}`, "mysql.sock");
+const assertPgRejection = async (dir: string, observed: SocketObservation): Promise<void> => {
+  const pg = await hostUrl(`postgres://postgres@/app?host=${dir}`);
   try {
-    const pg = await hostUrl(`postgres://postgres@/app?host=${dir}`);
-    assert.ok(pg.bridge && pg.url.startsWith("postgres://postgres@127.0.0.1:"), pg.url);
+    assert.ok(!matchesUndefined(pg.bridge) && pg.url.startsWith("postgres://postgres@127.0.0.1:"), pg.url);
     // A startup message for user postgres, as another local process would send it.
     const startup = Buffer.from("\0\0\0\u0024\0\u0003\0\0user\0postgres\0database\0app\0\0", "latin1");
-    assert.equal((await knock(pg.url, Buffer.concat([startup, startup]))).length, 0);
-    assert.equal(reached, 0);
+    const received = await knock(pg.url, Buffer.concat([startup, startup]));
+    assert.equal(received.length, 0);
+    assert.equal(observed.connections, 0);
+  } finally {
     pg.close();
-    const mysql = await hostUrl(`mysql://root@localhost/app?socketPath=${encodeURIComponent(my.path)}`);
-    assert.ok(mysql.bridge && mysql.url.startsWith("mysql://root@127.0.0.1:"), mysql.url);
+  }
+};
+
+const loginFixture = (): Buffer => {
+  const login = Buffer.alloc(36);
+  login.writeUIntLE(32, 0, 3);
+  login[3] = 1;
+  login.writeUInt32LE(0x82_00, 4);
+  return login;
+};
+
+const assertMySqlRejection = async (filename: string, standIn: Awaited<ReturnType<typeof mysqlStandIn>>): Promise<void> => {
+  const mysql = await hostUrl(`mysql://root@localhost/app?socketPath=${encodeURIComponent(filename)}`);
+  try {
+    assert.ok(!matchesUndefined(mysql.bridge) && mysql.url.startsWith("mysql://root@127.0.0.1:"), mysql.url);
     // A login with no connection attributes, after the greeting the bridge passes on.
-    const login = Buffer.alloc(36);
-    login.writeUIntLE(32, 0, 3);
-    login[3] = 1;
-    login.writeUInt32LE(0x2_00 | 0x80_00, 4);
+    const login = loginFixture();
     const greeting = await knock(mysql.url, login);
     assert.ok(greeting.length > 4 && greeting[4] === 10, "the greeting reached the client");
     // The greeting's capabilities offer no TLS, so the login that answers it is read in plain text.
     // After the protocol byte and the version, the connection id (4), the scramble's first part (8) and a filler byte.
     const capabilities = greeting.readUInt16LE(greeting.indexOf(0, 5) + 1 + 4 + 8 + 1);
+    // oxlint-disable-next-line eslint/no-bitwise -- Check the TLS capability bit in the real MySQL protocol greeting.
     assert.equal(capabilities & 0x08_00, 0);
     assert.deepEqual(standIn.tried, []);
-    mysql.close();
   } finally {
-    pgSocket.close();
-    my.server.close();
-    await standIn.close();
+    mysql.close();
+  }
+};
+
+// oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
+test("the bridge to a Unix socket closes a connection that does not carry its token, before the server reads it", { skip: noUnixSockets }, async () => {
+  const observed = { connections: 0 };
+  const postgres = await postgresSocket(() => {observed.connections += 1;});
+  // MySQL: the server speaks first, so the stand-in is reached, but no login reaches it.
+  const standIn = await mysqlStandIn({ version: "8.4.6" });
+  const my = await socketFor(`mysql://root@127.0.0.1:${standIn.port}`, "mysql.sock");
+  try {
+    await assertPgRejection(postgres.dir, observed);
+    await assertMySqlRejection(my.filename, standIn);
+  } finally {
+    await Promise.all([closeServer(postgres.server), closeServer(my.server), standIn.close()]);
   }
 });
 
@@ -129,12 +122,28 @@ test("the bridge to a Unix socket closes a connection that does not carry its to
 test("PGHOST names the socket's directory where the URL names no host, as libpq reads it", async () => {
   // As on a system with Unix sockets: the bridge itself is a TCP server, which every system opens.
   const bridged = await hostUrl("postgres://u@/d", { PGHOST: "/var/run/postgresql", PGPORT: "5433" }, "linux");
-  assert.ok(bridged.bridge);
+  assert.ok(!matchesUndefined(bridged.bridge));
   assert.match(bridged.url, /^postgres:\/\/u@127\.0\.0\.1:\d+\/d$/u);
   bridged.close();
   // A host in the URL, or a TCP host in PGHOST, is no socket.
-  assert.equal((await hostUrl("postgres://u@db/d", { PGHOST: "/var/run/postgresql" })).bridge, undefined);
-  assert.equal((await hostUrl("postgres://u@/d", { PGHOST: "db.internal" })).bridge, undefined);
+  const urlHost = await hostUrl("postgres://u@db/d", { PGHOST: "/var/run/postgresql" });
+  assert.equal(urlHost.bridge, undefined);
+  const environmentHost = await hostUrl("postgres://u@/d", { PGHOST: "db.internal" });
+  assert.equal(environmentHost.bridge, undefined);
   // Node opens no Unix socket on Windows, so the URL is refused with what to write instead.
   await assert.rejects(hostUrl("postgres://u@/d?host=/var/run/postgresql", {}, "win32"), (error: Error) => error instanceof Unreachable && /names the Unix socket \/var\/run\/postgresql\/\.s\.PGSQL\.5432, which Node cannot open on Windows: name the server's host and port/u.test(error.message));
+});
+
+const postgresFailure = (code: string): Unreachable =>
+  new Unreachable(Object.assign(nativeError("password authentication failed"), { code, severity: "FATAL" }));
+
+// oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
+test("a refused login is told apart from a server that cannot be reached, on Postgres and MySQL", () => {
+  assert.ok(refusedLogin(postgresFailure("28P01")));
+  assert.ok(refusedLogin(postgresFailure("28000")));
+  assert.ok(!refusedLogin(postgresFailure("3D000")));
+  const denied = Object.assign(nativeError("Access denied"), { code: "ER_ACCESS_DENIED_ERROR", errno: 1045 });
+  const refused = Object.assign(nativeError("connect ECONNREFUSED"), { code: "ECONNREFUSED" });
+  assert.ok(refusedLogin(new Unreachable(denied)));
+  assert.ok(!refusedLogin(new Unreachable(refused)));
 });
