@@ -54,6 +54,11 @@ const yes = (v: string) => v === "true" || v === "1";
 const describe = (r: Readonly<string[]>): string => `${r[2]}${yes(r[3]!) ? " not null" : ""}${yes(r[4]!) ? " with a default" : ""}`;
 const table = (name: string): string => name.replaceAll(/^"|"$/gu, "").replaceAll('"."', ".");
 
+const asciiUpper = (text: string): string => text.replaceAll(/[a-z]+/gu, (letters) => letters.toUpperCase());
+
+/** SQLite folds the case of ASCII letters alone. */
+const asciiLower = (text: string): string => text.replaceAll(/[A-Z]+/gu, (letters) => letters.toLowerCase());
+
 /** The catalog query's columns, as upstream engine/core/src/fresh.rs names them; the sixth on Postgres and SQLite. */
 const COLUMNS = ["fresh_table", "fresh_column", "fresh_type", "fresh_not_null", "fresh_default", "fresh_expr"] as const;
 
@@ -101,17 +106,37 @@ export const differences = function differences(fresh: Fresh, rows: Readonly<unk
   return out;
 };
 
-/** Where the parenthesis that opens `s` closes, its strings skipped. */
-const closes = function closes(s: string): number {
-  let depth = 0;
-  for (let i = 0; i < s.length; i++) {
-    if (s[i] === "'") {
-      i++;
-      while (i < s.length && !(s[i] === "'" && s[i + 1] !== "'")) {i += s[i] === "'" ? 2 : 1;}
-    } else if (s[i] === "(") {depth++;}
-    else if (s[i] === ")" && --depth === 0) {return i;}
+const TEXT_START = 0;
+const CODE_UNIT_WIDTH = 1;
+const DOUBLED_QUOTE_WIDTH = 2;
+const DEPTH_STEP = 1;
+const NO_NESTING = 0;
+const NO_CLOSING_PAREN = -1;
+
+const closingQuote = (text: string, opening: number): number => {
+  let offset = opening + CODE_UNIT_WIDTH;
+  while (offset < text.length) {
+    if (text[offset] === "'") {
+      if (text[offset + CODE_UNIT_WIDTH] !== "'") {return offset;}
+      offset += DOUBLED_QUOTE_WIDTH;
+    } else {offset += CODE_UNIT_WIDTH;}
   }
-  return -1;
+  return offset;
+};
+
+/** Where the opening parenthesis in the expression closes, with quoted strings skipped. */
+const closes = function closes(text: string): number {
+  let depth = NO_NESTING;
+  for (let offset = TEXT_START; offset < text.length; offset += CODE_UNIT_WIDTH) {
+    const character = text[offset];
+    if (character === "'") {offset = closingQuote(text, offset);}
+    else if (character === "(") {depth += DEPTH_STEP;}
+    else if (character === ")") {
+      depth -= DEPTH_STEP;
+      if (depth === NO_NESTING) {return offset;}
+    }
+  }
+  return NO_CLOSING_PAREN;
 };
 
 /**
@@ -124,33 +149,31 @@ const closes = function closes(s: string): number {
  * SQLite stores for it, as the upstream engine copies it (engine/core/src/structured.rs).
  */
 export function sqliteDefault(text: string): string {
-  const t = text.trim();
-  const lone = /^(?:"((?:[^"]|"")*)"|`((?:[^`]|``)*)`|\[([^\]]*)\]|([A-Za-z_\u0080-\uFFFF][\w$\u0080-\uFFFF]*))$/.exec(t);
+  const trimmed = text.trim();
+  const lone = /^(?:"((?:[^"]|"")*)"|`((?:[^`]|``)*)`|\[([^\]]*)\]|([A-Za-z_\u0080-\uFFFF][\w$\u0080-\uFFFF]*))$/.exec(trimmed);
   if (lone && !(!matchesUndefined(lone[4]) && /^(?:true|false|null|current_time|current_date|current_timestamp)$/i.test(lone[4]))) {
     const name = matchesUndefined(lone[1]) ? !matchesUndefined(lone[2]) ? lone[2].replace(/``/gu, "`") : (lone[3] ?? lone[4])! : lone[1].replace(/""/gu, '"');
     return `'${name.replaceAll('\'', "''")}'`;
   }
   let out = "";
-  for (let i = 0; i < t.length; ) {
-    if (t[i] === "'") {
-      let j = i + 1;
-      while (j < t.length && !(t[j] === "'" && t[j + 1] !== "'")) {j += t[j] === "'" ? 2 : 1;}
-      out += t.slice(i, j + 1);
-      i = j + 1;
+  let offset = TEXT_START;
+  while (offset < trimmed.length) {
+    const character = trimmed.charAt(offset);
+    if (character === "'") {
+      const next = closingQuote(trimmed, offset) + CODE_UNIT_WIDTH;
+      out += trimmed.slice(offset, next);
+      offset = next;
     } else {
-      if (!/\s/u.test(t[i]!)) {out += asciiUpper(t[i]!);}
-      i++;
+      if (!/\s/u.test(character)) {out += asciiUpper(character);}
+      offset += CODE_UNIT_WIDTH;
     }
   }
   // Parentheses around the whole text, as many as there are.
-  while (out.startsWith("(") && out.endsWith(")") && closes(out) === out.length - 1) {out = out.slice(1, -1);}
+  while (out.startsWith("(") && out.endsWith(")") && closes(out) === out.length - CODE_UNIT_WIDTH) {
+    out = out.slice(CODE_UNIT_WIDTH, -CODE_UNIT_WIDTH);
+  }
   return out;
 }
-
-const asciiUpper = (s: string): string => s.replaceAll(/[a-z]+/gu, (m) => m.toUpperCase());
-
-/** SQLite folds the case of ASCII letters alone. */
-const asciiLower = (s: string): string => s.replaceAll(/[A-Z]+/gu, (m) => m.toLowerCase());
 
 /** The error a call fails with when the schema changed under its query. */
 export const staleError = function staleError(source: string | undefined, lines: Readonly<string[]>): Error {
