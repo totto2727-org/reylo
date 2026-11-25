@@ -16,9 +16,12 @@ import { createServer, connect } from 'node:net';
 import type { AddressInfo, Socket } from 'node:net';
 import { Unreachable } from "./connection.ts";
 import { joinHost, prepareHostUrl, splitPair, withHost } from "./host-url-address.ts";
-import type { SocketAddress } from "./host-url-address.ts";
+import type { SocketAddress, SocketDialect } from "./host-url-address.ts";
+import { mysqlPacket as whole, MYSQL_LENGTH_BYTES, MYSQL_PACKET_HEADER_BYTES, takeAttribute, withoutTls } from "./host-url-mysql.ts";
 import { hostEnvironment } from "./project-files.ts";
 import { matchesUndefined } from "./native-predicates.ts";
+
+export { takeAttribute } from "./host-url-mysql.ts";
 
 /**
  * A URL as the engine opens it, the bridge's token where it goes through one, what to close with
@@ -33,253 +36,179 @@ const MYSQL_ATTRIBUTE = "reylo_bridge";
 
 /** How long a connection to the bridge may take to show its token. */
 const TOKEN_TIMEOUT = 10_000;
-const MYSQL_PACKET_HEADER_BYTES = 4;
-const MYSQL_LENGTH_BYTES = 3;
 const MYSQL_PACKET_SEQUENCE_OFFSET = MYSQL_LENGTH_BYTES;
 const FIRST_PACKET_BYTE = 0;
-const STRING_TERMINATOR = 0;
-const STRING_TERMINATOR_BYTES = 1;
-const MYSQL_PROTOCOL_V10 = 10;
-const MYSQL_GREETING_VERSION_START = 1;
-const MYSQL_THREAD_ID_BYTES = 4;
-const MYSQL_GREETING_SEED_BYTES = 8;
-const MYSQL_GREETING_FILLER_BYTES = 1;
-const MYSQL_LOWER_CAPABILITY_BYTES = 2;
-const MYSQL_HANDSHAKE_HEADER_BYTES = 32;
-const MYSQL_SSL_CAPABILITY = 0x08_00;
 const BRIDGE_TOKEN_BYTES = 24;
 const LOOPBACK = "127.0.0.1";
 const EPHEMERAL_PORT = 0;
 const EMPTY_BUFFER_BYTES = 0;
-const NOT_FOUND = -1;
 
-const MYSQL_INLINE_LENGTH_LIMIT = 0xFB;
-const MYSQL_LENGTH_TWO_BYTE_TAG = 0xFC;
-const MYSQL_LENGTH_THREE_BYTE_TAG = 0xFD;
-const MYSQL_LENGTH_EIGHT_BYTE_TAG = 0xFE;
-const MYSQL_LENGTH_TWO_BYTES = 2;
-const MYSQL_LENGTH_THREE_BYTES = 3;
-const MYSQL_LENGTH_EIGHT_BYTES = 8;
-const MYSQL_LENGTH_TWO_BYTE_LIMIT = 0x1_00_00;
-const MYSQL_LENGTH_THREE_BYTE_LIMIT = 0x1_00_00_00;
-const MYSQL_LENGTH_TAG_BYTES = 1;
-const MYSQL_AUTH_LENGTH_BYTES = 1;
-const MAX_BUFFER_INTEGER_BYTES = 6;
 
-/**
- * A TCP port on the loopback interface piped to the Unix socket at `path`, for the connections that
- * carry `token`: on Postgres the engine sends it before anything else; on MySQL, whose server speaks
- * first, the login carries it as a connection attribute, which the bridge reads in the client's
- * handshake and takes out of it before passing the handshake on, having taken TLS out of the
- * server's greeting so that the handshake is in plain text. None of its sockets keeps the process
- * alive.
- */
-async function openBridge(path: string, dialect: "postgres" | "mysql", token: string): Promise<{ port: number; close: () => void; failure: () => Error | undefined }> {
-  const open = new Set<Socket>();
-  let failure: Error | undefined;
-  const failed = (error: Error): void => {failure = new Error(`cannot open the socket ${path}: ${error.message}`);};
-  const track = (socket: Socket): void => {
-    open.add(socket);
-    socket.unref();
-    socket.on("close", () => open.delete(socket));
-  };
-  const server = createServer((client) => {
-    track(client);
-    client.on("error", () => client.destroy());
-    const refused = setTimeout(() => client.destroy(), TOKEN_TIMEOUT);
-    refused.unref();
-    client.on("close", () => {clearTimeout(refused);});
-    const pipe = (upstream: Socket, toServer: Buffer[]): void => {
-      clearTimeout(refused);
-      Iterator.from(toServer).forEach((chunk) => {upstream.write(chunk);});
-      client.pipe(upstream).pipe(client);
-    };
-    if (dialect === "postgres") {gatePostgres(client, token, () => openUpstream(path, client, track, failed), pipe);}
-    else {gateMysql(client, token, openUpstream(path, client, track, failed), pipe);}
-  });
-  await new Promise<void>((done, fail) => {
-    server.once("error", fail);
-    server.listen(EPHEMERAL_PORT, LOOPBACK, done);
-  });
-  server.unref();
-  return {
-    port: (server.address() as AddressInfo).port,
-    close: () => {
-      server.close();
-      Iterator.from(open).forEach((socket) => {socket.destroy();});
-    },
-    failure: () => failure,
-  };
+interface Admission<Upstream> {
+  pipe: (upstream: Socket, toServer: Buffer[]) => void;
+  token: string;
+  upstream: Upstream;
 }
 
-/** The connection to the socket for `client`, each closed with the other. */
-function openUpstream(path: string, client: Socket, track: (socket: Socket) => void, failed: (error: Error) => void): Socket {
-  const upstream = connect(path);
-  track(upstream);
-  // Only a socket that never opened is the bridge's failure: an error after it opened (a reset once
-  // The server refused the login) leaves the engine's own answer, which names the refusal.
-  let opened = false;
-  upstream.once("connect", () => (opened = true));
-  upstream.on("error", (error) => {
-    if (!opened) {failed(error);}
-    upstream.destroy();
-    client.destroy();
-  });
-  upstream.on("close", () => client.destroy());
-  client.on("close", () => upstream.destroy());
-  return upstream;
-}
-
-/** A Postgres connection admitted once its first bytes are the token: the socket is opened only then, and what followed the token goes to it first. */
-function gatePostgres(client: Socket, token: string, upstream: () => Socket, pipe: (upstream: Socket, toServer: Buffer[]) => void): void {
+// Postgres forwards only the data following a verified token and opens the upstream lazily.
+const gatePostgres = (client: Socket, { pipe, token, upstream }: Admission<() => Socket>): void => {
   const expected = Buffer.from(token);
-  let head = Buffer.alloc(EMPTY_BUFFER_BYTES);
-  const read = (chunk: Buffer): undefined => {
-    head = Buffer.concat([head, chunk]);
-    if (head.length < expected.length) {return;}
+  const received = { head: Buffer.alloc(EMPTY_BUFFER_BYTES) };
+  const read = (chunk: Buffer): void => {
+    received.head = Buffer.concat([received.head, chunk]);
+    if (received.head.length < expected.length) {return;}
     client.off("data", read);
     client.pause();
-    if (!timingSafeEqual(head.subarray(FIRST_PACKET_BYTE, expected.length), expected)) {return void client.destroy();}
-    pipe(upstream(), [head.subarray(expected.length)]);
+    if (!timingSafeEqual(received.head.subarray(FIRST_PACKET_BYTE, expected.length), expected)) {
+      client.destroy();
+      return;
+    }
+    pipe(upstream(), [received.head.subarray(expected.length)]);
     client.resume();
   };
   client.on("data", read);
+};
+
+interface LoginPacket {
+  payload: Buffer;
+  stream: Buffer;
 }
 
-/**
- * A MySQL connection admitted once its login carries the token. The server's greeting reaches the
- * client without TLS among its capabilities, so the login that answers it is in plain text; the
- * login is read whole, and passed on only where its connection attributes hold the token, without
- * it, so that the token is not among the session's attributes the server shows its accounts.
- */
-function gateMysql(client: Socket, token: string, upstream: Socket, pipe: (upstream: Socket, toServer: Buffer[]) => void): void {
-  let fromServer = Buffer.alloc(EMPTY_BUFFER_BYTES);
+const forwardLogin = (client: Socket, { payload, stream }: LoginPacket, { pipe, token, upstream }: Admission<Socket>): void => {
+  const taken = takeAttribute(payload, MYSQL_ATTRIBUTE);
+  if (taken?.value !== token) {
+    client.destroy();
+    return;
+  }
+  const header = Buffer.alloc(MYSQL_PACKET_HEADER_BYTES);
+  header.writeUIntLE(taken.login.length, FIRST_PACKET_BYTE, MYSQL_LENGTH_BYTES);
+  header[MYSQL_PACKET_SEQUENCE_OFFSET] = stream.readUInt8(MYSQL_PACKET_SEQUENCE_OFFSET);
+  upstream.resume();
+  pipe(upstream, [header, taken.login, stream.subarray(MYSQL_PACKET_HEADER_BYTES + payload.length)]);
+  client.resume();
+};
+
+const readLogin = (client: Socket, admission: Admission<Socket>): void => {
+  const received = { stream: Buffer.alloc(EMPTY_BUFFER_BYTES) };
+  const login = (chunk: Buffer): void => {
+    received.stream = Buffer.concat([received.stream, chunk]);
+    const answer = whole(received.stream);
+    if (matchesUndefined(answer)) {return;}
+    client.off("data", login);
+    client.pause();
+    forwardLogin(client, { payload: answer.payload, stream: received.stream }, admission);
+  };
+  client.on("data", login);
+};
+
+// MySQL sends the greeting first. The login is forwarded only after it passes the bridge's admission check.
+const gateMysql = (client: Socket, admission: Admission<Socket>): void => {
+  const { upstream } = admission;
+  const received = { stream: Buffer.alloc(EMPTY_BUFFER_BYTES) };
   const greeting = (chunk: Buffer): void => {
-    fromServer = Buffer.concat([fromServer, chunk]);
-    const packet = whole(fromServer);
-    if (!packet) {return;}
+    received.stream = Buffer.concat([received.stream, chunk]);
+    const packet = whole(received.stream);
+    if (matchesUndefined(packet)) {return;}
     upstream.off("data", greeting);
     upstream.pause();
     withoutTls(packet.payload);
-    client.write(fromServer);
-    let fromClient = Buffer.alloc(EMPTY_BUFFER_BYTES);
-    const login = (chunk: Buffer): undefined => {
-      fromClient = Buffer.concat([fromClient, chunk]);
-      const answer = whole(fromClient);
-      if (!answer) {return;}
-      client.off("data", login);
-      client.pause();
-      const taken = takeAttribute(answer.payload, MYSQL_ATTRIBUTE);
-      if (taken?.value !== token) {return void client.destroy();}
-      const header = Buffer.alloc(MYSQL_PACKET_HEADER_BYTES);
-      header.writeUIntLE(taken.login.length, FIRST_PACKET_BYTE, MYSQL_LENGTH_BYTES);
-      header[MYSQL_PACKET_SEQUENCE_OFFSET] = fromClient.readUInt8(MYSQL_PACKET_SEQUENCE_OFFSET);
-      upstream.resume();
-      pipe(upstream, [header, taken.login, fromClient.subarray(MYSQL_PACKET_HEADER_BYTES + answer.payload.length)]);
-      client.resume();
-    };
-    client.on("data", login);
+    client.write(received.stream);
+    readLogin(client, admission);
   };
   upstream.on("data", greeting);
-}
-
-/** The first whole packet of a MySQL stream, its payload in place, or undefined while it is still arriving. */
-function whole(stream: Buffer): { payload: Buffer } | undefined {
-  if (stream.length < MYSQL_PACKET_HEADER_BYTES) {return undefined;}
-  const length = stream.readUIntLE(FIRST_PACKET_BYTE, MYSQL_LENGTH_BYTES);
-  const packetEnd = MYSQL_PACKET_HEADER_BYTES + length;
-  return stream.length < packetEnd ? undefined : { payload: stream.subarray(MYSQL_PACKET_HEADER_BYTES, packetEnd) };
-}
-
-/** The greeting (HandshakeV10) with CLIENT_SSL cleared from its capabilities, in place. */
-function withoutTls(greeting: Buffer): void {
-  const versionEnd = greeting.indexOf(STRING_TERMINATOR, MYSQL_GREETING_VERSION_START);
-  const capabilityOffset = versionEnd + STRING_TERMINATOR_BYTES +
-    MYSQL_THREAD_ID_BYTES + MYSQL_GREETING_SEED_BYTES + MYSQL_GREETING_FILLER_BYTES;
-  if (greeting[FIRST_PACKET_BYTE] === MYSQL_PROTOCOL_V10 &&
-    capabilityOffset + MYSQL_LOWER_CAPABILITY_BYTES <= greeting.length) {
-    greeting.writeUInt16LE(greeting.readUInt16LE(capabilityOffset) & ~MYSQL_SSL_CAPABILITY, capabilityOffset);
-  }
-}
-
-/** A length-encoded integer, as MySQL's protocol writes one. */
-const lenenc = (value: number): Buffer => {
-  if (value < MYSQL_INLINE_LENGTH_LIMIT) {return Buffer.from([value]);}
-  const size = value < MYSQL_LENGTH_TWO_BYTE_LIMIT
-    ? MYSQL_LENGTH_TWO_BYTES
-    : (value < MYSQL_LENGTH_THREE_BYTE_LIMIT ? MYSQL_LENGTH_THREE_BYTES : MYSQL_LENGTH_EIGHT_BYTES);
-  const out = Buffer.alloc(MYSQL_LENGTH_TAG_BYTES + size);
-  out[FIRST_PACKET_BYTE] = size === MYSQL_LENGTH_TWO_BYTES
-    ? MYSQL_LENGTH_TWO_BYTE_TAG
-    : (size === MYSQL_LENGTH_THREE_BYTES ? MYSQL_LENGTH_THREE_BYTE_TAG : MYSQL_LENGTH_EIGHT_BYTE_TAG);
-  out.writeUIntLE(value, MYSQL_LENGTH_TAG_BYTES, Math.min(size, MAX_BUFFER_INTEGER_BYTES));
-  return out;
 };
 
-const lengthSizeForMarker = (marker: number): number =>
-  marker === MYSQL_LENGTH_TWO_BYTE_TAG
-    ? MYSQL_LENGTH_TWO_BYTES
-    : (marker === MYSQL_LENGTH_THREE_BYTE_TAG ? MYSQL_LENGTH_THREE_BYTES : MYSQL_LENGTH_EIGHT_BYTES);
-
-/**
- * A connection attribute of a login (HandshakeResponse41), and the login without it, its
- * attributes' length written again; undefined where the login carries no such attribute.
- */
-export function takeAttribute(login: Buffer, name: string): { value: string; login: Buffer } | undefined {
-  const CONNECT_WITH_DB = 0x8; const SECURE_CONNECTION = 0x80_00; const PLUGIN_AUTH = 0x8_00_00; const CONNECT_ATTRS = 0x10_00_00; const LENENC_AUTH = 0x20_00_00;
-  if (login.length < MYSQL_HANDSHAKE_HEADER_BYTES) {return undefined;}
-  const capabilities = login.readUInt32LE(FIRST_PACKET_BYTE);
-  if (capabilities & MYSQL_SSL_CAPABILITY || !(capabilities & CONNECT_ATTRS)) {return undefined;}
-  // Capabilities, the largest packet, the character set and 23 bytes of filler.
-  let at = MYSQL_HANDSHAKE_HEADER_BYTES;
-  const int = (): number => {
-    const first = login[at];
-    at += MYSQL_LENGTH_TAG_BYTES;
-    if (matchesUndefined(first)) {throw new RangeError("short");}
-    if (first < MYSQL_INLINE_LENGTH_LIMIT) {return first;}
-    const size = lengthSizeForMarker(first);
-    const value = login.readUIntLE(at, Math.min(size, MAX_BUFFER_INTEGER_BYTES));
-    at += size;
-    return value;
-  };
-  const bytes = (length: number): Buffer => {
-    if (at + length > login.length) {throw new RangeError("short");}
-    const value = login.subarray(at, at + length);
-    at += length;
-    return value;
-  };
-  const cstring = (): void => {
-    const end = login.indexOf(STRING_TERMINATOR, at);
-    if (end === NOT_FOUND) {throw new RangeError("unterminated");}
-    at = end + STRING_TERMINATOR_BYTES;
-  };
-  try {
-    cstring(); // The user
-    if (capabilities & LENENC_AUTH) {bytes(int());}
-    else if (capabilities & SECURE_CONNECTION) {bytes(bytes(MYSQL_AUTH_LENGTH_BYTES).readUInt8(FIRST_PACKET_BYTE));}
-    else {cstring();}
-    if (capabilities & CONNECT_WITH_DB) {cstring();}
-    if (capabilities & PLUGIN_AUTH) {cstring();}
-    const lengthAt = at;
-    const length = int();
-    const start = at;
-    const end = start + length;
-    while (at < end) {
-      const pairAt = at;
-      const key = bytes(int()).toString("utf8");
-      const value = bytes(int()).toString("utf8");
-      if (key !== name) {continue;}
-      const rest = Buffer.concat([login.subarray(start, pairAt), login.subarray(at, end)]);
-      return { value, login: Buffer.concat([login.subarray(FIRST_PACKET_BYTE, lengthAt), lenenc(rest.length), rest, login.subarray(end)]) };
-    }
-  } catch {}
-  return undefined;
+interface BridgePool {
+  failure?: Error;
+  sockets: Set<Socket>;
 }
 
-const directAddress = (url: string): HostUrl => {
+const trackSocket = (socket: Socket, pool: BridgePool): void => {
+  pool.sockets.add(socket);
+  socket.unref();
+  socket.on("close", () => {pool.sockets.delete(socket);});
+};
+
+const socketOpenFailure = (path: string, error: Error): Error =>
+  // oxlint-disable-next-line rules/require-tagged-error -- The host bridge reports its native socket-open diagnostic through the existing failure hook.
+  new Error(`cannot open the socket ${path}: ${error.message}`);
+
+const openUpstream = (path: string, client: Socket, pool: BridgePool): Socket => {
+  const upstream = connect(path);
+  trackSocket(upstream, pool);
+  // Once connected, a server rejection belongs to the engine's own diagnostic.
+  const status = { opened: false };
+  upstream.once("connect", () => {status.opened = true;});
+  upstream.on("error", (error) => {
+    if (!status.opened) {pool.failure = socketOpenFailure(path, error);}
+    upstream.destroy();
+    client.destroy();
+  });
+  upstream.on("close", () => {client.destroy();});
+  client.on("close", () => {upstream.destroy();});
+  return upstream;
+};
+
+const admissionTimer = (client: Socket): NodeJS.Timeout => {
+  const timer = setTimeout(() => {client.destroy();}, TOKEN_TIMEOUT);
+  timer.unref();
+  client.on("close", () => {clearTimeout(timer);});
+  return timer;
+};
+
+interface BridgeTarget {
+  dialect: SocketDialect;
+  path: string;
+  token: string;
+}
+
+const acceptClient = (client: Socket, { path, dialect, token }: BridgeTarget, pool: BridgePool): void => {
+  trackSocket(client, pool);
+  client.on("error", () => {client.destroy();});
+  const timer = admissionTimer(client);
+  const pipe = (upstream: Socket, toServer: Buffer[]): void => {
+    clearTimeout(timer);
+    Iterator.from(toServer).forEach((chunk) => {upstream.write(chunk);});
+    client.pipe(upstream).pipe(client);
+  };
+  const open = (): Socket => openUpstream(path, client, pool);
+  if (dialect === "postgres") {gatePostgres(client, { pipe, token, upstream: open });}
+  else {gateMysql(client, { pipe, token, upstream: open() });}
+};
+
+interface OpenBridge {
+  close: () => void;
+  failure: () => Error | undefined;
+  port: number;
+}
+
+// Only admitted engine connections are forwarded. The loopback listener and its sockets are unref'ed.
+const openBridge = async (path: string, dialect: SocketDialect, token: string): Promise<OpenBridge> => {
+  const pool: BridgePool = { sockets: new Set() };
+  const server = createServer((client) => {acceptClient(client, { dialect, path, token }, pool);});
+  // oxlint-disable-next-line promise/avoid-new -- Await the native server's first listen success or startup error.
+  await new Promise<void>((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(EPHEMERAL_PORT, LOOPBACK, resolve);
+  });
+  server.unref();
+  // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- A successfully listening TCP server has an IP address and port.
+  const { port } = server.address() as AddressInfo;
+  return {
+    close: () => {
+      server.close();
+      Iterator.from(pool.sockets).forEach((socket) => {socket.destroy();});
+    },
+    failure: () => pool.failure,
+    port,
+  };
+};
+
+const directAddress = (url: string): HostUrl =>
   // oxlint-disable-next-line eslint/sort-keys -- Keep the established URL resource field order.
-  return { url, close: () => { /* This address owns no socket bridge. */ } };
-};
+  ({ url, close: () => {
+    // This address owns no socket bridge.
+  } });
 
 const socketAddress = async ({ base, dialect, pairs, socket }: SocketAddress, platform: NodeJS.Platform): Promise<HostUrl> => {
   if (dialect === "postgres" && platform === "win32") {
