@@ -3,27 +3,22 @@
 // Is analyzed as the type check analyzes a file (never run), and answered with its Params, Returns
 // And diagnostics by line and column (src/play-result.ts). The database is the one the type check
 // Reads, and nothing else: a project that names none is told so, and pointed at reylo.dev/play.
-// oxlint-disable-next-line rules/no-node-imports -- This server-side entry point uses this built-in to launch the real programs whose stdout, stderr and status are consumed.
+// oxlint-disable-next-line rules/no-node-imports -- Open the local playground page through the platform's existing command.
 import { spawn } from "node:child_process";
-// oxlint-disable-next-line rules/no-node-imports -- This server-side entry point uses this built-in to inspect or write files through the host filesystem.
-import { existsSync, readFileSync, statSync } from "node:fs";
-// oxlint-disable-next-line rules/no-node-imports -- This server-side entry point uses this built-in to use the native HTTP server and its request lifecycle.
-import { createServer } from 'node:http';
-// oxlint-disable-next-line rules/no-node-imports -- This server-side entry point uses this built-in to type the host server's native request and response.
-import type { IncomingMessage, ServerResponse } from 'node:http';
-// oxlint-disable-next-line rules/no-node-imports -- This server-side entry point uses this built-in to use the host resolver for the installed driver or fixture package.
+// oxlint-disable-next-line rules/no-node-imports -- Find the built page in the installed or development package.
+import { existsSync } from "node:fs";
+// oxlint-disable-next-line rules/no-node-imports -- Run the playground through the native loopback HTTP server.
+import { createServer } from "node:http";
+// oxlint-disable-next-line rules/no-node-imports -- Resolve the published runtime from a project or the CLI's own directory.
 import { createRequire } from "node:module";
-// oxlint-disable-next-line rules/no-node-imports -- This server-side entry point uses this built-in to resolve paths using the host platform's filesystem conventions.
-import { dirname, extname, join, sep } from "node:path";
-// oxlint-disable-next-line rules/no-node-imports -- This server-side entry point uses this built-in to preserve the CLI's native terminal styling.
+// oxlint-disable-next-line rules/no-node-imports -- Read the runtime's built page using the host platform's paths.
+import path from "node:path";
+// oxlint-disable-next-line rules/no-node-imports -- Preserve the CLI's native terminal styling.
 import { styleText } from "node:util";
-import { Session } from "./analyze.ts";
-import type { Dialect } from "./engine.ts";
-import { catalog, CATALOG_QUERIES } from './play-catalog.ts';
-import type { Catalog } from './play-catalog.ts';
-import { playResult } from './play-result.ts';
-import type { PlayResult } from './play-result.ts';
-import { hasObjectType, matchesNull, matchesNumber, matchesString, matchesUndefined } from "./native-predicates.ts";
+import { isEmptyString, matchesNull, matchesString, matchesUndefined } from "./native-predicates.ts";
+import { openBackend } from "./play-backend.ts";
+import type { Backend } from "./play-backend.ts";
+import { handler } from "./play-http.ts";
 
 export const PLAY_USAGE = `Usage: reylo play [--port <n>] [--no-open]
 
@@ -37,322 +32,226 @@ It opens the page in the browser; --no-open leaves it closed, for a script or an
   POST /api/analyze  {"sql": "<sql>"}             the same
   GET  /api/schema                                the tables, their columns, functions and types`;
 
-/** What answers the page: the dialect, a line saying which database, the schema it shows, and each statement's analysis. */
-interface Backend {
-  dialect: Dialect;
-  label: string;
-  /** What the project file sets that Reylo does not read (`url` alone), said once, as `reylo generate` says it. */
-  notice?: string;
-  schema: string;
-  catalog: Catalog;
-  analyze(sql: string, width: number): Promise<PlayResult>;
-  close: () => Promise<void>;
-}
-
 const DEFAULT_PORT = 4983;
+const DEFAULT_PORT_ATTEMPTS = 20;
+const LOWEST_PORT = 0;
+const HIGHEST_PORT = 65_535;
+const FIRST_ARG = 0;
+const FIRST_ATTEMPT = 0;
+const NEXT = 1;
+const SUCCESS = 0;
+const ERROR = 1;
+const USAGE_ERROR = 2;
+const LOOPBACK = "127.0.0.1";
 
-const parseArgs = function parseArgs(args: string[]): { port?: number; open: boolean; help: boolean } | string {
-  const out: { port?: number; open: boolean; help: boolean } = { open: true, help: false };
-  for (let i = 0; i < args.length; i++) {
-    const a = args[i]!;
-    const [flag, inline] = a.startsWith("--") && a.includes("=") ? [a.slice(0, a.indexOf("=")), a.slice(a.indexOf("=") + 1)] : [a, undefined];
-    const value = (): string | undefined => inline ?? args[++i];
-    if (flag === "--help" || flag === "-h") {out.help = true;}
-    else if (flag === "--no-open") {out.open = false;}
-    else if (flag === "--port") {
-      const n = Number(value());
-      if (!Number.isInteger(n) || n < 0 || n > 65_535) {return `--port takes a port number`;}
-      out.port = n;
-    } else {return `unknown argument ${a}`;}
-  }
-  return out;
+interface CliOptions { help: boolean; open: boolean; port?: number }
+
+interface Flag { name: string; value: string | undefined }
+
+const parseFlag = (argument: string): Flag => {
+  const separator = argument.indexOf("=");
+  if (!argument.startsWith("--") || separator < FIRST_ARG) {return { name: argument, value: undefined };}
+  return { name: argument.slice(FIRST_ARG, separator), value: argument.slice(separator + NEXT) };
 };
 
-const openBrowser = function openBrowser(url: string): void {
-  const [command, args] = process.platform === "darwin" ? ["open", [url]] : (process.platform === "win32" ? ["cmd", ["/c", "start", "", url]] : ["xdg-open", [url]]);
-  spawn(command, args, { detached: true, stdio: "ignore" }).on("error", () => {}).unref();
+interface ArgCursor { index: number; values: string[] }
+
+const validPort = (value: string | undefined): number | undefined => {
+  const parsed = Number(value);
+  return Number.isInteger(parsed) && parsed >= LOWEST_PORT && parsed <= HIGHEST_PORT ? parsed : undefined;
 };
 
-export async function play(args: string[]): Promise<number> {
-  const options = parseArgs(args);
-  if (matchesString(options)) {
-    console.error(`reylo play: ${options}\n\n${PLAY_USAGE}`);
-    return 2;
-  }
-  if (options.help) {
-    console.log(PLAY_USAGE);
-    return 0;
-  }
-  let running: Playground;
-  try {
-    running = await startPlay({ port: options.port });
-  } catch (error) {
-    console.error(`reylo play: ${(error as Error).message}`);
-    return 1;
-  }
-  const { url, label, notice } = running;
-  if (notice) {console.log(styleText("yellow", notice));}
-  console.log(`${styleText("bold", "Reylo playground")} at ${styleText("cyan", url)}\n${styleText("dim", `${label}. The API: GET ${url}api/analyze?q=<sql>. Ctrl-C stops it.`)}`);
-  if (options.open) {openBrowser(url);}
-  await new Promise<void>((done) => {
-    process.once("SIGINT", done);
-    process.once("SIGTERM", done);
-  });
-  await running.close();
-  return 0;
-}
+const takeArg = (cursor: ArgCursor): string | undefined => {
+  const next = cursor.values[cursor.index];
+  cursor.index += NEXT;
+  return next;
+};
 
+const applyPort = (value: string | undefined, options: CliOptions): string | undefined => {
+  const port = validPort(value);
+  if (matchesUndefined(port)) {return "--port takes a port number";}
+  options.port = port;
+  return undefined;
+};
+
+const applyArg = (argument: string, cursor: ArgCursor, options: CliOptions): string | undefined => {
+  const { name, value } = parseFlag(argument);
+  if (name === "--help" || name === "-h") {options.help = true; return undefined;}
+  if (name === "--no-open") {options.open = false; return undefined;}
+  return name === "--port" ? applyPort(value ?? takeArg(cursor), options) : `unknown argument ${argument}`;
+};
+
+const parseArgs = (args: string[]): CliOptions | string => {
+  const options: CliOptions = { help: false, open: true };
+  const cursor = { index: FIRST_ARG, values: args };
+  while (cursor.index < args.length) {
+    // oxlint-disable-next-line typescript/no-non-null-assertion -- The CLI's dense argv bounds are checked by the cursor.
+    const problem = applyArg(takeArg(cursor)!, cursor, options);
+    if (!matchesUndefined(problem)) {return problem;}
+  }
+  return options;
+};
+
+const opener = (url: string): [string, string[]] => {
+  if (process.platform === "darwin") {return ["open", [url]];}
+  if (process.platform === "win32") {return ["cmd", ["/c", "start", "", url]];}
+  return ["xdg-open", [url]];
+};
+
+// oxlint-disable-next-line typescript/consistent-type-definitions -- Preserve structural assignment to the published Playground alias.
 export type Playground = { url: string; label: string; notice?: string; close: () => Promise<void> };
 
-/** The built page: in an installed reylo, `play/` beside its package.json; in this repository, dist/reylo/play/. */
-const pageDir = function pageDir(cwd: string): string | undefined {
-  const candidates = [process.env.REYLO_PLAY_PAGE];
-  // Reylo exports no package.json: its entry is resolved, and its directory found above it.
-  Iterator.from([join(cwd, "noop.js"), import.meta.filename]).forEach((from) => {
-    try {
-      let dir = dirname(createRequire(from).resolve("@totto2727/reylo"));
-      while (dir !== dirname(dir) && !existsSync(join(dir, "package.json"))) {dir = dirname(dir);}
-      candidates.push(join(dir, "play"));
-    } catch {}
-  });
-  candidates.push(join(import.meta.dirname, "..", "dist", "reylo", "play"));
-  return candidates.find((dir): dir is string => !!dir && existsSync(join(dir, "index.html")));
-};
-
-const send = function send(res: ServerResponse, status: number, body: unknown): void {
-  res.writeHead(status, { "content-type": "application/json; charset=utf-8", "cache-control": "no-store", "x-content-type-options": "nosniff" });
-  res.end(JSON.stringify(body));
-};
-
-const listen = function listen(server: ReturnType<typeof createServer>, port: number | undefined): Promise<number | undefined> {
-  // A port the caller names is that port or nothing; the default moves up past ports in use.
-  const tries = matchesUndefined(port) ? Array.from({ length: 20 }, (_unused, index) => DEFAULT_PORT + index) : [port];
-  return new Promise((done) => {
-    const attempt = (portIndex: number): void => {
-      if (portIndex >= tries.length) {
-        done(undefined);
-        return;
-      }
-      server.once("error", (error: NodeJS.ErrnoException) => {
-        if (error.code === "EADDRINUSE") {attempt(portIndex + 1);}
-        else {done(undefined);}
-      });
-      server.listen(tries[portIndex], "127.0.0.1", () => {
-        server.removeAllListeners("error");
-        const address = server.address();
-        done(hasObjectType(address) && address ? address.port : undefined);
-      });
-    };
-    attempt(0);
-  });
-};
-
-/** Starts the playground for the project of `cwd`, on `port` (by default the first free one from 4983): what `reylo play` runs, and the tests. */
-export async function startPlay(options: { port?: number | undefined; cwd?: string; env?: Record<string, string | undefined> } = {}): Promise<Playground> {
-  const cwd = options.cwd ?? process.cwd();
-  const page = pageDir(cwd);
-  if (!page) {throw new Error("the playground's page is not in this install of reylo; reinstall reylo.");}
-  const backend = await openBackend(cwd, options.env ?? process.env);
-  const server = createServer((req, res) => {
-    handle(req, res, backend, page, () => server.address()).catch((error: unknown) => {send(res, 500, { error: (error as Error).message });});
-  });
-  const port = await listen(server, options.port);
-  if (matchesUndefined(port)) {
-    await backend.close();
-    throw new Error(`port ${options.port ?? DEFAULT_PORT} is in use; name another with --port.`);
-  }
-  return {
-    url: `http://127.0.0.1:${port}/`,
-    label: backend.label,
-    ...(backend.notice ? { notice: backend.notice } : {}),
-    async close() {
-      server.closeAllConnections();
-      await new Promise<void>((done) => {server.close(() => {done();});});
-      await backend.close();
-    },
-  };
-}
-
-/** The project's database, the one its type check reads; a project that names none is refused. */
-async function openBackend(cwd: string, env: Record<string, string | undefined>): Promise<Backend> {
-  const session = await Session.open(cwd, env);
-  const { project } = session;
-  if (project.error || !project.url) {
-    await session.close();
-    throw new Error(project.error ?? `${project.missingUrl} reylo play reads the project's own database; to try Reylo without one, open https://reylo.dev/play.`);
-  }
-  return databaseBackend(session);
-}
-
-/** The project's database, through the type check's own session: its URL, its engine, its settings. */
-async function databaseBackend(session: Session): Promise<Backend> {
-  const { project } = session;
-  const {dialect} = project;
-  const schema = await session.schema();
-  if (matchesNull(schema.value) || schema.fatal) {throw new Error(schema.fatal ? schema.error! : session.cannotConnect(schema.error));}
-  const queries = CATALOG_QUERIES[dialect];
-  const rows = async (sql: string | undefined) => (sql ? session.query(sql).catch(() => []) : []);
-  const cat = catalog(dialect, await rows(queries.tables), await rows(queries.functions), await rows(queries.types));
-  return {
-    dialect,
-    ...(project.notice ? { notice: project.notice } : {}),
-    label: `${dialect === "postgres" ? "Postgres" : (dialect === "mysql" ? "MySQL" : "SQLite")} at ${session.where()} (${project.urlSource})`,
-    schema: (await schemaDdl(dialect, (sql) => session.query(sql))) ?? schemaText(dialect, cat),
-    catalog: cat,
-    async analyze(sql, width) {
-      const t = performance.now();
-      const outcome = await session.analyze(sql, { store: false });
-      const ms = performance.now() - t;
-      if (!outcome.ok) {return playResult(sql, dialect, { error: { message: outcome.message, code: outcome.code } }, { width, ms });}
-      let lexed;
-      try {
-        lexed = await session.lex(sql);
-      } catch {}
-      return playResult(sql, dialect, { analysis: outcome.analysis, lexed }, { strictParams: project.strictParams, width, ms });
-    },
-    close: () => session.close(),
-  };
-}
-
-/**
- * The database's schema as statements that would make it, for the page's schema card: SQLite's own
- * stored statements, MySQL's \`SHOW CREATE\`, and on Postgres, which keeps no statement, one written
- * from its catalog (types, tables with their defaults and constraints, views, indexes) for the
- * schemas on the search path. Undefined where the database refuses, and the columns stand in.
- */
-async function schemaDdl(dialect: Dialect, query: (sql: string) => Promise<unknown[][]>): Promise<string | undefined> {
+const packagePage = (origin: string): string | undefined => {
   try {
-    if (dialect === "sqlite") {
-      const rows = await query(`select sql as ddl from sqlite_schema where sql is not null and name not like 'sqlite_%' order by case type when 'table' then 0 when 'view' then 1 when 'index' then 2 else 3 end, name`);
-      return rows.map(([ddl]) => `${String(ddl).trim()};`).join("\n\n");
+    const cursor = { directory: path.dirname(createRequire(origin).resolve("@totto2727/reylo")) };
+    // oxlint-disable-next-line node/no-sync -- The native resolver and its package marker are read during playground startup.
+    while (cursor.directory !== path.dirname(cursor.directory) && !existsSync(path.join(cursor.directory, "package.json"))) {
+      cursor.directory = path.dirname(cursor.directory);
     }
-    if (dialect === "mysql") {
-      const tables = await query("select table_name, table_type from information_schema.tables where table_schema = database() order by table_type = 'VIEW', table_name");
-      const out: string[] = [];
-      for (const [name, type] of tables as [string, string][]) {
-        const [row] = await query(`show create ${type === "VIEW" ? "view" : "table"} \`${name.replaceAll('`', "``")}\``);
-        // A table's next AUTO_INCREMENT value is its data's, not its schema's.
-        out.push(`${String(row?.[1] ?? "").replace(/ AUTO_INCREMENT=\d+/u, "")};`);
-      }
-      return out.join("\n\n");
-    }
-    const rows = await query(POSTGRES_SCHEMA);
-    return rows.map(([ddl]) => String(ddl)).join("\n\n");
+    return path.join(cursor.directory, "play");
   } catch {
     return undefined;
   }
-}
+};
 
-const POSTGRES_SCHEMA = `with q as (
-  select n.oid, case when n.nspname = 'public' then '' else quote_ident(n.nspname) || '.' end as p
-  from pg_namespace n where n.nspname = any(current_schemas(false)) and n.nspname <> 'pg_catalog'
-)
-select ddl from (
-  select 0 as k, t.typname::text as name, format('create type %s%s as enum (%s);', q.p, quote_ident(t.typname),
-    (select string_agg(quote_literal(e.enumlabel), ', ' order by e.enumsortorder) from pg_enum e where e.enumtypid = t.oid)) as ddl
-  from pg_type t join q on q.oid = t.typnamespace where t.typtype = 'e'
-  union all
-  select 0, t.typname::text, format('create domain %s%s as %s%s%s;', q.p, quote_ident(t.typname), format_type(t.typbasetype, t.typtypmod),
-    case when t.typnotnull then ' not null' else '' end,
-    coalesce((select string_agg(' ' || pg_get_constraintdef(con.oid), '' order by con.conname) from pg_constraint con where con.contypid = t.oid and con.contype = 'c'), ''))
-  from pg_type t join q on q.oid = t.typnamespace where t.typtype = 'd'
-  union all
-  select 1, c.relname::text, format(E'create table %s%s (\n%s\n);', q.p, quote_ident(c.relname), (
-    select string_agg(line, E',\n' order by ord) from (
-      select a.attnum::int as ord, '  ' || quote_ident(a.attname) || ' ' || format_type(a.atttypid, a.atttypmod)
-        || case when a.attidentity in ('a', 'd') then ' generated ' || case a.attidentity when 'a' then 'always' else 'by default' end || ' as identity' else '' end
-        || case when a.attgenerated <> '' then ' generated always as (' || pg_get_expr(d.adbin, d.adrelid) || ')' || case a.attgenerated when 's' then ' stored' else ' virtual' end
-                when d.adbin is not null and a.attidentity = '' then ' default ' || pg_get_expr(d.adbin, d.adrelid) else '' end
-        || case when a.attnotnull then ' not null' else '' end as line
-      from pg_attribute a left join pg_attrdef d on d.adrelid = a.attrelid and d.adnum = a.attnum
-      where a.attrelid = c.oid and a.attnum > 0 and not a.attisdropped
-      union all
-      select 100000 + row_number() over (order by con.contype <> 'p', con.contype, con.conname)::int, '  constraint ' || quote_ident(con.conname) || ' ' || pg_get_constraintdef(con.oid)
-      from pg_constraint con where con.conrelid = c.oid and con.contype in ('p', 'u', 'f', 'c', 'x')
-    ) lines))
-  from pg_class c join q on q.oid = c.relnamespace where c.relkind in ('r', 'p', 'f')
-  union all
-  select 2, c.relname::text, format(E'create %sview %s%s as\n%s;', case c.relkind when 'm' then 'materialized ' else '' end, q.p, quote_ident(c.relname), rtrim(rtrim(pg_get_viewdef(c.oid, true)), ';'))
-  from pg_class c join q on q.oid = c.relnamespace where c.relkind in ('v', 'm')
-  union all
-  select 3, i.relname::text, pg_get_indexdef(i.oid) || ';'
-  from pg_index x join pg_class i on i.oid = x.indexrelid join pg_class c on c.oid = x.indrelid join q on q.oid = c.relnamespace
-  where not exists (select 1 from pg_constraint con where con.conindid = x.indexrelid and con.contype in ('p', 'u', 'x'))
-) s order by k, name`;
+const hasPage = (directory: string | undefined): boolean =>
+  // oxlint-disable-next-line node/no-sync -- Check for the installed page once during startup.
+  !matchesUndefined(directory) && !isEmptyString(directory) && existsSync(path.join(directory, "index.html"));
 
-/** The schema as the page shows it where the database refuses to give it: each table's columns, as a CREATE TABLE writes them. */
-function schemaText(dialect: Dialect, cat: Catalog): string {
-  const q = (name: string): string => (/^[a-z_][a-z0-9_]*$/u.test(name) ? name : (dialect === "mysql" ? `\`${name}\`` : `"${name.replace(/"/gu, '""')}"`));
-  return cat.tables
-    .map((t) => {
-      const width = Math.max(...t.columns.map((column) => q(column.name).length));
-      return `create table ${q(t.name)} (\n${t.columns.map((column) => `  ${q(column.name).padEnd(width)} ${column.type}${column.nullable ? "" : " not null"}`).join(",\n")}\n);`;
-    })
-    .join("\n\n");
-}
+const pageDir = (cwd: string): string | undefined => {
+  // oxlint-disable-next-line node/no-process-env -- This standalone CLI honors the existing installed page override.
+  const candidates = [process.env.REYLO_PLAY_PAGE, packagePage(path.join(cwd, "noop.js")), packagePage(import.meta.filename), path.join(import.meta.dirname, "..", "dist", "reylo", "play")];
+  return candidates.find((directory) => hasPage(directory));
+};
 
-const TYPES: Record<string, string> = { ".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8", ".css": "text/css; charset=utf-8", ".woff2": "font/woff2", ".svg": "image/svg+xml", ".wasm": "application/wasm", ".json": "application/json" };
+type Server = ReturnType<typeof createServer>;
 
-async function handle(req: IncomingMessage, res: ServerResponse, backend: Backend, page: string, address: () => ReturnType<ReturnType<typeof createServer>["address"]>): Promise<void> {
-  const a = address();
-  const port = hasObjectType(a) && a ? a.port : 0;
-  // Only this machine's own pages and tools: a page on another site that sends a request here, or
-  // A DNS name rebound to 127.0.0.1, names another host or origin, and is refused, so no web page
-  // Reads the schema through the playground.
-  const local = (host: string | undefined): boolean => !!host && [`127.0.0.1:${port}`, `localhost:${port}`, `[::1]:${port}`].includes(host);
-  const {origin} = req.headers;
-  if (!local(req.headers.host) || (!matchesUndefined(origin) && !local(origin.replace(/^http:\/\//u, "")))) {
-    send(res, 403, { error: "the playground answers this machine's own pages and tools only" });
-    return;
-  }
-  const url = new URL(req.url ?? "/", `http://${req.headers.host}`);
+const boundPort = (server: Server): number | undefined => {
+  const address = server.address();
+  return matchesNull(address) || matchesString(address) ? undefined : address.port;
+};
 
-  if (url.pathname === "/api/analyze") {
-    let sql: string | null = url.searchParams.get("q") ?? url.searchParams.get("sql");
-    let width = Number(url.searchParams.get("width") ?? Infinity);
-    if (req.method === "POST") {
-      let body: { sql?: unknown; q?: unknown; width?: unknown };
-      try {
-        body = JSON.parse((await readBody(req)) || "{}");
-      } catch {
-        send(res, 400, { error: "the body is not JSON" });
-        return;
-      }
-      sql = matchesString(body.sql) ? body.sql : (matchesString(body.q) ? body.q : sql);
-      if (matchesNumber(body.width)) {width = body.width;}
-    } else if (req.method !== "GET") {
-      send(res, 405, { error: "GET or POST" });
-      return;
-    }
-    if (matchesNull(sql)) {
-      send(res, 400, { error: "name the query: ?q=<sql>, or a JSON body {\"sql\": \"<sql>\"}" });
-    } else {
-      send(res, 200, await backend.analyze(sql, Number.isFinite(width) && width > 0 ? width : Infinity));
-    }
-  } else if (url.pathname === "/api/schema") {
-    send(res, 200, { dialect: backend.dialect, database: backend.label, ...backend.catalog });
-  } else if (url.pathname === "/api/page") {
-    send(res, 200, { dialect: backend.dialect, label: backend.label, schema: backend.schema, catalog: backend.catalog });
-  } else {
-    // The page's files; any other path is the page, which reads its query from the address.
-    const file = url.pathname === "/" ? join(page, "index.html") : join(page, decodeURIComponent(url.pathname));
-    const inside = file.startsWith(page + sep) && existsSync(file) && statSync(file).isFile();
-    const path = inside ? file : join(page, "index.html");
-    res.writeHead(200, { "content-type": TYPES[extname(path)] ?? "application/octet-stream", "cache-control": "no-cache", "x-content-type-options": "nosniff" });
-    res.end(readFileSync(path));
-  }
-}
+interface BindResult { port?: number | undefined }
 
-function readBody(req: IncomingMessage): Promise<string> {
-  return new Promise((done, fail) => {
-    let text = "";
-    req.setEncoding("utf8");
-    req.on("data", (chunk: string) => {
-      text += chunk;
-      if (text.length > 1_000_000) {req.destroy(new Error("the body is over a megabyte"));}
+const listen = async (server: Server, port: number | undefined): Promise<number | undefined> => {
+  const tries = matchesUndefined(port) ? Array.from({ length: DEFAULT_PORT_ATTEMPTS }, (_unused, index) => DEFAULT_PORT + index) : [port];
+  const { promise, resolve } = Promise.withResolvers<BindResult>();
+  const attempt = (portIndex: number): void => {
+    const nextPort = tries[portIndex];
+    if (matchesUndefined(nextPort)) {resolve({}); return;}
+    server.once("error", (error: NodeJS.ErrnoException) => {
+      if (error.code === "EADDRINUSE") {attempt(portIndex + NEXT);}
+      else {resolve({});}
     });
-    req.on("end", () => {done(text);});
-    req.on("error", fail);
-  });
-}
+    server.listen(nextPort, LOOPBACK, () => {
+      server.removeAllListeners("error");
+      resolve({ port: boundPort(server) });
+    });
+  };
+  attempt(FIRST_ATTEMPT);
+  const bound = await promise;
+  return bound.port;
+};
 
+const close = async (server: Server, backend: Backend): Promise<void> => {
+  const { promise, resolve } = Promise.withResolvers<boolean>();
+  server.closeAllConnections();
+  server.close(() => {resolve(true);});
+  await promise;
+  await backend.close();
+};
+
+const started = (port: number, backend: Backend, server: Server): Playground => {
+  const { label, notice } = backend;
+  // oxlint-disable-next-line eslint/sort-keys -- Preserve enumeration of the public Playground handle's properties.
+  return { url: `http://${LOOPBACK}:${port}/`, label, ...(matchesUndefined(notice) || isEmptyString(notice) ? {} : { notice }), close: async () => close(server, backend) };
+};
+
+interface StartOptions { cwd?: string; env?: Record<string, string | undefined>; port?: number | undefined }
+
+const startServer = async (page: string, backend: Backend, requestedPort: number | undefined): Promise<Playground> => {
+  const server = createServer();
+  server.on("request", handler({ backend, page, port: () => boundPort(server) ?? LOWEST_PORT }));
+  const port = await listen(server, requestedPort);
+  if (matchesUndefined(port)) {
+    await backend.close();
+    // oxlint-disable-next-line rules/require-tagged-error -- The dependency-free CLI surfaces this native bind error to callers.
+    throw new Error(`port ${requestedPort ?? DEFAULT_PORT} is in use; name another with --port.`);
+  }
+  return started(port, backend, server);
+};
+
+export const startPlay = async function startPlay(options: StartOptions = {}): Promise<Playground> {
+  const cwd = options.cwd ?? process.cwd();
+  const page = pageDir(cwd);
+  if (matchesUndefined(page)) {
+    // oxlint-disable-next-line rules/require-tagged-error -- Preserve the standalone CLI's native missing-page error.
+    throw new Error("the playground's page is not in this install of reylo; reinstall reylo.");
+  }
+  // oxlint-disable-next-line node/no-process-env -- Default to the invoking project's existing connection environment.
+  const backend = await openBackend(cwd, options.env ?? process.env);
+  return startServer(page, backend, options.port);
+};
+
+const ignoreBrowserFailure = (): void => {
+  // The CLI keeps serving the announced URL if the browser could not start.
+};
+
+const openBrowser = (url: string): void => {
+  const [command, args] = opener(url);
+  spawn(command, args, { detached: true, stdio: "ignore" }).on("error", ignoreBrowserFailure).unref();
+};
+
+const waitForSignal = async (): Promise<void> => {
+  const { promise, resolve } = Promise.withResolvers<boolean>();
+  const stop = (): void => {resolve(true);};
+  process.once("SIGINT", stop);
+  process.once("SIGTERM", stop);
+  await promise;
+};
+
+const showReady = ({ label, notice, url }: Playground): void => {
+  if (!matchesUndefined(notice) && !isEmptyString(notice)) {
+    // oxlint-disable-next-line eslint/no-console -- The CLI prints the project's configuration notice.
+    console.log(styleText("yellow", notice));
+  }
+  // oxlint-disable-next-line eslint/no-console -- Report where the playground listens to the caller.
+  console.log(`${styleText("bold", "Reylo playground")} at ${styleText("cyan", url)}\n${styleText("dim", `${label}. The API: GET ${url}api/analyze?q=<sql>. Ctrl-C stops it.`)}`);
+};
+
+const launch = async (port: number | undefined): Promise<Playground | undefined> => {
+  try {
+    return await startPlay({ port });
+  } catch (error) {
+    // oxlint-disable-next-line eslint/no-console, typescript/no-unsafe-type-assertion -- Print the native failure's message at the CLI boundary.
+    console.error(`reylo play: ${(error as Error).message}`);
+    return undefined;
+  }
+};
+
+const runPlay = async (options: CliOptions): Promise<number> => {
+  const running = await launch(options.port);
+  if (matchesUndefined(running)) {return ERROR;}
+  showReady(running);
+  if (options.open) {openBrowser(running.url);}
+  await waitForSignal();
+  await running.close();
+  return SUCCESS;
+};
+
+const usage = (problem?: string): number => {
+  if (matchesUndefined(problem)) {
+    // oxlint-disable-next-line eslint/no-console -- The CLI writes requested usage to stdout.
+    console.log(PLAY_USAGE);
+    return SUCCESS;
+  }
+  // oxlint-disable-next-line eslint/no-console -- The CLI writes invalid options and usage to stderr.
+  console.error(`reylo play: ${problem}\n\n${PLAY_USAGE}`);
+  return USAGE_ERROR;
+};
+
+export const play = async function play(args: string[]): Promise<number> {
+  const options = parseArgs(args);
+  if (matchesString(options)) {return usage(options);}
+  return options.help ? usage() : runPlay(options);
+};
