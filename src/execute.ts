@@ -266,12 +266,13 @@ const isSlonik = function (client: ClientMembers): boolean {
 
 const HEX_RADIX = 16;
 
-const asByteaHex = function asByteaHex(binaryValue: unknown) {
-  if (!(binaryValue instanceof Uint8Array)) {return binaryValue;}
-  let hex = String.raw`\x`;
-  Iterator.from(binaryValue).forEach((byte) => {hex += (byte < HEX_RADIX ? "0" : "") + byte.toString(HEX_RADIX);});
-  return hex;
-};
+const byteaHex = (bytes: Uint8Array): string =>
+  Iterator.from(bytes).reduce(
+    (hex, byte) => hex + (byte < HEX_RADIX ? "0" : "") + byte.toString(HEX_RADIX),
+    String.raw`\x`,
+  );
+
+const asByteaHex = (candidate: unknown): unknown => candidate instanceof Uint8Array ? byteaHex(candidate) : candidate;
 
 // The parameters are an object, refused before anything reaches the database otherwise: an
 // Array, which `run` took in the order of `params` from 2026-10-03, was dropped on 2026-10-20
@@ -349,7 +350,7 @@ const refuseNull = function refuseNull(name: string, parameterValue: unknown): n
   throw new ParameterError(`Parameter "${name}" ${matchesUndefined(parameterValue) ? "is missing" : "is null"}, and the statement takes no null for it: pass a value.`);
 };
 
-const value = function value(params: Record<string, unknown>, name: string) {
+const value = function value(params: Record<string, unknown>, name: string): unknown {
   const suppliedValue = params[name];
   return matchesUndefined(suppliedValue) ? null : suppliedValue;
 };
@@ -360,7 +361,7 @@ const value = function value(params: Record<string, unknown>, name: string) {
 // As the text {"0":1,"1":2,"2":255}: it gets a Buffer over the same memory, where a Buffer
 // Exists (not in every Worker). Neon's neon() before 0.10 sends a Buffer as JSON as well, so it
 // Gets Postgres's hex form, `\x0102ff`, which 0.10 and later send for a Buffer themselves.
-const asBuffer = function asBuffer(binaryValue: unknown) {
+const asBuffer = function asBuffer(binaryValue: unknown): unknown {
   // Named structurally, so that a project without Node's types can type-check the module.
   const NodeBuffer = (globalThis as { Buffer?: { isBuffer(candidate: unknown): boolean; from(buffer: ArrayBufferLike, offset: number, length: number): Uint8Array } }).Buffer;
   return binaryValue instanceof Uint8Array && !matchesUndefined(NodeBuffer) && !NodeBuffer.isBuffer(binaryValue) ? NodeBuffer.from(binaryValue.buffer, binaryValue.byteOffset, binaryValue.byteLength) : binaryValue;
@@ -575,7 +576,7 @@ export function arrayLiteral(array: Readonly<unknown[]>, delim = ","): string {
     if (arrayIndex) {out += delim;}
     if (matchesNullish(element)) {out += "NULL";}
     else if (Array.isArray(element)) {out += arrayLiteral(element, delim);}
-    else if (ArrayBuffer.isView(element)) {out += `\\${  asByteaHex(new Uint8Array(element.buffer, element.byteOffset, element.byteLength))}`;}
+    else if (ArrayBuffer.isView(element)) {out += `\\${  byteaHex(new Uint8Array(element.buffer, element.byteOffset, element.byteLength))}`;}
     else {out += `"${(element instanceof Date ? dateText(element) : (hasObjectType(element) ? JSON.stringify(element) : String(element))).replaceAll(/[\\"]/gu, String.raw`\$&`)}"`;}
   }
   return `${out  }}`;
@@ -586,7 +587,7 @@ export function arrayLiteral(array: Readonly<unknown[]>, delim = ","): string {
 // Date as its instant, and an object as its JSON. An omitted parameter binds NULL, as on pg.
 const slonikParam = function (parameterValue: unknown): unknown {
   if (matchesUndefined(parameterValue) || matchesNull(parameterValue)) {return null;}
-  if (parameterValue instanceof Uint8Array) {return asByteaHex(parameterValue);}
+  if (parameterValue instanceof Uint8Array) {return byteaHex(parameterValue);}
   if (Array.isArray(parameterValue)) {return arrayLiteral(parameterValue);}
   if (parameterValue instanceof Date) {return parameterValue.toISOString();}
   return hasObjectType(parameterValue) ? JSON.stringify(parameterValue) : parameterValue;
@@ -606,7 +607,7 @@ const postgresText = function postgresText(query: QueryModule, name: string, par
   if (Array.isArray(parameterValue) && inputType?.kind === "array") {return arrayLiteral(isJson(inputType.of.kind) ? parameterValue.map((element) => (matchesNullish(element) ? element : JSON.stringify(element))) : parameterValue, inputType.delimiter);}
   if (isJsonValue(query, name, parameterValue)) {return jsonText(parameterValue);}
   if (Array.isArray(parameterValue)) {return arrayLiteral(parameterValue);}
-  if (parameterValue instanceof Uint8Array) {return asByteaHex(parameterValue) as string;}
+  if (parameterValue instanceof Uint8Array) {return byteaHex(parameterValue);}
   if (matchesBoolean(parameterValue)) {return parameterValue ? "t" : "f";}
   if (parameterValue instanceof Date) {return dateText(parameterValue);}
   if (hasObjectType(parameterValue)) {return JSON.stringify(parameterValue);}
@@ -728,23 +729,38 @@ const statement = function statement(query: QueryModule, params: ParamsInput) {
   return bound;
 };
 
+const verifyFreshness = (query: QueryModule, fresh: Fresh, rows: unknown[] | undefined): void => {
+  const changes = (rows && differences(fresh, rows, query.dialect)) ?? [];
+  if (changes.length) {throw staleError(query.source, changes);}
+  passed(query);
+};
+
+const readSqliteCatalog = (client: ClientMembers, fresh: Fresh): unknown[] | undefined => {
+  try {
+    return isDurableObjectSql(client)
+      ? inspectClient<{ exec: (sql: string) => { toArray: () => unknown[] } }>(client).exec(fresh.query).toArray()
+      : inspectClient<{ prepare: (sql: string) => { all: () => unknown[] } }>(client).prepare(fresh.query).all();
+  } catch {
+    // The caller's role can lack catalog access. It can still run the actual query.
+    return undefined;
+  }
+};
+
 const executeSyncSqlite = function executeSyncSqlite(client: ClientMembers, query: QueryModule, params: ParamsInput): unknown[] | Promise<unknown[]> {
   checkParams(query, params);
-  if (query.fresh && due(query)) {
-    let rows: unknown[] | undefined;
-    try {
-      rows = isDurableObjectSql(client)
-        ? inspectClient<{ exec: (sql: string) => { toArray: () => unknown[] } }>(client).exec(query.fresh.query).toArray()
-        : inspectClient<{ prepare: (sql: string) => { all: () => unknown[] } }>(client).prepare(query.fresh.query).all();
-    } catch {}
-    const lines = (rows && differences(query.fresh, rows, query.dialect)) ?? [];
-    if (lines.length) {throw staleError(query.source, lines);}
-    passed(query);
+  const { fresh } = query;
+  if (fresh && due(query)) {
+    verifyFreshness(query, fresh, readSqliteCatalog(client, fresh));
   }
+
   const { text, values, names } = statement(query, params);
   if (isDurableObjectSql(client)) {return runDurableObject(client, text, durableObjectValues(query, names, values), query.columns);}
   return runSyncSqlite(client, text, values, query.columns);
 };
+
+const refuseSyncClient = (reason: string): TypeError =>
+  // oxlint-disable-next-line rules/require-tagged-error -- Preserve the native TypeError of the synchronous SQLite API without loading Effect.
+  new TypeError(`runSync takes a synchronous SQLite client (better-sqlite3, node:sqlite, bun:sqlite, the Database of @tursodatabase/database/compat or a Durable Object's ctx.storage.sql); ${reason}. run takes every client.`);
 
 /**
  * The synchronous path alone, for `runSync`: any other client is refused before anything runs.
@@ -756,13 +772,14 @@ const executeSyncSqlite = function executeSyncSqlite(client: ClientMembers, quer
  */
 export const executeSync = function executeSync<D extends Dialect>(client: SyncClientFor<D>, query: QueryModule<D>, params: ParamsInput = {}): unknown[] {
   const currentClient = underneath(inspectClient(client));
-  const refuse = (why: string) => new TypeError(`runSync takes a synchronous SQLite client (better-sqlite3, node:sqlite, bun:sqlite, the Database of @tursodatabase/database/compat or a Durable Object's ctx.storage.sql); ${why}. run takes every client.`);
-  if (query.dialect !== "sqlite") {throw refuse(`a ${query.dialect} statement has none`);}
-  if (!isSyncSqlite(currentClient) && !isDurableObjectSql(currentClient)) {throw refuse("this client answers through a promise");}
+  if (query.dialect !== "sqlite") {throw refuseSyncClient(`a ${query.dialect} statement has none`);}
+  if (!isSyncSqlite(currentClient) && !isDurableObjectSql(currentClient)) {throw refuseSyncClient("this client answers through a promise");}
   const rows = executeSyncSqlite(currentClient, query, params);
   if (Array.isArray(rows)) {return rows;}
-  rows.catch(() => {});
-  throw refuse("this client's statement answered with a promise");
+  rows.catch(() => {
+    // The synchronous TypeError below already reports the incompatible driver.
+  });
+  throw refuseSyncClient("this client's statement answered with a promise");
 };
 
 /**
@@ -829,14 +846,16 @@ const executeAsync = async function executeAsync(client: ClientMembers | null | 
   checkParams(query, params);
   // The catalog facts the statement relied on, read again through the same client.
   if (query.fresh && due(query)) {
-    const {fresh} = query;
-    let rows: unknown[] | undefined;
-    try {
-      rows = await executeAsync(client, { dialect: query.dialect, sql: fresh.query, params: [], text: fresh.query, order: [] }, {});
-    } catch {}
-    const lines = (rows && differences(fresh, rows, query.dialect)) ?? [];
-    if (lines.length) {throw staleError(query.source, lines);}
-    passed(query);
+    const { fresh } = query;
+    const readCatalog = async (): Promise<unknown[] | undefined> => {
+      try {
+        return await executeAsync(client, { dialect: query.dialect, order: [], params: [], sql: fresh.query, text: fresh.query }, {});
+      } catch {
+        // The caller's role can lack catalog access. It can still run the actual query.
+        return undefined;
+      }
+    };
+    verifyFreshness(query, fresh, await readCatalog());
   }
   const { text, values, names } = statement(query, params);
   const type = (parameterIndex: number) => query.inputs?.[names[parameterIndex]!]?.type;
