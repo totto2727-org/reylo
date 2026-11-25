@@ -22,11 +22,11 @@ const noParse = function (x: string): string {
   return String(x);
 };
 const appTable: Record<number, Parser> = {
-  20: (x) => x,
-  23: (x) => Number.parseInt(x, 10),
   1184: (x) => `app:${x}`,
   1186: (x) => ({ interval: x }),
   1231: (x) => parseArray(x, parseFloat),
+  20: (x) => x,
+  23: (x) => Number.parseInt(x, 10),
 };
 const appTypes = { getTypeParser: (oid: number) => appTable[oid] ?? noParse };
 
@@ -61,29 +61,29 @@ const COLUMNS: [string, number, string | null][] = [
 ];
 /** What Reylo returns for each column: src/values.ts. */
 const declared = {
-  roles: ["admin", "member", SQL_NULL],
-  role: "admin",
-  names: ["a", "b"],
-  posints: [1, 2],
-  pairs: '{"(1,x)"}',
-  span: "P1Y2M",
-  spans: ["P1D", "PT2H"],
   amounts: ["1.5", "12345678901234567890.1"],
-  ints: [1, SQL_NULL],
-  big: BigInt("9007199254740993"),
   at: "2024-01-15T08:30:00.123456Z",
-  wall: "2024-01-15T10:30:00.123456",
+  big: BigInt("9007199254740993"),
+  boxes: ["(1,1),(0,0)", "(2,2),(1,1)"],
+  bytes: Uint8Array.from([1, 2, 255]),
   day: "2024-01-15",
   doc: { a: [1, 2] },
-  bytes: Uint8Array.from([1, 2, 255]),
-  flag: true,
-  boxes: ["(1,1),(0,0)", "(2,2),(1,1)"],
-  shapes: ["0101", SQL_NULL, "0102"],
   embedding: [1, 2.5, -3, 1e-7],
   embeddings: [[1, 2], SQL_NULL, [3]],
-  prefs: { a: "1", "b c": SQL_NULL, 'q"': "\\" },
+  flag: true,
   history: [{ a: "1" }, SQL_NULL, {}],
+  ints: [1, SQL_NULL],
+  names: ["a", "b"],
   nothing: SQL_NULL,
+  pairs: '{"(1,x)"}',
+  posints: [1, 2],
+  prefs: { a: "1", "b c": SQL_NULL, 'q"': "\\" },
+  role: "admin",
+  roles: ["admin", "member", SQL_NULL],
+  shapes: ["0101", SQL_NULL, "0102"],
+  span: "P1Y2M",
+  spans: ["P1D", "PT2H"],
+  wall: "2024-01-15T10:30:00.123456",
 };
 /** The module's columns for the same statement, as a build step writes them (src/loader.ts). */
 const columns: Columns = [
@@ -119,11 +119,11 @@ const database = function () {
             ...(wanted.includes(array) ? [[0, array, true, ",", array, `_${name}`]] : []),
           ])
           .map((row) => row.map(String));
-        return { fields: [0, 1, 2, 3, 4, 5].map((i) => ({ name: `c${i}`, dataTypeID: 25 })), raw: rows };
+        return { fields: [0, 1, 2, 3, 4, 5].map((i) => ({ dataTypeID: 25, name: `c${i}` })), raw: rows };
       }
       const cols = [...COLUMNS];
       if (text.includes("late")) {cols.push(["lates", LATE_ARR, "{x,y}"], ["late", LATE, "x"]);}
-      return { fields: cols.map(([name, dataTypeID]) => ({ name, dataTypeID })), raw: [cols.map(([, , v]) => v)] };
+      return { fields: cols.map(([name, dataTypeID]) => ({ dataTypeID, name })), raw: [cols.map(([, , v]) => v)] };
     },
   };
   return db;
@@ -318,7 +318,7 @@ test("pg-promise: result({ text, values, types }) on the database, a task and a 
 /** PGlite: a query's parsers merged over the instance's, as its parse.ts does. */
 const pglite = function (db: Db, instance: Record<number, Parser> | undefined) {
   const lite = {
-    ...(instance ? { parsers: instance, refreshArrayTypes: asyncDriverMarker } : { rollback: asyncDriverMarker, closed: false }),
+    ...(instance ? { parsers: instance, refreshArrayTypes: asyncDriverMarker } : { closed: false, rollback: asyncDriverMarker }),
     exec: promiseDriverStub(() => []),
     seen: [] as Record<number, Parser>[],
     async query(text: string, _values?: unknown[], options?: { parsers?: Record<number, Parser>; rowMode?: string }) {
@@ -359,13 +359,13 @@ test("Neon's neon(): query(text, params, { fullResults, types }), which replaces
   const conn = pgClient(db);
   const calls: unknown[][] = [];
   const neon = Object.assign(() => Promise.reject(new Error("not a template")), {
-    transaction: driverMarker,
-    unsafe: () => ({}),
     query: async (text: string, values: unknown[], options: { fullResults?: boolean; arrayMode?: boolean; types?: Config["types"] }) => {
       calls.push([text, values, options]);
       const r = await conn.query({ text, values, ...(options.types ? { types: options.types } : {}), ...(options.arrayMode ? { rowMode: "array" } : {}) });
       return options.fullResults ? r : r.rows;
     },
+    transaction: driverMarker,
+    unsafe: () => ({}),
   });
   const [row] = (await executeFixture(neon, probe, { id: 1 })) as Record<string, unknown>[];
   same(row, declared);
@@ -375,7 +375,7 @@ test("Neon's neon(): query(text, params, { fullResults, types }), which replaces
 /** Postgres.js: `.raw()` gives each value's bytes and the result's columns; a row transform runs on raw rows too. */
 const postgresJs = function (db: Db, rowTransform?: (row: unknown[]) => unknown) {
   return {
-    typed: (value: unknown, type: number) => ({ value, type }),
+    typed: (value: unknown, type: number) => ({ type, value }),
     unsafe: (text: string) => ({
       raw: async () => {
         const answer = db.answer(text);
@@ -414,14 +414,14 @@ test("Bun.sql: its values are given their kinds after the fact", async () => {
     at: nativeDriverDate("2024-01-15T08:30:00Z"),
     forever: Infinity,
   };
-  const bun = { unsafe: async () => [{ ...bunRow }], commitDistributed: asyncDriverMarker };
+  const bun = { commitDistributed: asyncDriverMarker, unsafe: async () => [{ ...bunRow }] };
   const q: QueryModule<"postgres"> = { ...probe, columns: [["big", "int8"], ["day", "date"], ["wall", "timestamp"], ["old", "timestamp"], ["far", "timestamp"], ["ints", "int[]"], ["roles", "text[]"], ["shapes", "text[]", ":"], ["embedding", "vector"], ["prefs", "hstore"], ["at", "timestamptz"], ["forever", "date"]] };
   // The failing control: Bun.sql's timestamptz is a Date; Reylo's the instant's text, to Bun's millisecond.
   assert.ok(bunRow.at instanceof Date);
-  assert.deepEqual(await execute(bun, q, { id: 1 }), [{ big: BigInt("9007199254740993"), day: "2024-01-15", wall: "2024-01-15T10:30:00.12", old: "-000043-03-15T12:00:00", far: "+012345-06-01T12:00:00", ints: [1, 2], roles: ["admin", "member"], shapes: ["0101", "0102"], embedding: [1, 2.5], prefs: { a: "1" }, at: "2024-01-15T08:30:00Z", forever: "infinity" }]);
+  assert.deepEqual(await execute(bun, q, { id: 1 }), [{ at: "2024-01-15T08:30:00Z", big: BigInt("9007199254740993"), day: "2024-01-15", embedding: [1, 2.5], far: "+012345-06-01T12:00:00", forever: "infinity", ints: [1, 2], old: "-000043-03-15T12:00:00", prefs: { a: "1" }, roles: ["admin", "member"], shapes: ["0101", "0102"], wall: "2024-01-15T10:30:00.12" }]);
   // Without bigint: true, Bun's int8 is its text.
-  const plain = { unsafe: async () => [{ big: "9007199254740993", at: nativeDriverDate("2024-01-15T08:30:00.5Z") }], commitDistributed: asyncDriverMarker };
-  assert.deepEqual(await execute(plain, { ...probe, columns: [["big", "int8"], ["at", "timestamptz"]] }, { id: 1 }), [{ big: BigInt("9007199254740993"), at: "2024-01-15T08:30:00.5Z" }]);
+  const plain = { unsafe: async () => [{ at: nativeDriverDate("2024-01-15T08:30:00.5Z"), big: "9007199254740993" }], commitDistributed: asyncDriverMarker };
+  assert.deepEqual(await execute(plain, { ...probe, columns: [["big", "int8"], ["at", "timestamptz"]] }, { id: 1 }), [{ at: "2024-01-15T08:30:00.5Z", big: BigInt("9007199254740993") }]);
   // A query defined by hand: a typed array an array, and a Date, which no value is, the instant's text.
   assert.deepEqual(await execute(bun, probe, { id: 1 }), [{ ...bunRow, day: "2024-01-15T00:00:00Z", wall: "2024-01-15T10:30:00.12Z", old: "-000043-03-15T12:00:00Z", far: "+012345-06-01T12:00:00Z", at: "2024-01-15T08:30:00Z", ints: [1, 2] }]);
 });
