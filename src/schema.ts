@@ -8,12 +8,11 @@
 // Refuses a BigInt), a decimal its text, a timestamptz its ISO text in UTC, a date and a timestamp
 // The wall-clock text the server wrote. The input is the parameters the caller passes.
 import type { EngineType, JsonSchema } from "./engine-type.ts";
-import { scalarKind } from './values.ts';
-import type { ScalarKind } from './values.ts';
 import { hasObjectType, matchesNull, matchesString, matchesUndefined } from "./native-predicates.ts";
+import { arraySchema, scalarSchema, withDescription } from "./schema-representation.ts";
+import type { Schema } from "./schema-representation.ts";
+import type { Dialect } from "./values.ts";
 
-type Dialect = "postgres" | "mysql" | "sqlite" | "duckdb";
-type Schema = Record<string, unknown>;
 interface Analysis {
   params: Readonly<{ name: string; type: EngineType; nullable: boolean; schema?: JsonSchema }[]>;
   columns: Readonly<{ name: string; type: EngineType; nullable: boolean }[]>;
@@ -29,153 +28,6 @@ const nullable = function (schema: Schema | JsonSchema): Schema | JsonSchema {
   if (schema === true || (hasObjectType(schema) && Object.keys(schema).length === 0)) {return schema;}
   if (hasObjectType(schema) && Object.keys(schema).length === 1 && matchesString(schema.type)) {return { type: [schema.type, "null"] };}
   return { anyOf: [schema, { type: "null" }] };
-};
-
-/** A PostGIS geometry inside a document, which its cast to JSON writes as GeoJSON. */
-// oxlint-disable-next-line eslint/sort-keys -- Preserve the field order in the serialized GeoJSON schema.
-const GEOJSON: Schema = { type: "object", properties: { type: { type: "string" } }, required: ["type"], description: "a GeoJSON geometry" };
-
-const withFormat = (type: string | string[], format: string): Schema => (
-  // oxlint-disable-next-line eslint/sort-keys -- Keep the type before its format in serialized query schemas.
-  { type, format }
-);
-
-const withDescription = (type: string, description: string): Schema => (
-  // oxlint-disable-next-line eslint/sort-keys -- Keep the type before its description in serialized query schemas.
-  { type, description }
-);
-
-const arraySchema = (items: Schema | JsonSchema): Schema => (
-  // oxlint-disable-next-line eslint/sort-keys -- Keep the array type before its items in serialized query schemas.
-  { type: "array", items }
-);
-
-const binarySchema = (): Schema => (
-  // oxlint-disable-next-line eslint/sort-keys -- Keep the binary type, format, and encoding in the published order.
-  { type: "string", format: "byte", contentEncoding: "base64" }
-);
-
-const hstoreSchema = (): Schema => (
-  // oxlint-disable-next-line eslint/sort-keys -- Keep the object type before the property schema in serialized query schemas.
-  { type: "object", additionalProperties: { type: ["string", "null"] } }
-);
-
-const documentNumberSchema = (format: string, dialect: Dialect): Schema => {
-  const finite = withFormat("number", format);
-  return dialect === "postgres" ? { anyOf: [finite, { enum: ["NaN", "Infinity", "-Infinity"] }] } : finite;
-};
-
-/**
- * The JSON form of a value of `kind` as `run` returns it, once JSON: each kind's one representation (src/values.ts).
- * @param {ScalarKind} kind - The scalar representation.
- * @param {string} name - The database type name.
- * @param {Dialect} dialect - The database dialect.
- * @returns {Schema} The JSON representation of the scalar.
- */
-const kindSchema = function kindSchema(kind: ScalarKind, name: string, dialect: Dialect): Schema {
-  switch (kind) {
-    case "bool": { return { type: "boolean" }; }
-    // A SQLite INTEGER is 64 bits wide, and so is an oid's range past int4's.
-    case "int": { return withFormat("integer", name === "oid" || dialect === "sqlite" || name === "uinteger" ? "int64" : "int32"); }
-    case "float": { return withFormat("number", name === "float4" || (dialect === "duckdb" && name === "float") ? "float" : "double"); }
-    // A BigInt, as the JSON integer it is.
-    case "int8": { return withFormat("integer", "int64"); }
-    case "decimal": { return withFormat("string", "decimal"); }
-    case "timestamptz": { return withFormat("string", "date-time"); }
-    // RFC 3339's duration, which JSON Schema's `duration` format names, has no sign and no fraction.
-    case "interval": { return withDescription("string", "an ISO 8601 duration with its sign in front (P1Y2M3DT4H5M6.789S, -P1D); one whose parts differ in sign signs each part (P1M-1D)"); }
-    case "date": { return withFormat("string", "date"); }
-    // A date and a time with no zone, which RFC 3339's date-time does not admit.
-    case "timestamp": { return withDescription("string", "a date and time without a time zone, as the database wrote it (2026-10-20T10:00:00.123456)"); }
-    case "bytes": { return binarySchema(); }
-    case "vector": { return arraySchema(withFormat("number", "float")); }
-    case "hstore": { return hstoreSchema(); }
-    case "text": { return { type: "string" }; }
-    case "json": { return {}; }
-    case "unknown": { return {}; }
-  }
-};
-
-/**
- * A base type by its catalog name, standing where `inJson` says: inside a JSON document, as a parameter the caller passes, or as `run` returns it.
- * @param {string} name - The catalog name of the type.
- * @param {Dialect} dialect - The database dialect.
- * @param {boolean} inJson - Whether the value occurs inside a JSON document.
- * @param {boolean} input - Whether the caller supplies the value as a parameter.
- * @returns {Schema} The schema for the base type in this position.
- */
-const scalar = function (name: string, dialect: Dialect, inJson: boolean, input: boolean): Schema {
-  if (name.includes("|")) {return { anyOf: name.split("|").map((part) => scalar(part, dialect, inJson, input)) };}
-  if (dialect === "sqlite") {
-    // A SQLite INTEGER is a number as a parameter (src/render.ts), and its JSON spelling inside a
-    // Document; as `run` returns it, its kind's.
-    if (inJson || input) {
-      switch (name) {
-        case "integer": case "int8": { return withFormat("integer", "int64"); }
-        case "real": { return withFormat("number", "double"); }
-        case "text": { return { type: "string" }; }
-        case "blob": { return binarySchema(); }
-        case "numeric": { return { type: ["number", "string"] }; }
-        case "bool": { return { type: "boolean" }; }
-        default: { return {}; }
-      }
-    }
-    const kinds = scalarKind(name, dialect).split("|");
-    if (kinds.length > 1) {
-      // A NUMERIC: whichever storage class the row stored, an integer being a number too.
-      const types = [...new Set(kinds.map((part) => kindSchema(part as ScalarKind, name, dialect).type))];
-      return { type: types.includes("number") ? types.filter((currentType) => currentType !== "integer") : types };
-    }
-    return kindSchema(kinds[0] as ScalarKind, name, dialect);
-  }
-  if (inJson) {
-    // As the database writes the value inside a document.
-    // JSON has no number for a non-finite value, so Postgres writes a float's or a decimal's as text;
-    // MySQL stores none.
-    switch (name) {
-      case "int8": { return withFormat("integer", "int64"); }
-      case "float4": { return documentNumberSchema("float", dialect); }
-      case "float8": { return documentNumberSchema("double", dialect); }
-      case "numeric": { return documentNumberSchema("decimal", dialect); }
-      case "bytea": { return withFormat("string", "hex"); }
-      // Postgres's own interval text: the run time converts a column's interval, never one inside a document.
-      case "interval": { return withDescription("string", "pg type interval"); }
-      // A row whose columns were not read (a subquery's): an object of them.
-      case "record": { return { type: "object" }; }
-      // An hstore: an object of its keys, each value text or null.
-      case "hstore": { return hstoreSchema(); }
-      // PostGIS's cast to JSON: a GeoJSON geometry.
-      case "geometry": { return GEOJSON; }
-      // An oid is not one of the numbers JSON has a number for: Postgres writes its text.
-      case "oid": { return { type: "string" }; }
-      // Pgvector has no cast to JSON, so a vector inside a document is its text.
-      case "vector": case "halfvec": { return { type: "string" }; }
-    }
-  } else if (input && dialect === "duckdb") {
-    // What DuckDB binds: a 64-bit or wider integer as a number, a BigInt or its digits; a decimal as its digits.
-    const kind = scalarKind(name, dialect);
-    if (kind === "int8") {return withFormat(["integer", "string"], "int64");}
-    if (kind === "decimal") {return withFormat("string", "decimal");}
-    if (kind === "timestamp") {return withFormat("string", "date-time");}
-  } else if (input) {
-    // What every driver binds: a 64-bit integer as a number, a BigInt or its digits; a decimal as its digits.
-    switch (name) {
-      case "int8": { return withFormat(["integer", "string"], "int64"); }
-      case "numeric": { return withFormat("string", "decimal"); }
-      case "timestamp": { return withFormat("string", "date-time"); }
-    }
-  }
-  const kind = scalarKind(name, dialect);
-  if (kind.includes("|")) {return { anyOf: kind.split("|").map((currentPart) => kindSchema(currentPart as ScalarKind, name, dialect)) };}
-  const schema = kindSchema(kind as ScalarKind, name, dialect);
-  if (kind !== "text") {return schema;}
-  switch (name) {
-    case "text": case "varchar": case "bpchar": case "name": case "char": case "citext": { return { type: "string" }; }
-    case "uuid": { return withFormat("string", "uuid"); }
-    case "time": { return withFormat("string", "time"); }
-    case "unknown": { return {}; }
-    default: { return withDescription("string", `${dialect === "mysql" ? "MySQL" : (dialect === "duckdb" ? "DuckDB" : "pg")} type ${name}`); }
-  }
 };
 
 const MISSING_KEY = -1;
@@ -221,7 +73,7 @@ const withNull = (schema: Schema | JsonSchema, acceptsNull: boolean): Schema | J
  */
 export const typeSchema = function typeSchema(valueType: EngineType, dialect: Dialect, input = false, inJson = false, inRow = false): Schema | JsonSchema {
   switch (valueType.kind) {
-    case "scalar": {return scalar(valueType.name, dialect, inJson, input);}
+    case "scalar": {return scalarSchema(valueType.name, dialect, { inJson, input });}
     case "enum": {return { type: "string", enum: valueType.labels };}
     case "array": {
       // A result's elements may be null unless the statement shows they are not; a parameter's

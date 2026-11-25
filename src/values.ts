@@ -95,7 +95,7 @@ const SQL_KINDS: Readonly<Record<string, ScalarKind>> = {
  * stored; `bool` is a truth value or a column declared BOOLEAN; a column with no declared type,
  * or ANY in a STRICT table, is whatever the driver gives.
  */
-const SQLITE_KINDS: Readonly<Record<string, Kind>> = {
+const SQLITE_KINDS: Readonly<Record<string, ScalarKind | "int|float|text">> = {
   integer: "int",
   int8: "int8",
   real: "float",
@@ -142,11 +142,19 @@ const DUCKDB_KINDS: Readonly<Record<string, ScalarKind>> = {
  * The kind of a base type by its engine name, `a|b` naming either. An integer that may be a BIGINT
  * or a narrower integer (a MySQL expression a temporary table may widen, `int8|int4`) is a BIGINT's,
  * a BigInt either way, where no float shares the column: there a number may be either.
+ * @param {string} name - The engine's type name or union of type names.
+ * @param {Dialect} dialect - The database dialect.
+ * @returns {[ScalarKind, ...ScalarKind[]]} The scalar representations in their existing order.
  */
-export const scalarKind = function scalarKind(name: string, dialect: Dialect): Kind {
+export const scalarKindParts = function scalarKindParts(name: string, dialect: Dialect): [ScalarKind, ...ScalarKind[]] {
   const kinds = [...new Set(name.split("|").flatMap((part) => (dialect === "sqlite" ? (SQLITE_KINDS[part] ?? "unknown") : (dialect === "duckdb" ? (DUCKDB_KINDS[part] ?? "text") : (SQL_KINDS[part] ?? "text"))).split("|")))];
-  const wide = kinds.includes("int8") && !kinds.includes("float") ? kinds.filter((k) => k !== "int") : kinds;
-  return wide.join("|");
+  const parts = kinds.includes("int8") && !kinds.includes("float") ? kinds.filter((kind) => kind !== "int") : kinds;
+  // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- The typed catalog tables supply one or more ScalarKind names, and widening always keeps int8.
+  return parts as [ScalarKind, ...ScalarKind[]];
+};
+
+export const scalarKind = function scalarKind(name: string, dialect: Dialect): Kind {
+  return scalarKindParts(name, dialect).join("|");
 };
 
 /** The delimiter of an array's text, where the element type's is not a comma: a column carries it beside its kind. */
