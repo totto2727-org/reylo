@@ -31,7 +31,7 @@
 //   Without safeIntegers) is refused in an INTEGER or BIGINT column, where a number past 2^53 can
 //   Only be one; a BIGINT's number within 2^53, or libSQL's BigInt or digits, is its BigInt.
 import type { Columns } from "./values.ts";
-import { hasFunctionType, matchesUndefined } from "./native-predicates.ts";
+import { hasFunctionType, isEmptyArray, matchesUndefined } from "./native-predicates.ts";
 
 import { normalize } from "./decode-sqlite-values.ts";
 
@@ -61,9 +61,9 @@ const statements = new WeakMap<object, Map<string, Kept>>();
 /** How many statements Reylo keeps per database: more distinct texts than that drop the oldest. */
 const KEPT = 500;
 
-const prepare = <Result>(database: SqliteClient, text: string): Result =>
+const prepare = (database: SqliteClient, text: string): Statement | PromiseLike<Statement> =>
   // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- SQLite dispatch selects the native prepare protocol and whether its statement is awaited.
-  (database.prepare as (sql: string) => Result)(text);
+  (database.prepare as (sql: string) => Statement | PromiseLike<Statement>)(text);
 
 const cacheFor = (database: SqliteClient, keep: boolean): Map<string, Kept> | undefined => {
   const previous = statements.get(database);
@@ -90,9 +90,20 @@ const configureIntegerRead = (statement: Statement, typed: boolean): boolean => 
 const remember = (cache: Map<string, Kept>, key: string, entry: Kept): void => {
   if (cache.size >= KEPT) {
     const oldest = cache.keys().next();
-    if (!oldest.done) {cache.delete(oldest.value);}
+    if (oldest.done !== true) {cache.delete(oldest.value);}
   }
   cache.set(key, entry);
+};
+
+interface StatementSettings {
+  kept: boolean;
+  typed: boolean;
+}
+
+const prepareStatement = (database: SqliteClient, text: string, { kept, typed }: StatementSettings): Kept => {
+  // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- The synchronous SQLite adapters prepare a statement directly.
+  const statement = prepare(database, text) as Statement;
+  return { exact: configureIntegerRead(statement, typed), kept, statement };
 };
 
 /**
@@ -110,8 +121,7 @@ const statementFor = function (database: SqliteClient, text: string, typed: bool
   const key = `${typed ? "n" : "b"}${text}`;
   const found = cache?.get(key);
   if (found) {return found;}
-  const statement = prepare<Statement>(database, text);
-  const entry = { exact: configureIntegerRead(statement, typed), kept: keep, statement };
+  const entry = prepareStatement(database, text, { kept: keep, typed });
   if (cache) {remember(cache, key, entry);}
   return entry;
 };
@@ -119,14 +129,49 @@ const statementFor = function (database: SqliteClient, text: string, typed: bool
 // Every column typed: a number past 2^53 in one can be told as rounded (src/values.ts). A column
 // Read as a BigInt (`int8`) needs the statement's integers exact.
 const everyColumnTyped = function everyColumnTyped(columns: Columns | undefined): boolean {
-  return !matchesUndefined(columns) && columns.length > 0 && !columns.some(([, kind]) => kind === "unknown" || kind.split("|").includes("int8"));
+  return !matchesUndefined(columns) && !isEmptyArray(columns) && !columns.some(([, kind]) => kind === "unknown" || kind.split("|").includes("int8"));
+};
+
+// Turso's compat statement can throw when read intent is unavailable. Its all() runs either kind.
+const returnsRows = (statement: Statement): boolean | undefined => {
+  try {
+    return statement.reader;
+  } catch {
+    return undefined;
+  }
+};
+
+const FIRST_ROW = 0;
+
+const namedRows = (statement: Statement, rows: unknown[]): unknown[] => {
+  // A Node connection can supply positional rows even if its statements cannot turn that mode off.
+  if (isEmptyArray(rows) || !Array.isArray(rows[FIRST_ROW]) || !hasFunctionType(statement.columns)) {return rows;}
+  const columns = statement.columns().map(({ name }) => name);
+  // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- A native positional result uses arrays for every row.
+  const positional = rows as unknown[][];
+  return positional.map((row) => Object.fromEntries(columns.map((column, index) => [column, row[index]])));
+};
+
+const runStatement = ({ statement, exact }: Kept, values: unknown[], columns: Columns | undefined): unknown[] | Promise<unknown[]> => {
+  // Better-sqlite3 refuses all() on a statement that does not return rows.
+  if (returnsRows(statement) === false) {
+    statement.run(...values);
+    return [];
+  }
+  const result = statement.all(...values);
+  if (!Array.isArray(result)) {return Promise.resolve(result).then((rows) => normalize(rows, columns));}
+  return normalize(namedRows(statement, result), columns, { exact });
 };
 
 /**
- * Runs `text` on a synchronous SQLite database (better-sqlite3, node:sqlite, bun:sqlite, Turso's
- * compat Database) and returns its normalized rows; a statement that answers through a promise (no
- * such database) gives the promise, which `runSync` refuses.
+ * Runs a statement on a synchronous SQLite connection.
+ * @param {SqliteClient} database - The native SQLite connection.
+ * @param {string} text - The SQL statement.
+ * @param {unknown[]} values - Its bindings.
+ * @param {Columns | undefined} columns - The generated output types, when known.
+ * @returns {unknown[] | Promise<unknown[]>} The rows, or a promise from a driver that answered asynchronously.
  */
+// oxlint-disable-next-line eslint/max-params -- Preserve the SQLite adapter signature consumed by the query dispatcher.
 export const runSyncSqlite = function runSyncSqlite(database: SqliteClient, text: string, values: unknown[], columns: Columns | undefined): unknown[] | Promise<unknown[]> {
   const entry = statementFor(database, text, everyColumnTyped(columns));
   if (entry.kept) {return runStatement(entry, values, columns);}
@@ -137,42 +182,21 @@ export const runSyncSqlite = function runSyncSqlite(database: SqliteClient, text
   }
 };
 
-function runStatement({ statement, exact }: Kept, values: unknown[], columns: Columns | undefined): unknown[] | Promise<unknown[]> {
-  // Better-sqlite3 refuses all() on a statement that returns no rows.
-  if (reader(statement) === false) {
-    statement.run(...values);
-    return [];
-  }
-  const all = statement.all(...values);
-  if (!Array.isArray(all)) {return Promise.resolve(all).then((rows) => normalize(rows, columns));}
-  let rows = all;
-  // A database opened with returnArrays, on a Node whose statements cannot turn it off.
-  if (rows.length && Array.isArray(rows[0]) && hasFunctionType(statement.columns)) {
-    const names = statement.columns().map(({ name }) => name);
-    rows = (rows as unknown[][]).map((currentRow) => Object.fromEntries(names.map((currentName, index) => [currentName, currentRow[index]])));
-  }
-  return normalize(rows, columns, { exact });
-}
-
-// Whether the statement returns rows: undefined where it cannot say, as Turso 0.4's compat statement,
-// Whose `reader` throws "not implemented" and whose all() runs any statement.
-function reader(statement: Statement): boolean | undefined {
-  try {
-    return statement.reader;
-  } catch {
-    return undefined;
-  }
-}
-
 /**
  * Runs `text` on Turso's promise API (a Database from `connect()`, or the Transaction
  * `transactionAsync()` hands its callback) and returns its normalized rows. Its prepare() returns
  * the statement (its types say a promise of it from 0.6, so it is awaited), whose all() runs a
- * statement that returns no rows as well; the statement is closed after its one run.
+ * statement that returns no rows as well. The statement is closed after its one run.
+ * @param {SqliteClient} database - The native Turso connection or transaction.
+ * @param {string} text - The SQL statement.
+ * @param {unknown[]} values - Its bindings.
+ * @param {Columns | undefined} columns - The generated output types, when known.
+ * @returns {Promise<unknown[]>} The driver's rows in Reylo's representation.
  */
+// oxlint-disable-next-line eslint/max-params -- Preserve the SQLite adapter signature consumed by the query dispatcher.
 export const runTurso = async function runTurso(database: SqliteClient, text: string, values: unknown[], columns: Columns | undefined): Promise<unknown[]> {
   const typed = everyColumnTyped(columns);
-  const statement = await prepare<Statement | PromiseLike<Statement>>(database, text);
+  const statement = await prepare(database, text);
   try {
     if (hasFunctionType(statement.safeIntegers)) {statement.safeIntegers(!typed);}
     return normalize(await statement.all(...values), columns, { exact: !typed });
@@ -185,7 +209,13 @@ export const runTurso = async function runTurso(database: SqliteClient, text: st
  * Runs `text` on a SQLite-backed Durable Object's SQL storage (`ctx.storage.sql`), whose exec()
  * answers at once with a cursor, and returns its normalized rows. Its integers are numbers, so one
  * past 2^53 in an INTEGER column can only be a rounded one, and is refused.
+ * @param {SqliteClient} sql - The Durable Object's SQL storage.
+ * @param {string} text - The SQL statement.
+ * @param {unknown[]} values - Its bindings.
+ * @param {Columns | undefined} columns - The generated output types, when known.
+ * @returns {unknown[]} The driver's rows in Reylo's representation.
  */
+// oxlint-disable-next-line eslint/max-params -- Preserve the SQLite adapter signature consumed by the query dispatcher.
 export const runDurableObject = function runDurableObject(sql: SqliteClient, text: string, values: unknown[], columns: Columns | undefined): unknown[] {
   // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- A Durable Object's native exec method returns a cursor before this synchronous path returns.
   const cursor = (sql.exec as (query: string, ...bindings: unknown[]) => { toArray: () => unknown[] })(text, ...values);
