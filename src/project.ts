@@ -16,10 +16,10 @@ import nodePath from "node:path";
 import type { Engine, MissingEngine } from "./engine.ts";
 import { matchesUndefined, nonemptyText } from "./native-predicates.ts";
 
-import { commandOutput } from "./project-command.ts";
+import { nativeErrorText } from "./native-error-text.ts";
+import { resolveConnection } from "./project-connection.ts";
 import { readProjectConfig } from "./project-config.ts";
-import { findProjectFile, hasProjectPath, hostEnvironment, packageDir, PROJECT_FILE, PROJECT_FILES, readEnvFile } from "./project-files.ts";
-import { inUserinfo, urlParts } from "./project-url-template.ts";
+import { findProjectFile, hasProjectPath, hostEnvironment, packageDir, PROJECT_FILE, PROJECT_FILES } from "./project-files.ts";
 import { dialectOf, hclPath } from "./project-address.ts";
 import type { Dialect } from "./project-address.ts";
 
@@ -81,6 +81,74 @@ export type ResolvedProject = {
 };
 
 const DEFAULT_ENV_FILES = [".env.local", ".env"];
+
+const showPath = (directory: string, path: string): string => {
+  if (!isAbsolute(path)) {return path;}
+  return nonemptyText(relative(directory, path).split(sep).join("/")) ?? path;
+};
+
+interface ProjectSettings {
+  both: string[];
+  config: ProjectFile;
+  envFiles: string[];
+  error: string | undefined;
+  file: string | undefined;
+  root: string;
+  shown: (path: string) => string;
+}
+
+const settings = (
+  engine: Engine | MissingEngine,
+  projectDir: string,
+  env: Record<string, string | undefined>,
+): ProjectSettings => {
+  const shown = (path: string): string => showPath(projectDir, path);
+  const file = findProjectFile(projectDir, env);
+  const root = matchesUndefined(file) ? packageDir(projectDir) : dirname(file);
+  const { config, error: parseError } = readProjectConfig(engine, file, shown);
+  // Edits to the second filename would do nothing. Refuse both names beside one package.
+  const both = PROJECT_FILES.map((name) => join(root, name));
+  const conflict = matchesUndefined(nonemptyText(env.REYLO_CONFIG)) && both.every((path) => hasProjectPath(path));
+  const error = conflict ? `${both.map((path) => shown(path)).join(" and ")} are both project files; keep one.` : parseError;
+  const envFiles = (config.env ?? DEFAULT_ENV_FILES).map((filename) => resolve(root, filename));
+  return { both, config, envFiles, error, file, root, shown };
+};
+
+const connectionNotices = (config: ProjectFile, label: string): { missingUrl: string; notice?: string } => {
+  if (!matchesUndefined(config.url) && matchesUndefined(config.direct_url)) {
+    return {
+      missingUrl: `No database URL: ${label} sets url, which Reylo does not read; set direct_url there, or DATABASE_URL in the environment, .env.local or .env.`,
+      notice: `${label}: Reylo does not read url; set direct_url to the dev database Reylo reads your types from (it uses DATABASE_URL meanwhile)`,
+    };
+  }
+  return { missingUrl: `No database URL: set DATABASE_URL in the environment, .env.local or .env, or "direct_url" in ${label}.` };
+};
+
+interface CheckedAddress {
+  dialect: Dialect;
+  error: string | undefined;
+  source?: string | undefined;
+}
+
+interface ConnectionAddress {
+  url: string | undefined;
+  urlSource: string;
+}
+
+const checkAddress = ({ url, urlSource }: ConnectionAddress, root: string, problem: string | undefined): CheckedAddress => {
+  const address = nonemptyText(url);
+  if (matchesUndefined(address)) {return { dialect: "sqlite", error: problem };}
+  const dialect = dialectOf(address);
+  const error = problem ?? (matchesUndefined(dialect)
+    ? `Cannot tell the database from the URL (${urlSource}): reylo reads postgres://, postgresql://, mysql://, file:, sqlite:, duckdb: and hcl: URLs.`
+    : undefined);
+  try {
+    return { dialect: dialect ?? "sqlite", error, source: hclPath(address, root) };
+  } catch (error_) {
+    return { dialect: dialect ?? "sqlite", error: error ?? `${urlSource}: ${nativeErrorText(error_, "message")}` };
+  }
+};
+
 /**
  * The project `projectDir` belongs to. `engine` reads the project file: any database's engine does
  * (src/engine.ts, `anyEngine`), and where none is installed a project file is the project's error.
@@ -90,104 +158,14 @@ const DEFAULT_ENV_FILES = [".env.local", ".env"];
  * @returns {ResolvedProject} The native project settings and any configuration diagnostic.
  */
 export const resolveProject = function resolveProject(engine: Engine | MissingEngine, projectDir: string, env: Record<string, string | undefined> = hostEnvironment()): ResolvedProject {
-  const file = findProjectFile(projectDir, env);
-  const root = matchesUndefined(file) ? packageDir(projectDir) : dirname(file);
-  const shown = (path: string): string => (isAbsolute(path) ? relative(projectDir, path).split(sep).join("/") || path : path);
-  const parsed = readProjectConfig(engine, file, shown);
-  const { config } = parsed;
-  let error = parsed.error;
-  // Both names beside one package.json: whichever were read, edits to the other would do nothing.
-  const both = PROJECT_FILES.map((name) => join(root, name));
-  if (matchesUndefined(nonemptyText(env.REYLO_CONFIG)) && both.every((filePath) => hasProjectPath(filePath))) {error = `${both.map(shown).join(" and ")} are both project files; keep one.`;}
-  const envFiles = (config.env ?? DEFAULT_ENV_FILES).map((filename) => resolve(root, filename));
-  // The process environment wins; among the files, the first that sets a variable does.
-  const lookup = (name: string): { value: string; source: string } | undefined => {
-    if (!matchesUndefined(env[name])) {return { value: env[name], source: `${name} in the environment` };}
-    for (const path of envFiles) {
-      const value = readEnvFile(path)[name];
-      if (!matchesUndefined(value)) {return { value, source: `${name} in ${shown(path)}` };}
-    }
-    return undefined;
-  };
-  let url: string | undefined;
-  let urlSource = "DATABASE_URL";
-  // Reylo never reads `url`; a file that sets `direct_url` beside it has named Reylo's connection, and is fine.
-  const urlAlone = !matchesUndefined(config.url) && matchesUndefined(config.direct_url);
-  const notice = urlAlone ? `${shown(file!)}: Reylo does not read url; set direct_url to the dev database Reylo reads your types from (it uses DATABASE_URL meanwhile)` : undefined;
-  const missingUrl = urlAlone
-    ? `No database URL: ${shown(file!)} sets url, which Reylo does not read; set direct_url there, or DATABASE_URL in the environment, .env.local or .env.`
-    : `No database URL: set DATABASE_URL in the environment, .env.local or .env, or "direct_url" in ${file ? shown(file) : PROJECT_FILE}.`;
-  const written = config.direct_url;
-  let refreshUrl: (() => string | undefined) | undefined;
-  if (matchesUndefined(written)) {
-    const hit = lookup("DATABASE_URL");
-    url = hit?.value;
-    if (hit) {urlSource = hit.source;}
-  } else {
-    const missing: string[] = [];
-    const sources: string[] = [];
-    const parts = urlParts(written);
-    urlSource = `"direct_url" in ${shown(file!)}`;
-    if ("open" in parts) {
-      error ??= `${shown(file!)}: "direct_url" opens $( at column ${parts.open + 1} and never closes it.`;
-    } else {
-      // The text's ${VAR}s are Reylo's; a command's are its shell's, so that no value is read as
-      // Shell syntax, and its shell sees the variables the text would: the environment's, then
-      // The `.env` files'.
-      const texts = parts.map((part) =>
-        "text" in part
-          ? part.text.replace(/\$\{(?<name>[A-Za-z_][A-Za-z0-9_]*)\}/gu, (_, name: string) => {
-              const hit = lookup(name);
-              if (!hit) {missing.push(name);}
-              else {sources.push(hit.source);}
-              return hit?.value ?? "";
-            })
-          : undefined,
-      );
-      urlSource += sources.length ? `, ${sources.join(", ")}` : "";
-      if (missing.length) {
-        error ??= `${shown(file!)}: "direct_url" names ${missing.map((m) => `\${${m}}`).join(", ")}, which neither the environment nor ${envFiles.map(shown).join(" nor ")} sets.`;
-      } else if (parts.some((part) => "command" in part)) {
-        const shellEnv: Record<string, string> = {};
-        Iterator.from([...envFiles].reverse()).forEach((path) => {Object.assign(shellEnv, readEnvFile(path));});
-        Object.entries({ ...hostEnvironment(), ...env }).forEach(([name, value]) => {if (!matchesUndefined(value)) {shellEnv[name] = value;}});
-        const encoded = inUserinfo(parts);
-        const build = (fresh: boolean): { url: string } | { error: string } => {
-          let built = "";
-          for (const [index, part] of parts.entries()) {
-            if ("text" in part) {
-              built += texts[index];
-              continue;
-            }
-            const out = commandOutput(part.command, { cwd: root, env: shellEnv }, fresh);
-            if ("error" in out) {return { error: `${shown(file!)}: "direct_url" runs \`${part.command}\`, ${out.error}.` };}
-            built += encoded.has(part) ? encodeURIComponent(out.value) : out.value;
-          }
-          return { url: built };
-        };
-        // A project that cannot be used anyway runs nothing, so that it asks for no password.
-        if (!error) {
-          const first = build(false);
-          if ("error" in first) {error = first.error;}
-          else {url = first.url;}
-          refreshUrl = () => {
-            const again = build(true);
-            return "url" in again ? again.url : undefined;
-          };
-        }
-      } else {url = texts.join("");}
-    }
-  }
-  const dialect = url ? dialectOf(url) : "sqlite";
-  if (url && !dialect) {error ??= `Cannot tell the database from the URL (${urlSource}): reylo reads postgres://, postgresql://, mysql://, file:, sqlite:, duckdb: and hcl: URLs.`;}
-  // Either name, created or removed, changes the project.
-  const watched = [...new Set([...(file ? [file] : []), ...both]), ...envFiles];
-  try {
-    const source = url && hclPath(url, root);
-    if (source) {watched.push(source);}
-  } catch (error_) {
-    error ??= `${urlSource}: ${(error_ as Error).message}`;
-  }
-  // This fork supports only SQLite, including cached analysis without a URL.
-  return { file, root, dialect: dialect ?? "sqlite", strictParams: config.strict_params ?? true, sqlcommenter: config.sqlcommenter ?? true, cli: config.cli ?? {}, url, urlSource, refreshUrl, watched, error, notice, missingUrl };
+  const { both, config, envFiles, error: problem, file, root, shown } = settings(engine, projectDir, env);
+  const label = matchesUndefined(file) ? PROJECT_FILE : shown(file);
+  const { missingUrl, notice } = connectionNotices(config, label);
+  const { error: connectionError, refreshUrl, url, urlSource } = resolveConnection(config.direct_url, { env, envFiles, error: problem, label, root, shown });
+  const { dialect, error, source } = checkAddress({ url, urlSource }, root, connectionError);
+  // Creating or removing either project filename changes the project.
+  const watched = [...new Set([...matchesUndefined(file) ? [] : [file], ...both]), ...envFiles];
+  if (!matchesUndefined(source)) {watched.push(source);}
+  // oxlint-disable-next-line eslint/sort-keys -- Preserve property order for consumers serializing resolved project configuration.
+  return { file, root, dialect, strictParams: config.strict_params ?? true, sqlcommenter: config.sqlcommenter ?? true, cli: config.cli ?? {}, url, urlSource, refreshUrl, watched, error, notice, missingUrl };
 };

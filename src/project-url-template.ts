@@ -1,6 +1,6 @@
 import { isEmptyString, matchesUndefined } from "./native-predicates.ts";
 
-type UrlPart = { text: string } | { command: string };
+export type UrlPart = { text: string } | { command: string };
 
 const FIRST_CHARACTER = 0;
 const CHARACTER_STEP = 1;
