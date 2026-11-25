@@ -3,9 +3,13 @@
 // Their types, the functions a query can call with what they return, and the type names a cast
 // Takes. Free of Node.
 import type { Dialect } from "./engine-core.ts";
+import { matchesUndefined, nonemptyText } from "./native-predicates.ts";
 
+// oxlint-disable-next-line typescript/consistent-type-definitions -- Preserve the published catalog record alias and its structural assignability.
 export type Column = { name: string; type: string; nullable: boolean };
+// oxlint-disable-next-line typescript/consistent-type-definitions -- Preserve the published catalog record alias and its structural assignability.
 export type Table = { name: string; columns: Column[] };
+// oxlint-disable-next-line typescript/consistent-type-definitions -- Preserve the published catalog record alias and its structural assignability.
 export type CatalogFunction = {
   name: string;
   kind: "function" | "aggregate";
@@ -14,12 +18,15 @@ export type CatalogFunction = {
   /** It returns rows, so it can stand in a FROM clause. */
   rows: boolean;
 };
+// oxlint-disable-next-line typescript/consistent-type-definitions -- Preserve the published catalog record alias and its structural assignability.
 export type Catalog = { tables: Table[]; functions: CatalogFunction[]; types: string[] };
 
 interface Queries { tables: string; functions?: string; types?: string }
 
 /** Each database's catalog queries: rows of `[table, column, type, nullable]`, `[name, aggregate, returns[], rows]` and `[type]`. */
+// oxlint-disable-next-line eslint/sort-keys -- Preserve the published catalog descriptor enumeration order.
 export const CATALOG_QUERIES: Record<Dialect, Queries> = {
+  // oxlint-disable-next-line eslint/sort-keys -- Keep catalog statements ordered with the table query first.
   postgres: {
     // The tables and views of the schemas on the search path, as an unqualified name finds them.
     tables: `select c.relname::text, a.attname::text, format_type(a.atttypid, a.atttypmod), not a.attnotnull
@@ -48,12 +55,14 @@ export const CATALOG_QUERIES: Record<Dialect, Queries> = {
     tables: `select table_name, column_name, column_type, is_nullable = 'YES' from information_schema.columns
   where table_schema = database() order by table_name, ordinal_position`,
   },
+  // oxlint-disable-next-line eslint/sort-keys -- Keep catalog statements ordered with the table query first.
   sqlite: {
     // Each column named apart: a host may read a row by its columns' names.
     tables: `select m.name as table_name, p.name as column_name, p.type as column_type, not p."notnull" as nullable from sqlite_schema m join pragma_table_info(m.name) p
   where m.type in ('table', 'view') and m.name not like 'sqlite_%' order by m.name, p.cid`,
     functions: `select name, max(type = 'a') as aggregate, null as returns, 0 as set_returning from pragma_function_list where name not like 'sqlite_%' group by name order by name`,
   },
+  // oxlint-disable-next-line eslint/sort-keys -- Keep catalog statements ordered with the table query first.
   duckdb: {
     // The tables and views of the current schema, as an unqualified name finds them.
     tables: `select table_name, column_name, data_type, is_nullable from duckdb_columns()
@@ -67,13 +76,17 @@ export const CATALOG_QUERIES: Record<Dialect, Queries> = {
 
 /** The type names each database's casts take beyond what its catalog lists: the SQL standard's spellings, or every name where it lists none. */
 const SPELLED: Record<Dialect, string[]> = {
-  postgres: ["bigint", "boolean", "char", "character", "character varying", "decimal", "double precision", "int", "integer", "real", "smallint", "timestamp with time zone"],
-  mysql: ["binary", "char", "date", "datetime", "decimal", "double", "float", "json", "nchar", "real", "signed", "time", "unsigned", "year"],
-  sqlite: ["blob", "integer", "numeric", "real", "text"],
   duckdb: ["bigint", "blob", "boolean", "date", "decimal", "double", "float", "hugeint", "integer", "interval", "json", "smallint", "time", "timestamp", "timestamptz", "tinyint", "ubigint", "uhugeint", "uinteger", "usmallint", "utinyint", "uuid", "varchar"],
+  mysql: ["binary", "char", "date", "datetime", "decimal", "double", "float", "json", "nchar", "real", "signed", "time", "unsigned", "year"],
+  postgres: ["bigint", "boolean", "char", "character", "character varying", "decimal", "double precision", "int", "integer", "real", "smallint", "timestamp with time zone"],
+  sqlite: ["blob", "integer", "numeric", "real", "text"],
 };
 
-/** A type as the list shows it: Postgres's short names for the long standard ones. */
+/**
+ * Use the short catalog spelling of standard Postgres type names.
+ * @param {string} type - The database's type name.
+ * @returns {string} The catalog display type.
+ */
 export const shortType = function shortType(type: string): string {
   return type
     .replace(/^timestamp with time zone/u, "timestamptz")
@@ -83,21 +96,66 @@ export const shortType = function shortType(type: string): string {
     .replace(/^character varying/u, "varchar");
 };
 
-/** The catalog from its queries' rows; a database with no query for functions or types gives none, or the names it takes. */
+type TableRow = [table: string, column: string, type: unknown, nullable: unknown];
+type FunctionRow = [name: string, aggregate: unknown, returns: string[] | null, rows: unknown];
+const SINGLE_RETURN_TYPE = 1;
+const FIRST_VALUE = 0;
+
+const tableByName = (byName: Map<string, Table>, name: string): Table => {
+  const known = byName.get(name);
+  if (!matchesUndefined(known)) {return known;}
+  // oxlint-disable-next-line eslint/sort-keys -- Keep the public table's original catalog order.
+  const table: Table = { name, columns: [] };
+  byName.set(name, table);
+  return table;
+};
+
+const tableColumn = (byName: Map<string, Table>, [table, name, type, nullable]: TableRow): void => {
+  const { columns } = tableByName(byName, table);
+  // oxlint-disable-next-line typescript/no-base-to-string -- Preserve coercion of native type descriptors before shortening their text.
+  const displayed = shortType(String(type ?? ""));
+  // oxlint-disable-next-line eslint/sort-keys -- Keep the public column's original catalog order.
+  columns.push({ name, type: displayed, nullable: Boolean(Number(nullable)) });
+};
+
+const returnType = (returns: string[] | null): string | undefined => {
+  if (returns?.length !== SINGLE_RETURN_TYPE) {return undefined;}
+  // oxlint-disable-next-line typescript/no-non-null-assertion -- The driver reports exactly one type in this branch.
+  const type = returns[FIRST_VALUE]!;
+  // Polymorphic and pseudo types do not improve editor completion.
+  return /^(?:any|record|void|"any")/u.test(type) ? undefined : nonemptyText(shortType(type));
+};
+
+const catalogFunction = (row: unknown[]): CatalogFunction => {
+  // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- The native query supplies these positional function fields.
+  const [name, aggregate, returns, rows] = row as FunctionRow;
+  const type = returnType(returns);
+  const isAggregate = Boolean(Number(aggregate));
+  // oxlint-disable-next-line eslint/sort-keys -- Keep the public function's original catalog order.
+  return { name, kind: isAggregate ? "aggregate" : "function", ...(matchesUndefined(type) ? {} : { returns: type }), rows: Boolean(Number(rows)) };
+};
+
+const catalogType = ([name]: unknown[]): string =>
+  // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- Each native type query emits the type name in the first column.
+  name as string;
+
+/**
+ * Build the editor catalog from native query results.
+ * @param {Dialect} dialect - The database that supplies these rows.
+ * @param {unknown[][]} tables - Table and column results in catalog order.
+ * @param {unknown[][]} functions - Native function metadata, when available.
+ * @param {unknown[][]} types - Native type names, when available.
+ * @returns {Catalog} The editor's tables, functions, and accepted type names.
+ */
+// oxlint-disable-next-line eslint/max-params -- Preserve the published positional catalog arguments.
 export const catalog = function catalog(dialect: Dialect, tables: unknown[][], functions: unknown[][] = [], types: unknown[][] = []): Catalog {
   const byName = new Map<string, Table>();
-  Iterator.from(tables as [string, string, string, unknown][]).forEach(([table, name, type, nullable]) => {
-    let entry = byName.get(table);
-    if (!entry) {byName.set(table, (entry = { name: table, columns: [] }));}
-    entry.columns.push({ name, type: shortType(String(type ?? "")), nullable: Boolean(Number(nullable) || nullable === true) });
-  });
+  // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- The native query returns each table and column in this fixed layout.
+  Iterator.from(tables as TableRow[]).forEach((row) => {tableColumn(byName, row);});
+  // oxlint-disable-next-line eslint/sort-keys -- Preserve the exported editor catalog's field order.
   return {
     tables: [...byName.values()],
-    functions: (functions as [string, unknown, string[] | null, unknown][]).map(([name, aggregate, returns, rows]) => {
-      // A polymorphic or pseudo return type (anyelement, record, void) says nothing worth showing.
-      const real = returns?.length === 1 && !/^(?:any|record|void|"any")/u.test(returns[0]!) ? shortType(returns[0]!) : undefined;
-      return { name, kind: Number(aggregate) || aggregate === true ? "aggregate" : "function", ...(real ? { returns: real } : {}), rows: Boolean(Number(rows) || rows === true) };
-    }),
-    types: [...new Set([...(types as [string][]).map(([t]) => t), ...SPELLED[dialect]])].sort(),
+    functions: functions.map((row) => catalogFunction(row)),
+    types: [...new Set([...types.map((row) => catalogType(row)), ...SPELLED[dialect]])].toSorted(),
   };
 };

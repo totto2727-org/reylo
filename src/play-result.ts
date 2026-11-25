@@ -1,12 +1,17 @@
 // One statement as the playground shows it, in `reylo play` and on the docs site's /play: the
 // Diagnostics the content mapper would place in its file, by line and column, and its Params and
 // Returns as the docs print them. Free of Node, since the docs run it in the reader's tab.
-import type { Analysis, Dialect, Lexed } from "./engine-core.ts";
+import type { Analysis, Diagnostic, Dialect, Lexed } from "./engine-core.ts";
 import { moduleTypes } from "./module-types.ts";
+import { placer } from "./play-positions.ts";
 import { formatType, resultType } from "./type-format.ts";
 
+export { placer } from "./play-positions.ts";
+
+// oxlint-disable-next-line typescript/consistent-type-definitions -- Preserve the public playground type alias and its structural assignability.
 export type PlayDiagnostic = { message: string; code: number; line: number; column: number; endLine: number; endColumn: number };
 
+// oxlint-disable-next-line typescript/consistent-type-definitions -- Preserve the public playground type alias and its structural assignability.
 export type PlayResult = {
   sql: string;
   /** `{ id: number }`; absent where the statement takes no parameters. */
@@ -22,70 +27,74 @@ export type PlayResult = {
   ms: number;
 };
 
-/**
- * The statement's result from its analysis, or from the error that stopped one, which is placed as
- * the content mapper places it: at the file's start. Types are broken over lines wider than `width`.
- */
-export const playResult = function playResult(
-  sql: string,
-  dialect: Dialect,
-  outcome: { analysis: Analysis; lexed?: Pick<Lexed, "params" | "placeholders"> | undefined } | { error: { message: string; code?: number } },
-  options: { strictParams?: boolean; width?: number; ms?: number } = {},
-): PlayResult {
+type Outcome = { analysis: Analysis; lexed?: Pick<Lexed, "params" | "placeholders"> | undefined } |
+  { error: { message: string; code?: number } };
+
+interface PlayOptions { strictParams?: boolean; width?: number; ms?: number }
+interface Display { ms: number; place: ReturnType<typeof placer>; width: number }
+
+const NO_DURATION = 0;
+const ERROR_START = 0;
+const ERROR_LENGTH = 1;
+const UNKNOWN_DIAGNOSTIC = 5;
+const DEFAULT_OPTIONS = {};
+
+const placed = ({ code, length, message, start }: Diagnostic, place: Display["place"]): PlayDiagnostic =>
+  // oxlint-disable-next-line eslint/sort-keys -- Preserve the response's established diagnostic key order.
+  ({ message, code, ...place(start, length) });
+
+const failed = (
+  sql: string, { message, code }: { code?: number | undefined; message: string }, { ms, place }: Display,
+): PlayResult => {
+  const diagnostic = placed({ code: code ?? UNKNOWN_DIAGNOSTIC, length: ERROR_LENGTH, message, start: ERROR_START }, place);
+  // oxlint-disable-next-line eslint/sort-keys -- Preserve the public playground error response's JSON order.
+  return { sql, params: "unknown", returns: "unknown", diagnostics: [diagnostic], ms };
+};
+
+const displayed = (sql: string, types: ReturnType<typeof moduleTypes>, { ms, place, width }: Display): PlayResult =>
+  // oxlint-disable-next-line eslint/sort-keys -- Preserve the public playground response's JSON order.
+  ({
+    sql,
+    ...(types.params === "Record<never, never>" ? {} : { params: formatType(types.params, width) }),
+    returns: formatType(types.row === "unknown" ? "unknown" : resultType(types.row, types.cardinality), width),
+    element: formatType(types.row, width),
+    cardinality: types.cardinality,
+    diagnostics: types.diagnostics.map((diagnostic) => placed(diagnostic, place)),
+    ms,
+  });
+
+const displayFor = (sql: string, options: PlayOptions): Display => {
   const place = placer(sql);
   const width = options.width ?? Infinity;
-  const ms = options.ms ?? 0;
-  const placed = (d: { message: string; start: number; length: number; code: number }) => ({ message: d.message, code: d.code, ...place(d.start, d.length) });
-  if ("error" in outcome) {return { sql, params: "unknown", returns: "unknown", diagnostics: [placed({ message: outcome.error.message, start: 0, length: 1, code: outcome.error.code ?? 5 })], ms };}
-  try {
-    const types = moduleTypes(sql, outcome.analysis, dialect, outcome.lexed, options.strictParams ?? true);
-    return {
-      sql,
-      ...(types.params === "Record<never, never>" ? {} : { params: formatType(types.params, width) }),
-      returns: formatType(types.row === "unknown" ? "unknown" : resultType(types.row, types.cardinality), width),
-      element: formatType(types.row, width),
-      cardinality: types.cardinality,
-      diagnostics: types.diagnostics.map(placed),
-      ms,
-    };
-  } catch (error) {
-    return { sql, params: "unknown", returns: "unknown", diagnostics: [placed({ message: (error as Error).message, start: 0, length: 1, code: 5 })], ms };
-  }
+  const ms = options.ms ?? NO_DURATION;
+  return { ms, place, width };
 };
 
 /**
- * For a statement, a function from a UTF-8 byte range, as the engine and the content mapper give
- * ranges, to its 1-based line and column range in UTF-16 units, as an editor counts.
+ * Render one statement's inferred types or the native diagnostic that stopped its analysis.
+ * @param {string} sql - The statement text.
+ * @param {Dialect} dialect - The database dialect.
+ * @param {Outcome} outcome - The analysis and lexer result, or the failure.
+ * @param {PlayOptions} options - Type formatting and timing options.
+ * @returns {PlayResult} The hosted or local playground response.
  */
-export function placer(sql: string) {
-  const bytes = new TextEncoder().encode(sql);
-  // Index[b] is the UTF-16 index of the character byte b begins or sits inside.
-  const index = new Uint32Array(bytes.length + 1);
-  let u = 0;
-  for (let b = 0; b < bytes.length; ) {
-    const lead = bytes[b]!;
-    const n = lead < 0x80 ? 1 : lead < 0xE0 ? 2 : lead < 0xF0 ? 3 : 4;
-    for (let k = 0; k < n && b + k < bytes.length; k++) {index[b + k] = u;}
-    b += n;
-    u += n === 4 ? 2 : 1;
+// oxlint-disable-next-line eslint/max-params -- Preserve the existing playground function signature.
+export const playResult = function playResult(
+  sql: string,
+  dialect: Dialect,
+  outcome: Outcome,
+  options: PlayOptions = DEFAULT_OPTIONS,
+): PlayResult {
+  const display = displayFor(sql, options);
+  if ("error" in outcome) {
+    // oxlint-disable-next-line eslint/sort-keys -- Read the native message before its optional error code.
+    return failed(sql, { message: outcome.error.message, code: outcome.error.code }, display);
   }
-  index[bytes.length] = sql.length;
-  const lineStarts = [0];
-  for (let i = 0; i < sql.length; i++) {if (sql.charCodeAt(i) === 10) {lineStarts.push(i + 1);}}
-  const at = (i: number) => {
-    let lo = 0;
-    let hi = lineStarts.length - 1;
-    while (lo < hi) {
-      const mid = (lo + hi + 1) >> 1;
-      if (lineStarts[mid]! <= i) {lo = mid;}
-      else {hi = mid - 1;}
-    }
-    return { line: lo + 1, column: i - lineStarts[lo]! + 1 };
-  };
-  const clamp = (byte: number): number => index[Math.max(0, Math.min(byte, bytes.length))]!;
-  return (start: number, length: number) => {
-    const a = at(clamp(start));
-    const b = at(clamp(start + length));
-    return { line: a.line, column: a.column, endLine: b.line, endColumn: b.column };
-  };
-}
+  try {
+    const types = moduleTypes(sql, outcome.analysis, dialect, outcome.lexed, options.strictParams ?? true);
+    return displayed(sql, types, display);
+  } catch (error) {
+    // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- Preserve the native diagnostic supplied to the playground.
+    return failed(sql, { message: (error as Error).message }, display);
+  }
+};
