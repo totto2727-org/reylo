@@ -6,15 +6,14 @@
 // Translated from hclsyntax/parser.go, parser_template.go and public.go at
 // Hashicorp/hcl 00057cf06d7b38a3f89e6e54d622eee98322b314.
 // The AST is data-only. cty evaluation is outside this port's boundary.
+/* oxlint-disable eslint/max-lines -- Keep HCL's recursive grammar on its existing Parser prototype with one Peeker, newline stack, and diagnostic stream. */
 import { lexConfig, lexExpression, lexTemplate } from './scanner.ts';
 import { Peeker } from './peeker.ts';
 import { TemplateParser } from './parser-template.ts';
-import { nameSuggestion } from './parser-suggestion.ts';
+import { readTemplateParts } from './parser-template-read.ts';
 import { dynamic, error, literal } from './parser-values.ts';
 import { flushHeredocTemplateParts, meldConsecutiveStringLiterals } from './parser-template-tokens.ts';
-import type { TemplateParts, TemplateToken } from './parser-template-tokens.ts';
 import { parseStringLiteralToken } from './string-literal.ts';
-import { trimLeadingWhitespace as trimLeft, trimTrailingWhitespace as trimRight } from './whitespace.ts';
 import { rangeBetween as between, emptyRangeAt, rangeString, isStringLiteral } from './types.ts';
 import type { Anonymous, Attribute, Block, Body, Diagnostic, Expression, Literal, ObjectKey, Pos, Range, Token, TraversalStep } from './types.ts';
 // oxlint-disable-next-line import/no-relative-parent-imports -- Reuse the package's native guards without loading Effect.
@@ -35,6 +34,13 @@ const PRECEDENCE_STEP = 1;
 const HEREDOC_INDENT_MARKER_POSITION = 2;
 const DASH_BYTE = 45;
 const FIRST_EXPRESSION = 0;
+const PASSTHROUGH_TOKEN_COUNT = 2;
+
+interface ParsedTemplate {
+  expressions: Expression[];
+  passthru: boolean;
+  range: Range;
+}
 // oxlint-disable-next-line unicorn/no-null -- HCL's null keyword and absent optional AST clauses use a native null value.
 const HCL_NULL = null;
 
@@ -238,6 +244,14 @@ const relativeTraversal = function relativeTraversal(expression: Expression, ste
   // oxlint-disable-next-line eslint/sort-keys -- Preserve the public traversal AST key order.
   return { kind: 'relativeTraversal', source: expression, steps: [step], range: between(expression.range, step.range) };
 };
+const templateExpression = (template: ParsedTemplate, range: Range): Expression => {
+  if (template.passthru) {
+    // oxlint-disable-next-line eslint/sort-keys, typescript/no-non-null-assertion -- Passthrough templates have one expression in their established AST field order.
+    return { kind: "templateWrap", wrapped: template.expressions[FIRST_EXPRESSION]!, range };
+  }
+  return { kind: "template", parts: template.expressions, range };
+};
+
 const literalIndex = ({ value, numberText }: Literal, range: Range): TraversalStep => {
   const spelling = matchesUndefined(numberText) || isEmptyString(numberText) ? {} : { numberText };
   // oxlint-disable-next-line eslint/sort-keys -- Preserve literal index AST fields before optional numeric spelling.
@@ -615,11 +629,7 @@ export class Parser extends Peeker {
     const open = this.read();
     const inner = this.parseTemplateInner(opposite(open.type), open.type === "TokenOHeredoc" && open.bytes[HEREDOC_INDENT_MARKER_POSITION] === DASH_BYTE);
     const range = between(open.range, this.prevRange());
-    if (inner.passthru) {
-      // oxlint-disable-next-line eslint/sort-keys, typescript/no-non-null-assertion -- Passthrough templates have one expression in their established AST field order.
-      return { kind: "templateWrap", wrapped: inner.expressions[FIRST_EXPRESSION]!, range };
-    }
-    return { kind: "template", parts: inner.expressions, range };
+    return templateExpression(inner, range);
   }
 
   private parseUnary(): Expression {
@@ -1257,113 +1267,19 @@ export class Parser extends Peeker {
 
   public parseTemplate(end: string, flush: boolean): Expression {
     const inner = this.parseTemplateInner(end, flush);
-    return inner.passthru ? { kind: 'templateWrap', wrapped: inner.expressions[0]!, range: inner.range } : { kind: 'template', parts: inner.expressions, range: inner.range };
+    return templateExpression(inner, inner.range);
   }
-  private parseTemplateInner(end: string, flush: boolean): { expressions: Expression[]; passthru: boolean; range: Range } {
-    const parts = this.parseTemplateParts(end);
+
+  private parseTemplateInner(end: string, flush: boolean): ParsedTemplate {
+    const parts = readTemplateParts(this, end);
     if (flush) {flushHeredocTemplateParts(parts);}
     meldConsecutiveStringLiterals(parts);
     const parser = new TemplateParser(parts.tokens, this.diagnostics);
     const expressions = parser.parseRoot();
-    return { expressions, passthru: parts.tokens.length === 2 && parts.tokens[0]!.kind === 'interpolation', range: parts.range };
-  }
-
-  private parseTemplateParts(end: string): TemplateParts {
-    const parts: TemplateToken[] = [];
-    const startRange = this.nextRange();
-    let ltrimNext = false; let nextCanTrimPrevious = false; let endRange: Range;
-    tokens: for (;;) {
-      const next = this.read();
-      if (next.type === end) { endRange = next.range; break }
-      const ltrim = ltrimNext; const canTrimPrevious = nextCanTrimPrevious;
-      ltrimNext = false; nextCanTrimPrevious = false;
-      if (next.type === 'TokenStringLit' || next.type === 'TokenQuotedLit') {
-        const result = parseStringLiteralToken(next); this.diagnostics.push(...result.diagnostics);
-        parts.push({ kind: 'literal', value: ltrim ? trimLeft(result.value) : result.value, range: cloneRange(next.range) });
-        nextCanTrimPrevious = true;
-      } else if (next.type === 'TokenTemplateInterp') {
-        if (canTrimPrevious && next.bytes.length === 3 && next.bytes[2] === 126 && parts.length) {
-          const previous = parts.at(-1)!; if (previous.kind === 'literal') {previous.value = trimRight(previous.value);}
-        }
-        this.pushIncludeNewlines(false);
-        const expression = this.parseExpression(); const close = this.peek();
-        if (close.type === 'TokenTemplateSeqEnd') { this.read(); if (close.bytes.length === 2 && close.bytes[0] === 126) {ltrimNext = true} } else {
-          if (!this.recovery) {
-            if (close.type === 'TokenEOF') {this.diag('Unclosed template interpolation sequence', 'There is no closing brace for this interpolation sequence before the end of the file. This might be caused by incorrect nesting inside the given expression.', startRange);}
-            else if (close.type === 'TokenColon') {this.diag('Extra characters after interpolation expression', 'Template interpolation doesn\'t expect a colon at this location. Did you intend this to be a literal sequence to be processed as part of another language? If so, you can escape it by starting with "$${" instead of just "${".', close.range, between(startRange, close.range));}
-            else if ((close.type === 'TokenCQuote' || close.type === 'TokenOQuote') && end === 'TokenCQuote') {this.diag('Unclosed template interpolation sequence', 'There is no closing brace for this interpolation sequence before the end of the quoted template. This might be caused by incorrect nesting inside the given expression.', startRange);}
-            else {this.diag('Extra characters after interpolation expression', 'Expected a closing brace to end the interpolation expression, but found extra characters.\n\nThis can happen when you include interpolation syntax for another language, such as shell scripting, but forget to escape the interpolation start token. If this is an embedded sequence for another language, escape it by starting with "$${" instead of just "${".', close.range, between(startRange, close.range));}
-          }
-          this.recover('TokenTemplateSeqEnd');
-        }
-        this.popIncludeNewlines();
-        parts.push({ kind: 'interpolation', expression, range: between(next.range, close.range) });
-      } else if (next.type === 'TokenTemplateControl') {
-        if (canTrimPrevious && next.bytes.length === 3 && next.bytes[2] === 126 && parts.length) {
-          const previous = parts.at(-1)!; if (previous.kind === 'literal') {previous.value = trimRight(previous.value);}
-        }
-        this.pushIncludeNewlines(false);
-        const kw = this.peek();
-        if (kw.type !== 'TokenIdent') {
-          if (!this.recovery) {this.diag('Invalid template directive', 'A template directive keyword ("if", "for", etc) is expected at the beginning of a %{ sequence.', kw.range, between(next.range, kw.range));}
-          this.recover('TokenTemplateSeqEnd'); this.popIncludeNewlines(); continue;
-        }
-        this.read();
-        const word = text(kw);
-        switch (word) {
-          case 'if': {
-            const condition = this.parseExpression(); parts.push({ kind: 'if', condition, range: between(next.range, this.nextRange()) }); break;
-          }
-          case 'else': case 'endif': case 'endfor': { parts.push({ kind: word, range: between(next.range, this.nextRange()) }); break; }
-          case 'for': {
-            if (this.peek().type !== 'TokenIdent') {
-              if (!this.recovery) {this.diag("Invalid 'for' directive", "For directive requires variable name after 'for'.", this.peek().range);}
-              this.recover('TokenTemplateSeqEnd'); this.popIncludeNewlines(); continue tokens;
-            }
-            let valueVar = text(this.read()); let keyVar = '';
-            if (this.peek().type === 'TokenComma') {
-              keyVar = valueVar; this.read();
-              if (this.peek().type !== 'TokenIdent') {
-                if (!this.recovery) {this.diag("Invalid 'for' directive", 'For directive requires value variable name after comma.', this.peek().range);}
-                this.recover('TokenTemplateSeqEnd'); this.popIncludeNewlines(); continue tokens;
-              }
-              valueVar = text(this.read());
-            }
-            if (!keyword(this.peek(), 'in')) {
-              if (!this.recovery) {this.diag("Invalid 'for' directive", "For directive requires 'in' keyword after names.", this.peek().range);}
-              this.recover('TokenTemplateSeqEnd'); this.popIncludeNewlines(); continue tokens;
-            }
-            this.read();
-            const collection = this.parseExpression(); parts.push({ kind: 'for', keyVar, valueVar, collection, range: between(next.range, this.nextRange()) }); break;
-          }
-          default: {
-            if (!this.recovery) {
-              const suggestion = nameSuggestion(word, ['if', 'for', 'else', 'endif', 'endfor']);
-              this.diag('Invalid template control keyword', `${JSON.stringify(word)} is not a valid template control keyword.${suggestion ? ` Did you mean ${JSON.stringify(suggestion)}?` : ''}`, kw.range, between(next.range, kw.range));
-            }
-            this.recover('TokenTemplateSeqEnd'); this.popIncludeNewlines(); continue;
-          }
-        }
-        const close = this.peek();
-        if (close.type === 'TokenTemplateSeqEnd') { this.read(); if (close.bytes.length === 2 && close.bytes[0] === 126) {ltrimNext = true} } else {
-          if (!this.recovery) {this.diag(`Extra characters in ${word} marker`, 'Expected a closing brace to end the sequence, but found extra characters.', close.range, between(startRange, close.range));}
-          this.recover('TokenTemplateSeqEnd');
-        }
-        this.popIncludeNewlines();
-      } else {
-        if (!this.recovery) {this.diag('Unterminated template string', 'No closing marker was found for the string.', next.range, between(startRange, next.range));}
-        endRange = this.recover(end).range; break;
-      }
-    }
-    if (!parts.length) {parts.push({ kind: 'literal', value: '', range: emptyRangeAt(startRange) });}
-    parts.push({ kind: 'end', range: endRange });
-    return { tokens: parts, range: between(startRange, endRange) };
+    const passthru = parts.tokens.length === PASSTHROUGH_TOKEN_COUNT && parts.tokens[FIRST_EXPRESSION]?.kind === "interpolation";
+    return { expressions, passthru, range: parts.range };
   }
 }
-
-// Unicode White_Space as used by Go unicode.IsSpace. JavaScript's \s differs
-// For FEFF and NEL, so do not use String.trim() here.
-const cloneRange = (range: Range): Range => ({ filename: range.filename, start: { ...range.start }, end: { ...range.end } });
 
 export const parseConfig = function parseConfig(source: string | Uint8Array, filename = '', start?: Pos): { body: Body; diagnostics: Diagnostic[] } {
   const result = lexConfig(matchesString(source) ? encoder.encode(source) : source, filename, start);
