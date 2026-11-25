@@ -2,6 +2,7 @@
 // Prose, then the statement in a `sql` code block, so an editor's hover over the import (or over
 // Its `.sql`) shows them as it shows any declaration's JSDoc. It imports nothing from Node.
 import type { Dialect } from "./engine.ts";
+import { isEmptyString, matchesNull, matchesNullish, matchesUndefined } from "./native-predicates.ts";
 
 /** The comments before a statement, as prose, and the offset where they end. */
 export type Leading = { prose: string; end: number };
@@ -19,6 +20,7 @@ const LINE_MARKER = "--";
 const MYSQL_LINE_MARKER = "#";
 const BLOCK_START = "/*";
 const BLOCK_END = "*/";
+const MIN_FENCE_LENGTH = 3;
 
 interface Comment {
   end: number;
@@ -39,9 +41,9 @@ const leadingIndent = (line: string): number => /^[ \t]*/u.exec(line)?.[START].l
 
 const dedent = (lines: string[]): string[] => {
   const trimmed = lines.map((line) => line.replace(/\s+$/u, ""));
-  while (trimmed.length && !trimmed[START]) {trimmed.shift();}
-  while (trimmed.length && !trimmed.at(LAST)) {trimmed.pop();}
-  const indent = Math.min(...trimmed.filter((line) => line).map((line) => leadingIndent(line)));
+  while (trimmed.length > EMPTY && isEmptyString(trimmed[START] ?? "")) {trimmed.shift();}
+  while (trimmed.length > EMPTY && isEmptyString(trimmed.at(LAST) ?? "")) {trimmed.pop();}
+  const indent = Math.min(...trimmed.filter(Boolean).map((line) => leadingIndent(line)));
   return trimmed.map((line) => line.slice(Math.min(indent, leadingIndent(line))));
 };
 
@@ -98,9 +100,9 @@ const readComment = (sql: string, start: number, dialect: Dialect | undefined): 
  * paragraph. Read as the dialect reads comments: Postgres nests block comments, MySQL's `--` is one
  * only before a space or a control character and `#` starts one too, and MySQL's `/*!` and `/*+`
  * are code to the server, so they end the prose. With no dialect (no project), `--` and `/* *\/`.
- * @param sql - The SQL file's source.
- * @param dialect - The comment syntax used by the project.
- * @returns The leading prose and the offset of the last comment.
+ * @param {string} sql - The SQL file's source.
+ * @param {Dialect} [dialect] - The comment syntax for the project.
+ * @returns {Leading} The leading prose and the end offset of the last comment.
  */
 export const leadingComment = (sql: string, dialect?: Dialect): Leading => {
   const paragraphs: string[][] = [];
@@ -129,19 +131,32 @@ export const leadingComment = (sql: string, dialect?: Dialect): Leading => {
   return { prose, end: cursor.end };
 };
 
-/** The statement after its leading comments, its blank edges trimmed. */
+/**
+ * The statement after its leading comments, its blank edges trimmed.
+ * @param {string} sql - The SQL file's source.
+ * @param {Leading} leading - The end offset from `leadingComment`.
+ * @returns {string} The statement without leading and trailing blank space.
+ */
 export const statementAfter = function statementAfter(sql: string, leading: Leading): string {
   return sql.slice(leading.end).trim();
 };
 
-/** The fence a Markdown text opens and never closes, which would take in what follows it. */
+/**
+ * The fence a Markdown text opens and never closes, which would take in what follows it.
+ * @param {string} text - The Markdown text before the SQL code block.
+ * @returns {string | undefined} The open fence, if there is one.
+ */
 const openFence = function openFence(text: string): string | undefined {
   let open: string | undefined;
   Iterator.from(text.split("\n")).forEach((line) => {
-    const regexMatch = /^ {0,3}(`{3,}|~{3,})/u.exec(line);
-    if (!regexMatch) {return;}
-    if (!open) {open = regexMatch[1];}
-    else if (regexMatch[1]![0] === open[0] && regexMatch[1]!.length >= open.length && !line.slice(regexMatch[0].length).trim()) {open = undefined;}
+    const match = /^ {0,3}(?<fence>`{3,}|~{3,})/u.exec(line);
+    if (matchesNull(match)) {return;}
+    const fence = match.groups?.fence;
+    if (matchesUndefined(fence)) {return;}
+    if (matchesUndefined(open)) {open = fence;}
+    else if (fence.startsWith(open.charAt(START)) && fence.length >= open.length && isEmptyString(line.slice(match[START].length).trim())) {
+      open = undefined;
+    }
   });
   return open;
 };
@@ -151,20 +166,25 @@ const openFence = function openFence(text: string): string | undefined {
  * `note`, each a paragraph where it is given. A star before a slash would end the comment, so a
  * backslash goes between them; the fence is longer than any run of backticks in the statement, and
  * a fence the prose leaves open is closed before the block. Empty when there is nothing to say.
+ * @param {string} prose - The text before the SQL code block.
+ * @param {string | undefined} sql - The SQL text for the code block.
+ * @param {string} [note] - The text after the SQL code block.
+ * @param {string} [indent] - The prefix before each JSDoc line.
+ * @returns {string} The JSDoc comment, including its final line break.
  */
 export const docComment = function docComment(prose: string, sql: string | undefined, note = "", indent = ""): string {
   const parts: string[] = [];
   if (prose) {
     const open = openFence(prose);
-    parts.push(open ? `${prose}\n${open}` : prose);
+    parts.push(matchesUndefined(open) ? prose : `${prose}\n${open}`);
   }
-  if (sql) {
-    const longest = Math.max(0, ...(sql.match(/`+/gu) ?? []).map((run) => run.length));
-    const fence = "`".repeat(Math.max(3, longest + 1));
+  if (!matchesNullish(sql) && !isEmptyString(sql)) {
+    const longest = Math.max(EMPTY, ...(sql.match(/`+/gu) ?? []).map((run) => run.length));
+    const fence = "`".repeat(Math.max(MIN_FENCE_LENGTH, longest + ONE_CODE_UNIT));
     parts.push(`${fence}sql\n${sql}\n${fence}`);
   }
   if (note) {parts.push(note);}
   if (!parts.length) {return "";}
   const body = parts.join("\n\n").replaceAll("*/", String.raw`*\/`).split("\n");
-  return [`${indent}/**`, ...body.map((l) => (l ? `${indent} * ${l}` : `${indent} *`)), `${indent} */`, ""].join("\n");
+  return [`${indent}/**`, ...body.map((line) => (line ? `${indent} * ${line}` : `${indent} *`)), `${indent} */`, ""].join("\n");
 };
