@@ -294,19 +294,22 @@ const checkZonedTime = (name: string, parameterValue: unknown): void => {
   }
 };
 
-const checkTime = function checkTime(type: EngineType | undefined, name: string, parameterValue: unknown): void {
-  if (matchesUndefined(type) || matchesNullish(parameterValue)) {return;}
-  if (type.kind === "array") {
-    if (Array.isArray(parameterValue)) {Iterator.from(parameterValue).forEach((element) => {checkTime(Array.isArray(element) ? type : type.of, name, element);});}
-    return;
-  }
-  if (type.kind !== "scalar") {return;}
+const checkScalarTime = (type: Extract<EngineType, { kind: "scalar" }>, name: string, parameterValue: unknown): void => {
   if (type.name === "timestamptz") {
     checkZonedTime(name, parameterValue);
     return;
   }
   if (parameterValue instanceof Date && type.name.split("|").every((part) => part === "timestamp" || part === "date")) {
     throw new ParameterError(`Parameter "${name}" is a ${type.name === "date" ? "date" : "timestamp"} without a time zone, so it takes the wall-clock text ("2026-10-12 19:06:48.282", "2026-10-12"), not a Date: drivers write a Date's time in different zones (the app's, the server's or UTC).`);
+  }
+};
+
+const checkTime = function checkTime(type: EngineType | undefined, name: string, parameterValue: unknown): void {
+  if (matchesUndefined(type) || matchesNullish(parameterValue)) {return;}
+  if (type.kind === "array") {
+    if (Array.isArray(parameterValue)) {Iterator.from(parameterValue).forEach((element) => {checkTime(Array.isArray(element) ? type : type.of, name, element);});}
+  } else if (type.kind === "scalar") {
+    checkScalarTime(type, name, parameterValue);
   }
 };
 
@@ -590,71 +593,137 @@ interface BoundStatement {
   values: unknown[];
 }
 
+type InputMetadata = NonNullable<QueryModule["inputs"]>[string];
+type QueryChecks = NonNullable<QueryModule["checks"]>;
+
+interface JsonParameter {
+  input: InputMetadata | undefined;
+  name: string;
+  schema: Exclude<InputMetadata["schema"], undefined>;
+}
+
+const validatedJson = (
+  { name, schema }: JsonParameter,
+  parameterValue: unknown,
+  { validate, withDefaults }: Pick<QueryChecks, "validate" | "withDefaults">,
+): unknown => {
+  const normalized = withDefaults(schema, parameterValue);
+  const failure = validate(schema, normalized);
+  if (failure) {throw new ParameterError(`Parameter "${name}"${failure.path ? ` at ${failure.path}` : ""} ${failure.message}.`);}
+  return normalized;
+};
+
+const typedJsonNull = (input: JsonParameter, parameterValue: unknown, validate: QueryChecks["validate"]): unknown => {
+  if (input.input?.nullable !== false) {return parameterValue;}
+  if (matchesUndefined(parameterValue) || validate(input.schema, NATIVE_NULL)) {refuseNull(input.name, parameterValue);}
+  return JSON_NULL;
+};
+
+// A typed JSON parameter (`:p::jsonb('…')`): a value left out takes the schema's default, a
+// Key under `properties` too, and the value is checked against the schema before the
+// Statement runs (wiki/typed-json-params.md). Null is SQL NULL where the statement takes SQL
+// NULL for the parameter, and elsewhere JSON's null, where the schema admits it; a value left
+// Out there is refused.
+const typedJson = (query: QueryModule, input: JsonParameter, supplied: unknown): unknown => {
+  const { name, schema } = input;
+  const { cloneJson, validate, withDefaults } = checksFor(query, name);
+  const candidate = matchesUndefined(supplied) && !matchesNull(schema) && hasObjectType(schema) && "default" in schema
+    ? cloneJson(schema.default)
+    : supplied;
+  const normalized = matchesNullish(candidate)
+    ? typedJsonNull(input, candidate, validate)
+    : validatedJson(input, candidate, { validate, withDefaults });
+  return matchesUndefined(normalized) ? NATIVE_NULL : normalized;
+};
+
+// A structured parameter is checked against its column list and written as the JSON the
+// Statement reads; in an insert, its lists name only the keys the call carries. It refuses
+// Null itself, saying what to pass.
+const bindRows = (
+  query: QueryModule,
+  bound: BoundStatement,
+  { index, name, type }: { index: number; name: string; type: Extract<EngineType, { kind: "rows" }> },
+): void => {
+  const structured = query.structured?.find((candidate) => candidate.name === name);
+  const { prepareRows, variant } = checksFor(query, name);
+  const prepared = prepareRows(name, type, bound.values[index], query.dialect, !matchesUndefined(structured));
+  bound.values[index] = prepared.value;
+  if (structured) {bound.text = variant(bound.text, structured, type.fields, prepared.present);}
+};
+
+interface ParameterPosition {
+  index: number;
+  name: string;
+  params: ParamsInput;
+}
+
+interface ParameterMetadata extends ParameterPosition {
+  input: InputMetadata | undefined;
+  type: EngineType | undefined;
+}
+
+// A parameter the statement takes no null for, which its types rely on (a column it alone
+// Fills, an expression of it typed non-null), refuses null and refuses to be left out, which
+// Would bind NULL: exactly where its declared type takes no null (src/render.ts,
+// `renderParamType`). One typed `unknown` is declared `unknown` and takes anything. A JSON one
+// Takes JSON's null there instead, unless the schema its type carries refuses null, and is
+// Refused only when left out.
+const representsJsonNull = (
+  query: QueryModule,
+  bound: BoundStatement,
+  { index, input, name, params, type }: ParameterMetadata,
+): boolean => {
+  if (input?.nullable !== false || !matchesNull(bound.values[index])) {return false;}
+  if (type?.kind === "json" && !matchesUndefined(params[name]) && !refusesNull(query, type)) {return true;}
+  if (type?.kind === "json" || refusesNull(query, type)) {refuseNull(name, params[name]);}
+  return false;
+};
+
+// An array parameter takes no NULL element, as its type says (`:ids::int[]` is `number[]`):
+// A NULL in `= any(:ids)` matches nothing. An array inside a
+// Structured parameter's member keeps its NULL elements (src/rows.ts).
+const validateArrayMembers = (bound: BoundStatement, { index, name, type }: ParameterMetadata): void => {
+  if (type?.kind !== "array" || !Array.isArray(bound.values[index])) {return;}
+  const at = nullElement(bound.values[index]);
+  if (!matchesUndefined(at)) {throw new ParameterError(`Parameter "${name}" is an array whose elements may not be null, and the element at ${at} is. Leave it out of the array.`);}
+};
+
+const validateBinding = (query: QueryModule, bound: BoundStatement, parameter: ParameterMetadata): void => {
+  validateArrayMembers(bound, parameter);
+  const { index, name, type } = parameter;
+  // A `::type` written on MySQL or SQLite, whose cast turns a value it cannot read into 0 or
+  // NULL: the value is checked against the type as written.
+  const cast = query.inputs?.[name]?.cast;
+  if (!matchesUndefined(cast) && !matchesUndefined(type)) {checksFor(query, name).checkCast(name, cast, type, bound.values[index], query.dialect);}
+  checkTime(type, name, bound.values[index]);
+  checkBinary(type, name, bound.values[index]);
+};
+
+const bindScalar = (query: QueryModule, bound: BoundStatement, parameter: ParameterMetadata): void => {
+  const jsonNull = representsJsonNull(query, bound, parameter);
+  validateBinding(query, bound, parameter);
+  const { index, name, type } = parameter;
+  if (jsonNull) {
+    bound.values[index] = JSON_NULL;
+  } else {
+    const parameterValue = bound.values[index];
+    bound.values[index] = encode({ dialect: query.dialect, name }, type, parameterValue);
+  }
+};
+
+const bindParameter = (query: QueryModule, bound: BoundStatement, { index, name, params }: ParameterPosition): void => {
+  const input = query.inputs?.[name];
+  const { type, schema } = input ?? {};
+  if (!matchesUndefined(schema)) {bound.values[index] = typedJson(query, { input, name, schema }, params[name]);}
+  else if (type?.kind === "rows") {bindRows(query, bound, { index, name, type });}
+  else {bindScalar(query, bound, { index, input, name, params, type });}
+};
+
 const statement = function statement(query: QueryModule, params: ParamsInput): BoundStatement {
   // The build step already compiled the statement; only the values need ordering.
   const compiled = compile(query);
-  const bound: BoundStatement = { text: compiled.text, values: compiled.order.map((name) => value(params, name)), names: compiled.order };
-  bound.names.forEach((name, index) => {
-    const input = query.inputs?.[name];
-    const type = input?.type;
-    // A typed JSON parameter (`:p::jsonb('…')`): a value left out takes the schema's default, a
-    // Key under `properties` too, and the value is checked against the schema before the
-    // Statement runs (wiki/typed-json-params.md). Null is SQL NULL where the statement takes SQL
-    // NULL for the parameter, and elsewhere JSON's null, where the schema admits it; a value left
-    // Out there is refused.
-    const schema = input?.schema;
-    if (!matchesUndefined(schema)) {
-      let parameterValue = params[name];
-      const { cloneJson, validate, withDefaults } = checksFor(query, name);
-      if (matchesUndefined(parameterValue) && !matchesNull(schema) && hasObjectType(schema) && "default" in schema) {parameterValue = cloneJson(schema.default);}
-      if (!matchesUndefined(parameterValue) && !matchesNull(parameterValue)) {
-        parameterValue = withDefaults(schema, parameterValue);
-        const failure = validate(schema, parameterValue);
-        if (failure) {throw new ParameterError(`Parameter "${name}"${failure.path ? ` at ${failure.path}` : ""} ${failure.message}.`);}
-      } else if (input?.nullable === false) {
-        if (matchesUndefined(parameterValue) || validate(schema, NATIVE_NULL)) {refuseNull(name, parameterValue);}
-        parameterValue = JSON_NULL;
-      }
-      bound.values[index] = matchesUndefined(parameterValue) ? NATIVE_NULL : parameterValue;
-      return;
-    }
-    // A structured parameter is checked against its column list and written as the JSON the
-    // Statement reads; in an insert, its lists name only the keys the call carries. It refuses
-    // Null itself, saying what to pass.
-    if (type?.kind === "rows") {
-      const structured = query.structured?.find((candidate) => candidate.name === name);
-      const { prepareRows, variant } = checksFor(query, name);
-      const prepared = prepareRows(name, type, bound.values[index], query.dialect, !matchesUndefined(structured));
-      bound.values[index] = prepared.value;
-      if (structured) {bound.text = variant(bound.text, structured, type.fields, prepared.present);}
-      return;
-    }
-    // A parameter the statement takes no null for, which its types rely on (a column it alone
-    // Fills, an expression of it typed non-null), refuses null and refuses to be left out, which
-    // Would bind NULL: exactly where its declared type takes no null (src/render.ts,
-    // `renderParamType`). One typed `unknown` is declared `unknown` and takes anything. A JSON one
-    // Takes JSON's null there instead, unless the schema its type carries refuses null, and is
-    // Refused only when left out.
-    let jsonNull = false;
-    if (input?.nullable === false && matchesNull(bound.values[index])) {
-      if (type?.kind === "json" && !matchesUndefined(params[name]) && !refusesNull(query, type)) {jsonNull = true;}
-      else if (type?.kind === "json" || refusesNull(query, type)) {refuseNull(name, params[name]);}
-    }
-    // An array parameter takes no NULL element, as its type says (`:ids::int[]` is `number[]`):
-    // A NULL in `= any(:ids)` matches nothing. An array inside a
-    // Structured parameter's member keeps its NULL elements (src/rows.ts).
-    if (type?.kind === "array" && Array.isArray(bound.values[index])) {
-      const at = nullElement(bound.values[index] as unknown[]);
-      if (!matchesUndefined(at)) {throw new ParameterError(`Parameter "${name}" is an array whose elements may not be null, and the element at ${at} is. Leave it out of the array.`);}
-    }
-    // A `::type` written on MySQL or SQLite, whose cast turns a value it cannot read into 0 or
-    // NULL: the value is checked against the type as written.
-    const cast = query.inputs?.[name]?.cast;
-    if (!matchesUndefined(cast) && !matchesUndefined(type)) {checksFor(query, name).checkCast(name, cast, type, bound.values[index], query.dialect);}
-    checkTime(type, name, bound.values[index]);
-    checkBinary(type, name, bound.values[index]);
-    bound.values[index] = jsonNull ? JSON_NULL : encode({ dialect: query.dialect, name }, type, bound.values[index]);
-  });
+  const bound: BoundStatement = { names: compiled.order, text: compiled.text, values: compiled.order.map((name) => value(params, name)) };
+  bound.names.forEach((name, index) => {bindParameter(query, bound, { index, name, params });});
   // Every MySQL and SQLite driver binds JSON text as text, which the database reads as JSON (a
   // Structured parameter's is written already).
   if (query.dialect !== "postgres") {bound.values = bound.values.map((currentValue, index) => (isJsonValue(query, parameterName(bound.names, index), currentValue) && query.inputs?.[parameterName(bound.names, index)]?.type.kind !== "rows" ? jsonText(currentValue) : currentValue));}
