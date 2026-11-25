@@ -36,7 +36,7 @@ test("postgres: query(text, values) → { rows }, as on pg, PGlite and Neon's Po
 
 // oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
 test("postgres: a query() that resolves to the rows, as Neon's neon() from 1.0 and pg-promise do", async () => {
-  const neon = Object.assign(() => Promise.reject(new Error("not a template")), {
+  const neon = Object.assign(promiseDriverStub(() => {throw new Error("not a template");}), {
     query: promiseDriverStub(() => [row]),
     // Neon's unsafe() builds a fragment for a template; it must never be taken for a query.
     unsafe: () => ({ sql: "fragment" }),
@@ -47,13 +47,12 @@ test("postgres: a query() that resolves to the rows, as Neon's neon() from 1.0 a
 // oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
 test("postgres: pg-promise gets a { text, values } object, so it binds instead of formatting $1 into the text", async () => {
   const calls: Call[] = [];
-  // Pg-promise types query() as resolving to any.
-  const db = { manyOrNone: promiseDriverStub(() => []), query: async (...args: unknown[]): Promise<any> => {
+  const db = { manyOrNone: promiseDriverStub(() => []), query: promiseDriverStub((...args: unknown[]) => {
     calls.push({ args, method: "query" });
     return [row];
-  } };
+  }) };
   const fixtureQuery: QueryModule<"postgres"> = { dialect: "postgres", params: ["id"], sql: "select '$2' as literal, :id::int as id" };
-  assert.deepEqual(await execute(db, fixtureQuery, { id: 1 }), [row]);
+  assert.deepEqual(await executeFixture(db, fixtureQuery, { id: 1 }), [row]);
   // With Reylo's decoder table, which answers every oid itself.
   const { types, ...bound } = requireFixtureValue(calls[0]).args[0] as { text: string; values: unknown[]; types: { getTypeParser(oid: number): (text: string) => unknown } };
   assert.deepEqual(bound, { text: "select '$2' as literal, $1::int as id", values: [1] });
@@ -63,18 +62,18 @@ test("postgres: pg-promise gets a { text, values } object, so it binds instead o
 // oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
 test("postgres: unsafe(text, values) → rows, as on postgres.js and Bun.sql and their transactions; postgres.js is asked to prepare the statement", async () => {
   const calls: Call[] = [];
-  const tx = { unsafe: (...args: unknown[]) => {
+  const tx = { unsafe: promiseDriverStub((...args: unknown[]) => {
     calls.push({ args, method: "unsafe" });
-    return Promise.resolve([row]);
-  } };
+    return [row];
+  }) };
   assert.deepEqual(await execute(tx, pg, { id: 1, name: "ada" }), [row]);
   assert.deepEqual(calls, [{ args: ["select $1::int as id, $2 as name, $1 as again", [1, "ada"], { prepare: true }], method: "unsafe" }]);
   // Bun.sql prepares a statement itself, and takes no options.
   const bunCalls: Call[] = [];
-  const bun = { unsafe: (...args: unknown[]) => {
+  const bun = { unsafe: promiseDriverStub((...args: unknown[]) => {
     bunCalls.push({ args, method: "unsafe" });
-    return Promise.resolve([row]);
-  }, commitDistributed: asyncDriverMarker };
+    return [row];
+  }), commitDistributed: asyncDriverMarker };
   assert.deepEqual(await execute(bun, pg, { id: 1, name: "ada" }), [row]);
   assert.deepEqual(bunCalls, [{ args: ["select $1::int as id, $2 as name, $1 as again", [1, "ada"]], method: "unsafe" }]);
 });
@@ -93,10 +92,10 @@ const typedValues = { data: [1, { a: "b" }], ids: [1, 3], name: "ada" };
 // oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
 test("postgres: every client gets an array for a SQL array parameter as its literal text; Bun.sql gets a JSON parameter as an object it serializes to its JSON text, postgres.js as its JSON text declared unknown", async () => {
   const seen: unknown[][] = [];
-  const unsafe = async (_sql: string, values?: unknown[]): Promise<never[]> => {
+  const unsafe = promiseDriverStub((_sql: string, values?: unknown[]): never[] => {
     seen.push(requireFixtureValue(values));
     return [];
-  };
+  });
   const bun = { commitDistributed: asyncDriverMarker, unsafe };
   await execute(bun, typed, typedValues);
   await execute({ unsafe }, typed, typedValues);
@@ -131,19 +130,19 @@ test("postgres: a JSON parameter's value is a JavaScript value, which every driv
     seen.push(requireFixtureValue(values));
     return { rows: [] };
   }) }, jsonQuery, jsonValues);
-  const pgp = { manyOrNone: promiseDriverStub(() => []), query: async (q: any): Promise<any> => {
-    seen.push(q.values);
+  const pgp = { manyOrNone: promiseDriverStub(() => []), query: promiseDriverStub((config: { values: unknown[] }) => {
+    seen.push(config.values);
     return [];
-  } };
-  await execute(pgp, jsonQuery, jsonValues);
-  await execute((_sql: string, values?: unknown[]) => {
+  }) };
+  await executeFixture(pgp, jsonQuery, jsonValues);
+  await execute(promiseDriverStub((_sql: string, values?: unknown[]) => {
     seen.push(requireFixtureValue(values));
-    return Promise.resolve([]);
-  }, jsonQuery, jsonValues);
-  const unsafe = async (_sql: string, values?: unknown[]): Promise<never[]> => {
+    return [];
+  }), jsonQuery, jsonValues);
+  const unsafe = promiseDriverStub((_sql: string, values?: unknown[]): never[] => {
     seen.push(requireFixtureValue(values).map((currentValue) => (!matchesNull(currentValue) && hasObjectType(currentValue) ? JSON.stringify(currentValue) : currentValue)));
     return [];
-  };
+  });
   const bun = { commitDistributed: asyncDriverMarker, unsafe };
   await execute({ unsafe }, jsonQuery, jsonValues);
   await execute(bun, jsonQuery, jsonValues);
@@ -195,15 +194,15 @@ test("postgres: pg's family, PGlite and Neon, which write any array as an array 
     seen.push(requireFixtureValue(values));
     return { rows: [] };
   }) }, typed, typedValues);
-  const pgp = { manyOrNone: promiseDriverStub(() => []), query: async (q: any): Promise<any> => {
-    seen.push(q.values);
+  const pgp = { manyOrNone: promiseDriverStub(() => []), query: promiseDriverStub((config: { values: unknown[] }) => {
+    seen.push(config.values);
     return [];
-  } };
-  await execute(pgp, typed, typedValues);
-  await execute((_sql: string, values?: unknown[]) => {
+  }) };
+  await executeFixture(pgp, typed, typedValues);
+  await execute(promiseDriverStub((_sql: string, values?: unknown[]) => {
     seen.push(requireFixtureValue(values));
-    return Promise.resolve([]);
-  }, typed, typedValues);
+    return [];
+  }), typed, typedValues);
   assert.equal(seen.length, 3);
   Iterator.from(seen).forEach((values) => {assert.deepEqual(values, ['{"1","3"}', "ada", '[1,{"a":"b"}]']);});
 });
@@ -270,10 +269,10 @@ test("a parameter the statement takes no null for refuses null and refuses to be
 test("a query without inputs, defined by hand or built before them, binds every array as it is", async () => {
   const { inputs: _inputs, ...bare } = typed;
   const seen: unknown[][] = [];
-  const unsafe = async (_sql: string, values?: unknown[]): Promise<never[]> => {
+  const unsafe = promiseDriverStub((_sql: string, values?: unknown[]): never[] => {
     seen.push(requireFixtureValue(values));
     return [];
-  };
+  });
   const bun = { commitDistributed: asyncDriverMarker, unsafe };
   await execute(bun, bare, typedValues);
   await execute({ unsafe }, bare, typedValues);
@@ -330,10 +329,10 @@ test("postgres: postgres.js, which binds a date or time string through new Date(
   const fixtureQuery: QueryModule<"postgres"> = { dialect: "postgres", sql: "select :at::timestamp, :day::date, :tz::timestamptz, :d::timestamptz, :name::text", params: ["at", "day", "tz", "d", "name"], inputs: { at: time("timestamp"), day: time("date"), tz: time("timestamptz"), d: time("timestamptz"), name: time("text") } };
   const values = { at: "2026-01-02 03:04:05.006", d: "1970-01-01T00:00:00Z", day: "infinity", name: "ada", tz: "2026-01-02 03:04:05 America/New_York" };
   const seen: unknown[][] = [];
-  const unsafe = async (_sql: string, boundValues?: unknown[]): Promise<never[]> => {
+  const unsafe = promiseDriverStub((_sql: string, boundValues?: unknown[]): never[] => {
     seen.push(requireFixtureValue(boundValues));
     return [];
-  };
+  });
   const typed = (value: unknown, type: number) => ({ type, value });
   const postgresJs = { typed, unsafe };
   await execute(postgresJs, fixtureQuery, values);
@@ -491,10 +490,10 @@ test("postgres: an array parameter is written with its element type's delimiter,
 // oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
 test("postgres: Neon's neon() before 1.0 is called with (text, values)", async () => {
   const calls: Call[] = [];
-  const sql = (...args: unknown[]) => {
+  const sql = promiseDriverStub((...args: unknown[]) => {
     calls.push({ args, method: "call" });
-    return Promise.resolve([row]);
-  };
+    return [row];
+  });
   assert.deepEqual(await execute(sql, pg, { id: 1, name: "ada" }), [row]);
   assert.deepEqual(requireFixtureValue(calls[0]).args.slice(0, 2), ["select $1::int as id, $2 as name, $1 as again", [1, "ada"]]);
   // Its options take a decoder table, 0.9 too, and the fields with fullResults.
@@ -570,7 +569,7 @@ test("mysql: mariadb's callback API answers through the callback, and its errors
     },
   };
   assert.deepEqual(await executeFixture(conn, my, { id: 1, name: "ada" }), [{ values: [1, "ada", 1] }]);
-  await assert.rejects(() => driverPromise(executeFixture(conn, { dialect: "mysql", params: ["a"], sql: "insert into t values (:a)" }, { a: 1 })), (error) => error === failure);
+  await assert.rejects(driverPromise(executeFixture(conn, { dialect: "mysql", params: ["a"], sql: "insert into t values (:a)" }, { a: 1 })), (error) => error === failure);
 });
 
 // A plain Uint8Array (TextEncoder's, getRandomValues') and a view into a larger buffer, neither a Buffer.
@@ -610,10 +609,10 @@ test("mysql: mariadb, which writes a value that is not a Buffer as JSON, gets a 
 test("postgres: Neon's neon() before 0.10, which sends a Buffer as JSON, gets a binary value in Postgres's hex form", async () => {
   const { plain, view } = binary();
   const seen: unknown[][] = [];
-  const sql = (_sql: string, values?: unknown[]): Promise<never[]> => {
+  const sql = promiseDriverStub((_sql: string, values?: unknown[]) => {
     seen.push(requireFixtureValue(values));
-    return Promise.resolve([]);
-  };
+    return [];
+  });
   const fixtureQuery: QueryModule<"postgres"> = { dialect: "postgres", params: ["plain", "view", "buf", "empty", "n"], sql: "select :plain::bytea, :view::bytea, :buf::bytea, :empty::bytea, :n" };
   await execute(sql, fixtureQuery, { buf: Buffer.from([0, 16, 171]), empty: new Uint8Array(0), n: 1, plain, view });
   assert.deepEqual(seen[0], [String.raw`\x0102ff`, String.raw`\x0102ff`, String.raw`\x0010ab`, String.raw`\x`, 1]);
@@ -625,11 +624,11 @@ test("every other driver gets a binary value as it is, pg-promise included, sinc
   const seen: unknown[] = [];
   const pgq: QueryModule<"postgres"> = { dialect: "postgres", params: ["b"], sql: "select :b::bytea" };
   const liteq: QueryModule<"sqlite"> = { dialect: "sqlite", params: ["b"], sql: "select :b" };
-  const pgp = { manyOrNone: promiseDriverStub(() => []), query: async (q: any): Promise<any> => {
-    seen.push(q.values[0]);
+  const pgp = { manyOrNone: promiseDriverStub(() => []), query: promiseDriverStub((config: { values: unknown[] }) => {
+    seen.push(config.values[0]);
     return [];
-  } };
-  await execute(pgp, pgq, { b: plain });
+  }) };
+  await executeFixture(pgp, pgq, { b: plain });
   await execute({ query: promiseDriverStub((_sql: string, values?: unknown[]) => {
     seen.push(requireFixtureValue(values)[0]);
     return { rows: [] };
@@ -687,7 +686,7 @@ test("mysql: PlanetScale 2.0, which binds no parameters, runs a statement withou
     }),
   };
   assert.deepEqual(await execute(conn, { dialect: "mysql", params: [], sql: "select 1" }), [row]);
-  await assert.rejects(() => driverPromise(execute(conn, my, { id: 1, name: "ada" })), (error: TypeError) => error instanceof TypeError && /2\.0 binds no parameters/u.test(error.message) && /not supported/u.test((error.cause as Error).message));
+  await assert.rejects(driverPromise(execute(conn, my, { id: 1, name: "ada" })), (error: TypeError) => error instanceof TypeError && /2\.0 binds no parameters/u.test(error.message) && /not supported/u.test((error.cause as Error).message));
   // 1.x's form first, then 2.0's, with Reylo's cast either way.
   assert.deepEqual(requireFixtureValue(calls[0]).slice(0, 2), ["select 1", null]);
   assert.deepEqual([requireFixtureValue(calls[1])[0], Object.keys(requireFixtureValue(calls[1])[1] as object)], ["select 1", ["as", "cast"]]);
@@ -870,7 +869,7 @@ test("sqlite: sqlite3's callback all(), its errors, and the sqlite package's pro
     prepare: () => ({}),
   };
   assert.deepEqual(await execute(sqlite3, lite, { id: 1, name: "ada" }), [{ values: [1, "ada", 1] }]);
-  await assert.rejects(() => driverPromise(execute(sqlite3, { dialect: "sqlite", params: [], sql: "selec 1" })), (error) => error === failure);
+  await assert.rejects(driverPromise(execute(sqlite3, { dialect: "sqlite", params: [], sql: "selec 1" })), (error) => error === failure);
   const wrapper = { all: promiseDriverStub((_sql: string, values: unknown[]) => [{ values }]), getDatabaseInstance: () => sqlite3, prepare: promiseDriverStub(() => ({})) };
   assert.deepEqual(await execute(wrapper, lite, { id: 2, name: "bo" }), [{ values: [2, "bo", 2] }]);
 });
@@ -883,31 +882,31 @@ test("sqlite: Bun.sql's SQLite adapter, which has unsafe() and no prepare()", as
 // oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
 test("the driver's own error comes through unchanged", async () => {
   const duplicate = Object.assign(new Error("duplicate key value violates unique constraint"), { code: "23505" });
-  await assert.rejects(() => driverPromise(execute({ query: promiseDriverStub(() => { throw duplicate; }) }, pg, { id: 1 })), (error) => error === duplicate);
+  await assert.rejects(driverPromise(execute({ query: promiseDriverStub(() => { throw duplicate; }) }, pg, { id: 1 })), (error) => error === duplicate);
   const db = new DatabaseSync(":memory:");
-  assert.throws(() => execute(db, { dialect: "sqlite", params: [], sql: "selec 1" }), /syntax error/u);
+  assert.throws((): void => {execute(db, { dialect: "sqlite", params: [], sql: "selec 1" });}, /syntax error/u);
 });
 
 // oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
 test("an unsupported client rejects, naming what it has and what reylo takes", async () => {
-  await assert.rejects(() => driverPromise(executeFixture({ connect: driverMarker, end: driverMarker }, pg)), (error: TypeError) => error instanceof TypeError && /postgres statement on an object with connect, end\. It takes a client with query\(text, values\)/u.test(error.message));
+  await assert.rejects(driverPromise(executeFixture({ connect: driverMarker, end: driverMarker }, pg)), (error: TypeError) => error instanceof TypeError && /postgres statement on an object with connect, end\. It takes a client with query\(text, values\)/u.test(error.message));
   // An object with Drizzle's select() but no session over a client is no Drizzle database.
-  await assert.rejects(() => driverPromise(executeFixture({ $client: {}, select: driverMarker }, pg)), /object with select\. .*or a Drizzle database over one of them\./);
+  await assert.rejects(driverPromise(executeFixture({ $client: {}, select: driverMarker }, pg)), /object with select\. .*or a Drizzle database over one of them\./);
   // Kysely and Prisma decode their values themselves, so each is told to pass the driver's client.
   class Kysely { public selectFrom(): void {} public executeQuery(): void {} public transaction(): void {} }
-  await assert.rejects(() => driverPromise(executeFixture(new Kysely(), pg)), /object with selectFrom, executeQuery, transaction\. .* Kysely decodes the values of its queries itself: pass the pool or database its dialect was made with\.$/);
-  await assert.rejects(() => driverPromise(executeFixture({ $queryRawUnsafe: driverMarker, $transaction: driverMarker }, my)), / Prisma decodes the values of its queries itself: pass a client of your database's driver, such as the pool its driver adapter was made with\.$/u);
+  await assert.rejects(driverPromise(executeFixture(new Kysely(), pg)), /object with selectFrom, executeQuery, transaction\. .* Kysely decodes the values of its queries itself: pass the pool or database its dialect was made with\.$/);
+  await assert.rejects(driverPromise(executeFixture({ $queryRawUnsafe: driverMarker, $transaction: driverMarker }, my)), / Prisma decodes the values of its queries itself: pass a client of your database's driver, such as the pool its driver adapter was made with\.$/u);
   // Inside their transactions, neither hands out the connection.
-  await assert.rejects(() => driverPromise(executeFixture(Object.assign(new Kysely(), { isTransaction: true }), pg)), / Kysely decodes the values of its queries itself and does not hand out its transaction's connection: take the transaction from the driver's client instead\.$/u);
-  await assert.rejects(() => driverPromise(executeFixture({ $queryRawUnsafe: driverMarker }, lite)), / Prisma decodes the values of its queries itself and does not hand out its transaction's connection/u);
+  await assert.rejects(driverPromise(executeFixture(Object.assign(new Kysely(), { isTransaction: true }), pg)), / Kysely decodes the values of its queries itself and does not hand out its transaction's connection: take the transaction from the driver's client instead\.$/u);
+  await assert.rejects(driverPromise(executeFixture({ $queryRawUnsafe: driverMarker }, lite)), / Prisma decodes the values of its queries itself and does not hand out its transaction's connection/u);
   // Node:sqlite's tag store has all() for templates; it is not sqlite3's database.
   const store = new DatabaseSync(":memory:").createTagStore();
-  await assert.rejects(() => driverPromise(executeFixture(store, lite, { id: 1, name: "ada" })), /sqlite statement on an object with .*pass its database, store\.db/);
-  await assert.rejects(() => driverPromise(executeFixture(null, my)), /mysql statement on null/u);
+  await assert.rejects(driverPromise(executeFixture(store, lite, { id: 1, name: "ada" })), /sqlite statement on an object with .*pass its database, store\.db/);
+  await assert.rejects(driverPromise(executeFixture(null, my)), /mysql statement on null/u);
   // The refusal names every client a MySQL statement runs on, mariadb's among them.
-  await assert.rejects(() => driverPromise(executeFixture({}, my)), /query\(text, values\) as on mariadb's pool or connection, from its promise or callback API/u);
+  await assert.rejects(driverPromise(executeFixture({}, my)), /query\(text, values\) as on mariadb's pool or connection, from its promise or callback API/u);
   // A pg pool handed to a SQLite statement matches no SQLite shape.
-  await assert.rejects(() => driverPromise(executeFixture({ query: promiseDriverStub(() => ({ rows: [] })) }, lite)), /sqlite statement on an object with query/u);
+  await assert.rejects(driverPromise(executeFixture({ query: promiseDriverStub(() => ({ rows: [] })) }, lite)), /sqlite statement on an object with query/u);
 });
 
 // A SQLite-backed Durable Object's ctx.storage.sql, as workerd's answers
@@ -963,7 +962,7 @@ test("a Drizzle database or transaction runs on the driver client its session ke
   // A MySQL client whose execute() answers without PlanetScale's rows, as TiDB Cloud's transaction inside
   // Drizzle-orm/tidb-serverless answers with the rows themselves, is refused rather than read as no rows.
   const tidb = { $client: {}, select: driverMarker, rollback: driverMarker, session: { client: { execute: promiseDriverStub(() => [row]) }, dialect: {} } };
-  await assert.rejects(() => driverPromise(executeFixture(tidb, my, { id: 1, name: "ada" })), /^TypeError: reylo ran this statement through execute\(\), as on PlanetScale's @planetscale\/database, and the client answered with an array rather than a result with rows\./u);
+  await assert.rejects(driverPromise(executeFixture(tidb, my, { id: 1, name: "ada" })), /^TypeError: reylo ran this statement through execute\(\), as on PlanetScale's @planetscale\/database, and the client answered with an array rather than a result with rows\./u);
 });
 
 // oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
@@ -1011,22 +1010,22 @@ test("an array of parameters is refused before anything runs, with a TypeError t
   const named = /^TypeError: The parameters must be an object keyed by parameter name, or by number for positional placeholders \(\{ 1: \.\.\., 2: \.\.\. \}\); got an array\. This statement takes \{ id: \.\.\., name: \.\.\. \}\.$/u;
   const refused = (re: RegExp) => (error: Error) => error instanceof TypeError && re.test(String(error));
   // A freshness check would be a round trip: the array is refused before it too.
-  await assert.rejects(() => driverPromise(executeFixture(client, { ...pg, fresh: { inserts: [], query: "select 1", rows: [] } }, [1, "ada"])), refused(named));
+  await assert.rejects(driverPromise(executeFixture(client, { ...pg, fresh: { inserts: [], query: "select 1", rows: [] } }, [1, "ada"])), refused(named));
   const positional: QueryModule<"postgres"> = { dialect: "postgres", params: ["1", "2"], sql: "select $1::int, $2::text" };
-  await assert.rejects(() => driverPromise(executeFixture(client, positional, [1, "ada"])), refused(/got an array\. This statement takes \{ 1: \.\.\., 2: \.\.\. \}\.$/u));
-  await assert.rejects(() => driverPromise(executeFixture(client, pg, "ada")), refused(/positional placeholders \(\{ 1: \.\.\., 2: \.\.\. \}\); got ada\. This statement takes \{ id: \.\.\., name: \.\.\. \}\.$/u));
-  await assert.rejects(() => driverPromise(executeFixture(client, pg, null)), refused(/got null\./u));
+  await assert.rejects(driverPromise(executeFixture(client, positional, [1, "ada"])), refused(/got an array\. This statement takes \{ 1: \.\.\., 2: \.\.\. \}\.$/u));
+  await assert.rejects(driverPromise(executeFixture(client, pg, "ada")), refused(/positional placeholders \(\{ 1: \.\.\., 2: \.\.\. \}\); got ada\. This statement takes \{ id: \.\.\., name: \.\.\. \}\.$/u));
+  await assert.rejects(driverPromise(executeFixture(client, pg, null)), refused(/got null\./u));
   assert.deepEqual(calls, []);
   // On a synchronous SQLite client the TypeError is thrown.
   const db = new DatabaseSync(":memory:");
-  assert.throws(() => executeFixture(db, lite, [1, "ada"]), refused(named));
-  assert.throws(() => executeFixture(db, { dialect: "sqlite", params: [], sql: "select 1" }, []), refused(/got an array\. This statement takes none: leave them out\.$/u));
+  assert.throws((): void => {executeFixture(db, lite, [1, "ada"]);}, refused(named));
+  assert.throws((): void => {executeFixture(db, { dialect: "sqlite", params: [], sql: "select 1" }, []);}, refused(/got an array\. This statement takes none: leave them out\.$/u));
   // Through the query object: run and with reject, runSync throws, and the types refuse it too.
   const currentQuery = defineQuery<{ id: number; name: string }, { id: number; name: string; again: number }, "one", "sqlite">({ dialect: "sqlite", sql: lite.sql, params: lite.params, cardinality: "one" });
   // @ts-expect-error the parameters are an object, never an array
-  await assert.rejects(() => currentQuery.run(db, [1, "ada"]), refused(named));
+  await assert.rejects(currentQuery.run(db, [1, "ada"]), refused(named));
   // @ts-expect-error the parameters are an object, never an array
-  await assert.rejects(() => currentQuery.with(db)([1, "ada"]), refused(named));
+  await assert.rejects(currentQuery.with(db)([1, "ada"]), refused(named));
   // @ts-expect-error the parameters are an object, never an array
   // oxlint-disable-next-line rules/no-effect-runtime-run -- This test exercises Reylo's native synchronous query API, which does not run Effect.
   assert.throws(() => currentQuery.runSync(db, [1, "ada"]), refused(named));
@@ -1034,7 +1033,7 @@ test("an array of parameters is refused before anything runs, with a TypeError t
   assert.deepEqual({ ...(currentQuery.runSync(db, { id: 1, name: "ada" }) as object) }, row);
   const p = defineQuery<{ 1: number; 2: string }, { id: number }, "one", "postgres">({ dialect: "postgres", sql: positional.sql, params: positional.params, cardinality: "one" });
   // @ts-expect-error positional placeholders take an object keyed by number
-  await assert.rejects(() => p.run(client, [1, "ada"]), refused(/This statement takes \{ 1: \.\.\., 2: \.\.\. \}\./u));
+  await assert.rejects(p.run(client, [1, "ada"]), refused(/This statement takes \{ 1: \.\.\., 2: \.\.\. \}\./u));
   db.close();
 });
 

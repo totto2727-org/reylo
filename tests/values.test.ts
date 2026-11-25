@@ -341,9 +341,9 @@ test("SQLite: Reylo's own statement per database and text, with integers read as
   assert.deepEqual(row, { b: Uint8Array.of(1, 2), doc: { a: 1 }, flag: true, id: 1, n: 5, r: 1.5, x: 7 });
   // The failing control: the app's own statement keeps its database's settings.
   assert.deepEqual(db.prepare("select n from t where id = 1").get(), [BigInt("5")]);
-  assert.throws(() => execute(db, fixtureQuery, { id: 2 }), (error: Error) => error instanceof DecodeError && error instanceof TypeError && error.message.startsWith('Column "n" holds 9007199254740993'));
+  assert.throws((): void => {execute(db, fixtureQuery, { id: 2 });}, (error: Error) => error instanceof DecodeError && error instanceof TypeError && error.message.startsWith('Column "n" holds 9007199254740993'));
   // A boolean column holding 2, which SQLite lets in: refused, naming it.
-  assert.throws(() => execute(db, fixtureQuery, { id: 3 }), /^TypeError: Column "flag" is a boolean, stored as 0 or 1, and holds 2/u);
+  assert.throws((): void => {execute(db, fixtureQuery, { id: 3 });}, /^TypeError: Column "flag" is a boolean, stored as 0 or 1, and holds 2/u);
   // A query defined by hand: integers exact, nothing else known.
   const [bare] = execute(db, { dialect: "sqlite", params: [], sql: "select n, doc from t where id = 1" }) as Record<string, unknown>[];
   assert.deepEqual(bare, { doc: '{"a":1}', n: 5 });
@@ -381,7 +381,7 @@ test("SQLite: a value its column's type does not allow, which a table that is no
     [9, /^TypeError: Column "big" is typed bigint and holds the text "x"/u],
     [10, /^TypeError: Column "z" is typed number \| string and holds a BLOB of 1 byte:/u],
   ];
-  Iterator.from(refusals).forEach(([id, refused]) => {assert.throws(() => execute(db, fixtureQuery, { id }), (error: Error) => error instanceof DecodeError && refused.test(String(error)), `row ${id}`);});
+  Iterator.from(refusals).forEach(([id, refused]) => {assert.throws((): void => {execute(db, fixtureQuery, { id });}, (error: Error) => error instanceof DecodeError && refused.test(String(error)), `row ${id}`);});
   // The drivers that read integers as numbers or strings: libSQL's digits are its INTEGER, any other text in a number's column is refused, and so is D1's BLOB in a string's.
   const libsql = (rows: unknown[]) => ({ execute: promiseDriverStub(() => ({ rows })), executeMultiple: asyncDriverMarker });
   const ints: QueryModule<"sqlite"> = { columns: [["n", "int"], ["big", "int8"], ["b", "bytes"]], dialect: "sqlite", params: [], sql: "select n, big, b from loose" };
@@ -401,7 +401,7 @@ test("mysql2: per-query options and Reylo's typeCast, never decimalNumbers; a DE
   const pool = {
     query: promiseDriverStub(() => [[], []]),
     // Mysql2 calls the typeCast once per value with the field and its own reading, and resolves to [rows, fields].
-    execute: async (options: Record<string, any>) => {
+    execute: promiseDriverStub((options: Record<string, any>) => {
       sent = options;
       const cast = options.typeCast as (f: unknown, next: () => unknown) => unknown;
       const row = {
@@ -416,7 +416,7 @@ test("mysql2: per-query options and Reylo's typeCast, never decimalNumbers; a DE
       };
       const fields = [["amount", 246, 18], ["doc", 245, 0], ["at", 12, 3], ["at6", 12, 6], ["latest", 12, 0], ["t", 11, 2], ["geo", 255, 0], ["big", 8, 0]].map(([name, columnType, decimals]) => ({ columnType, decimals, name }));
       return [[row], fields];
-    },
+    }),
   };
   const [row] = (await executeFixture(pool, { dialect: "mysql", params: [], sql: "select 1" })) as Record<string, unknown>[];
   // A BIGINT's exact text a BigInt, by the result's own column type (LONGLONG).
@@ -429,7 +429,7 @@ test("mysql2: per-query options and Reylo's typeCast, never decimalNumbers; a DE
 test("mariadb: every option per query, metaAsArray off, a SET joined and a DATETIME's T; a GEOMETRY read as bytes only where a column may hold one", async () => {
   let sent: Record<string, any> = {};
   const meta = [{ isSet: () => true, name: () => "tags", type: "SET" }, { isSet: () => false, name: () => "at", type: "DATETIME" }, { isSet: () => false, name: () => "id", type: "INT" }];
-  const conn = { batch: promiseDriverStub(() => ({})), query: async (options: Record<string, any>) => ((sent = options), Object.assign([{ at: "2026-03-08 09:31:00.000", id: 1, tags: ["x", "z"] }], { meta })) };
+  const conn = { batch: promiseDriverStub(() => ({})), query: promiseDriverStub((options: Record<string, any>) => ((sent = options), Object.assign([{ at: "2026-03-08 09:31:00.000", id: 1, tags: ["x", "z"] }], { meta }))) };
   assert.deepEqual([...((await executeFixture(conn, { dialect: "mysql", params: [], sql: "select 1" })) as unknown[])], [{ at: "2026-03-08T09:31:00.000", id: 1, tags: "x,z" }]);
   assert.equal(sent.metaAsArray, false);
   // A BIGINT mariadb's own BigInt, a DECIMAL its text, on mariadb 3 and mariadb 2 (supportBigInt, bigNumberStrings).
@@ -442,7 +442,7 @@ test("mariadb: every option per query, metaAsArray off, a SET joined and a DATET
 // oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
 test("PlanetScale: Reylo's cast per query, the driver's own default with a DATETIME's T, over the app's", async () => {
   let cast: (field: { type: string; charset?: number }, value: string | null) => unknown = () => null;
-  const conn = { execute: async (_sql: string, __?: unknown, options?: { cast: typeof cast }) => ((cast = requireFixtureValue(options).cast), { rows: [], statement: "" }) };
+  const conn = { execute: promiseDriverStub((_sql: string, __?: unknown, options?: { cast: typeof cast }) => ((cast = requireFixtureValue(options).cast), { rows: [], statement: "" })) };
   await execute(conn, { dialect: "mysql", params: [], sql: "select 1" });
   const bytes = (s: string): string => String.fromCharCode(...Buffer.from(s, "utf8"));
   assert.deepEqual(
@@ -478,10 +478,10 @@ test("runSync refuses a client whose prepared statement answers through a promis
 // oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
 test("mysql2: Reylo's typeCast only where it is needed, since mysql2 calls it for every value: a JSON or unknown column, unknown columns, or the app's typeCast, decimalNumbers or jsonStrings", async () => {
   const sent: unknown[] = [];
-  const pool = (connectionConfig: Record<string, unknown> | undefined) => ({ pool: connectionConfig && { config: { connectionConfig } }, query: promiseDriverStub(() => [[], []]), execute: async (options: { typeCast: unknown }) => {
+  const pool = (connectionConfig: Record<string, unknown> | undefined) => ({ pool: connectionConfig && { config: { connectionConfig } }, query: promiseDriverStub(() => [[], []]), execute: promiseDriverStub((options: { typeCast: unknown }) => {
     sent.push(hasFunctionType(options.typeCast) ? "cast" : options.typeCast);
     return [[], []];
-  } });
+  }) });
   const q = (columns?: [string, string][]): QueryModule<"mysql"> => ({ dialect: "mysql", sql: "select 1", params: [], ...(columns ? { columns } : {}) });
   await executeFixture(pool({}), q([["n", "int8"], ["amount", "decimal"], ["at", "timestamp"]]));
   await executeFixture(pool({}), q([["doc", "json"]]));
@@ -502,21 +502,21 @@ test("MySQL: a truth value is a boolean on every driver, whatever form it gives 
   // Mysql2: a TINYINT(1) a number, a comparison a BIGINT's text (bigNumberStrings), a BIT(1) a Buffer, an INT a temporary table may widen a number.
   const mysql2Row = (done: unknown) => ({ done, same: "0", one_bit: Buffer.of(1), n: "9007199254740993", widened: 7, either: 2.5 });
   const fields = [["done", 1], ["same", 8], ["one_bit", 16], ["n", 8], ["widened", 3], ["either", 5]].map(([name, columnType]) => ({ columnType, decimals: 0, name }));
-  const mysql2 = (done: unknown) => ({ execute: async () => [[mysql2Row(done)], fields], query: promiseDriverStub(() => [[], []]) });
+  const mysql2 = (done: unknown) => ({ execute: promiseDriverStub(() => [[mysql2Row(done)], fields]), query: promiseDriverStub(() => [[], []]) });
   assert.deepEqual(await executeFixture(mysql2(1), fixtureQuery), expected);
   await assert.rejects(driverPromise(executeFixture(mysql2(2), fixtureQuery)), /^TypeError: Column "done" is a boolean, stored as 0 or 1, and holds 2, which is neither/u);
   // A query defined by hand: a BIGINT by the result's own type, a TINYINT(1) as it is.
   assert.deepEqual(await executeFixture(mysql2(2), { ...fixtureQuery, columns: undefined }), [{ ...mysql2Row(2), same: BigInt("0"), n: BigInt("9007199254740993") }]);
   // Mariadb: a BIGINT its own BigInt, a BIT(1) a Buffer (bitOneIsBoolean off).
-  const mariadb = (done: unknown) => ({ batch: promiseDriverStub(() => ({})), query: async () => [{ done, same: BigInt("0"), one_bit: Buffer.of(1), n: BigInt("9007199254740993"), widened: 7, either: 2.5 }] });
+  const mariadb = (done: unknown) => ({ batch: promiseDriverStub(() => ({})), query: promiseDriverStub(() => [{ done, same: BigInt("0"), one_bit: Buffer.of(1), n: BigInt("9007199254740993"), widened: 7, either: 2.5 }]) });
   assert.deepEqual([...((await executeFixture(mariadb(1), fixtureQuery)) as unknown[])], expected);
   await assert.rejects(driverPromise(executeFixture(mariadb(-1), fixtureQuery)), /Column "done" is a boolean, stored as 0 or 1, and holds -1/u);
   // PlanetScale: Reylo's cast, then the kinds.
   const planetscale = (done: string) => ({
-    execute: async (_sql: string, __: unknown, options: { cast: (f: { type: string; charset?: number }, v: string | null) => unknown }) => ({
+    execute: promiseDriverStub((_sql: string, __: unknown, options: { cast: (f: { type: string; charset?: number }, v: string | null) => unknown }) => ({
       statement: "",
       rows: [{ done: options.cast({ type: "INT8" }, done), same: options.cast({ type: "INT64" }, "0"), one_bit: options.cast({ charset: 63, type: "BIT" }, "\u0001"), n: options.cast({ type: "INT64" }, "9007199254740993"), widened: options.cast({ type: "INT32" }, "7"), either: options.cast({ type: "FLOAT64" }, "2.5") }],
-    }),
+    })),
   });
   assert.deepEqual(await executeFixture(planetscale("1"), fixtureQuery), expected);
   await assert.rejects(driverPromise(executeFixture(planetscale("2"), fixtureQuery)), /Column "done" is a boolean/u);
@@ -542,12 +542,12 @@ test("MySQL: a VECTOR is an array of its floats on every driver that reads one, 
   // Mysql2 3.x decodes the floats itself; mariadb and PlanetScale give the bytes.
   const fields = [{ columnType: 242, decimals: 0, name: "v" }, { columnType: 242, decimals: 0, name: "vn" }];
   assert.deepEqual(await executeFixture({ execute: promiseDriverStub(() => [[{ v: floats, vn: SQL_NULL }], fields]), query: promiseDriverStub(() => [[], []]) }, fixtureQuery), expected);
-  assert.deepEqual(await executeFixture({ execute: async () => [[{ v: Buffer.from(bytes), vn: SQL_NULL }], fields], query: promiseDriverStub(() => [[], []]) }, fixtureQuery), expected);
-  assert.deepEqual([...((await execute({ batch: promiseDriverStub(() => ({})), query: async () => [{ v: Buffer.from(bytes), vn: SQL_NULL }] }, fixtureQuery)) as unknown[])], expected);
+  assert.deepEqual(await executeFixture({ execute: promiseDriverStub(() => [[{ v: Buffer.from(bytes), vn: SQL_NULL }], fields]), query: promiseDriverStub(() => [[], []]) }, fixtureQuery), expected);
+  assert.deepEqual([...((await execute({ batch: promiseDriverStub(() => ({})), query: promiseDriverStub(() => [{ v: Buffer.from(bytes), vn: SQL_NULL }]) }, fixtureQuery)) as unknown[])], expected);
   const planetscale = {
-    execute: async (_sql: string, __: unknown, options: { cast: (f: { type: string; charset?: number }, v: string | null) => unknown }) => ({
+    execute: promiseDriverStub((_sql: string, __: unknown, options: { cast: (f: { type: string; charset?: number }, v: string | null) => unknown }) => ({
       rows: [{ v: options.cast({ charset: 63, type: "VECTOR" }, String.fromCharCode(...bytes)), vn: options.cast({ charset: 63, type: "VECTOR" }, SQL_NULL) }],
-    }),
+    })),
   };
   assert.deepEqual(await executeFixture(planetscale, fixtureQuery), expected);
   // A slice of a larger buffer, as a driver's row may be, reads from its own offset.
@@ -559,26 +559,26 @@ test("MySQL: a VECTOR is an array of its floats on every driver that reads one, 
   // A parameter binds the text of its floats, which the engine's `to_vector(?)` reads, on every driver.
   const w: QueryModule<"mysql"> = { dialect: "mysql", inputs: { v: { type: vector } }, params: ["v"], sql: "insert into items (v) values (to_vector(:v))" };
   const seen: unknown[][] = [];
-  await execute({ execute: async (_statement: unknown, boundValues?: unknown[]) => {
+  await execute({ execute: promiseDriverStub((_statement: unknown, boundValues?: unknown[]) => {
     seen.push(requireFixtureValue(boundValues));
     return [[], []] as [unknown, unknown];
-  }, query: promiseDriverStub(() => [[], []] as [unknown, unknown]) }, w, { v: floats });
-  await execute({ batch: promiseDriverStub(() => []), query: async (_sql: string, boundValues: unknown) => {
+  }), query: promiseDriverStub(() => [[], []] as [unknown, unknown]) }, w, { v: floats });
+  await execute({ batch: promiseDriverStub(() => []), query: promiseDriverStub((_sql: string, boundValues: unknown) => {
     seen.push(boundValues as unknown[]);
     return [];
-  } }, w, { v: floats });
-  await execute({ commitDistributed: asyncDriverMarker, unsafe: async (_sql: string, boundValues?: unknown[]) => {
+  }) }, w, { v: floats });
+  await execute({ commitDistributed: asyncDriverMarker, unsafe: promiseDriverStub((_sql: string, boundValues?: unknown[]) => {
     seen.push(requireFixtureValue(boundValues));
     return [];
-  } }, w, { v: floats });
-  await executeFixture({ execute: async (_sql: string, boundValues: unknown[]) => {
+  }) }, w, { v: floats });
+  await executeFixture({ execute: promiseDriverStub((_sql: string, boundValues: unknown[]) => {
     seen.push(boundValues);
     return { rows: [] };
-  } }, w, { v: floats });
-  await execute({ batch: promiseDriverStub(() => ({})), query: async (_sql: string, boundValues: unknown) => {
+  }) }, w, { v: floats });
+  await execute({ batch: promiseDriverStub(() => ({})), query: promiseDriverStub((_sql: string, boundValues: unknown) => {
     seen.push(boundValues as unknown[]);
     return [];
-  } }, w, { v: SQL_NULL });
+  }) }, w, { v: SQL_NULL });
   assert.deepEqual(seen, [...Array(4).fill(["[1,2.5,-3,0.10000000149011612]"]), [SQL_NULL]]);
   const fake = { execute: promiseDriverStub(() => [[], []]), query: promiseDriverStub(() => [[], []]) };
   await assert.rejects(driverPromise(executeFixture(fake, w, { v: [1, "2"] })), /^TypeError: Parameter "v" is a VECTOR, an array of finite numbers, and the element at \[1\] is "2"\.$/u);
