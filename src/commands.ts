@@ -1,21 +1,12 @@
-// The commands of the `reylo` CLI (src/cli.ts), which each engine package carries (src/tooling.ts):
-// `reylo generate`: analyzes every `.sql` file of the project into `.reylo/`, the cache that the type
-// Check and the build steps share, and prints each file with a mark and every error in full. A
-// Build that runs where the database cannot be reached (a CI job, a container build) runs on what
-// It wrote; where the database can be reached, it only saves the build the round trips.
-// oxlint-disable-next-line rules/no-node-imports -- This server-side entry point uses this built-in to launch the real programs whose stdout, stderr and status are consumed.
-import { spawnSync } from "node:child_process";
-// oxlint-disable-next-line rules/no-node-imports -- This server-side entry point uses this built-in to inspect or write files through the host filesystem.
-import { existsSync, readFileSync, statSync } from "node:fs";
-// oxlint-disable-next-line rules/no-node-imports -- This server-side entry point uses this built-in to await writes and reads through the host filesystem.
-import { glob } from "node:fs/promises";
-// oxlint-disable-next-line rules/no-node-imports -- This server-side entry point uses this built-in to resolve paths using the host platform's filesystem conventions.
-import { dirname, relative, resolve, sep } from "node:path";
-// oxlint-disable-next-line rules/no-node-imports -- This server-side entry point uses this built-in to preserve the CLI's native terminal styling.
-import { styleText } from "node:util";
+// The reylo generate CLI writes analysis to the cache shared by the type checker and bundlers.
+// oxlint-disable-next-line rules/no-node-imports -- Read SQL from each file discovered by the native CLI.
+import { readFileSync } from "node:fs";
 import { Session } from "./analyze.ts";
-import { findProjectFile, PROJECT_FILE } from "./project.ts";
-import { matchesNull, matchesUndefined } from "./native-predicates.ts";
+import { gatherTargets, groupProjects } from "./command-input.ts";
+import { err, out, paint, showRows, shown, statementDiagnostic, SUCCESS, summarize, USAGE_ERROR } from "./command-output.ts";
+import type { Result, Row } from "./command-output.ts";
+import type { Diagnostic } from "./engine-core.ts";
+import { isEmptyArray, matchesNull, matchesString, matchesUndefined, nonemptyText } from "./native-predicates.ts";
 
 const USAGE = `Usage: reylo generate [paths...] [--force]
 
@@ -30,200 +21,138 @@ Which files are queries can be set in .reylo.yaml; the globs are relative to it:
     include: ["src/**/*.sql"]   # instead of every .sql file
     exclude: ["src/legacy/**"]  # in addition to dependencies, build output and what git ignores`;
 
-// Never the project's own queries: dependencies and build output. A directory whose name starts
-// With a dot (.git, .reylo, .next) is left out too, because a glob's `*` does not match a dot, but
-// For `.server`: React Router's (and Remix's) server-only modules, which its build keeps out of the
-// Browser, and so the place for an app's queries there (examples/vite).
-const INCLUDE = ["**/*.sql", "**/.server/**/*.sql"];
-const EXCLUDE = ["**/node_modules/**", "**/{dist,build,out,target,coverage}/**"];
-
-// A path from the working directory, written with `/` on every system, as tsc writes it.
-const shown = (path: string): string => relative(process.cwd(), path).split(sep).join("/") || ".";
-const paint = (format: Parameters<typeof styleText>[0], text: string): string => styleText(format, text);
-
-// Node's own glob, which does not descend into a symlinked directory, and on macOS and Windows
-// Matches without regard to case, hence the check of the extension. It also yields directories (a
-// Directory named `x.sql` among them), which are dropped. The patterns read as they always have: one
-// That names a directory takes every file under it, and an include that starts with `!` excludes.
-const sqlFiles = async function (dir: string, include = INCLUDE, exclude: string[] = []): Promise<string[]> {
-  const negated = (p: string): boolean => p.startsWith("!") && !p.startsWith("!(");
-  const patterns = include.filter((p) => !negated(p)).flatMap((p) => {
-    const q = p.replace(/\/$/u, "");
-    return q.endsWith("*") ? [q] : [q, `${q}/**`];
-  });
-  const excluded = [...EXCLUDE, ...exclude, ...include.filter(negated).map((p) => p.slice(1))];
-  const entries = await Array.fromAsync(glob(patterns, { cwd: dir, exclude: excluded, withFileTypes: true }));
-  return entries.filter((entry) => !entry.isDirectory() && entry.name.endsWith(".sql")).map((entry) => resolve(entry.parentPath, entry.name));
-};
-
-/** The files among `files` that git ignores; none where git is missing or `dir` is not in a repository. */
-const gitIgnored = function (dir: string, files: string[]): Set<string> {
-  if (!files.length) {return new Set();}
-  const commandResult = spawnSync("git", ["check-ignore", "-z", "--stdin"], { cwd: dir, input: files.join("\0"), encoding: "utf8" });
-  // 0: some are ignored; 1: none is; 128 or no status: not a repository, or no git.
-  return commandResult.status === 0 ? new Set(commandResult.stdout.split("\0").filter(Boolean).map((part) => resolve(dir, part))) : new Set();
-};
-
-/** The place of a byte offset and the line that holds it, with a caret under the span, as an editor underlines it. */
-const located = function (text: string, start: number, length: number): { at: string; frame: string[] } {
-  const bytes = Buffer.from(text, "utf8");
-  const before = bytes.subarray(0, start).toString("utf8");
-  const lineNumber = before.split("\n").length;
-  const column = before.length - before.lastIndexOf("\n") - 1;
-  const line = text.split("\n")[lineNumber - 1]!.replace(/\r$/u, "");
-  const span = Math.max(1, Math.min(bytes.subarray(start, start + length).toString("utf8").length, line.length - column));
-  const gutter = String(lineNumber);
-  return {
-    at: `${lineNumber}:${column + 1}`,
-    frame: [`  ${paint("dim", `${gutter} |`)} ${line}`, `  ${paint("dim", `${" ".repeat(gutter.length)} |`)} ${line.slice(0, column).replaceAll(/[^\t]/g, " ")}${paint("red", "^".repeat(span))}`],
-  };
-};
-
-// A file of several statements is a migration or a schema file, which nothing imports: the
-// Engine's error says so (or the server refuses to prepare several commands), and the file is
-// Skipped. A file of one command is typed like a query, and one the database refuses (a typo in an
-// Imported CREATE INDEX, or a migration's CREATE TABLE of a table the database has) is an error
-// Like any other, which fails the run and is printed: the database cannot tell a migration from a
-// Command someone imports, and its message still says how to leave a migration out of the check.
 const NOT_A_QUERY = /^A typed \.sql file holds one statement and this one holds several, |^cannot insert multiple commands into a prepared statement/u;
 
-const generate = async function (args: string[]): Promise<number> {
-  const force = args.includes("--force");
-  const unknown = args.filter((argument) => argument.startsWith("-") && argument !== "--force");
-  if (unknown.length) {
-    console.error(`reylo generate: unknown option ${unknown.join(", ")}\n\n${USAGE}`);
-    return 2;
-  }
-  const paths = args.filter((argument) => !argument.startsWith("-"));
-  const started = performance.now();
+interface Availability { offline: boolean; unusable?: string | undefined }
 
-  // A file named on the command line is analyzed as named; a directory is searched.
-  const named = new Set<string>();
-  const found = new Set<string>();
-  for (const arg of paths.length ? paths : ["."]) {
-    const full = resolve(arg);
-    if (!existsSync(full)) {
-      console.error(`reylo generate: ${arg} does not exist.`);
-      return 2;
-    }
-    if (statSync(full).isDirectory()) {
-      const files = await sqlFiles(full);
-      const ignored = gitIgnored(full, files);
-      Iterator.from(files).forEach((file) => {if (!ignored.has(file)) {found.add(file);}});
-    } else if (full.endsWith(".sql")) {named.add(full);}
-    else {
-      console.error(`reylo generate: ${arg} is not a .sql file or a directory.`);
-      return 2;
-    }
-  }
-
-  // One project per `.reylo.yaml` (or package): each has its database, its `.reylo/` and its `cli` globs.
-  const projects = new Map<Session, string[]>();
-  for (const file of [...named, ...found].sort()) {
-    const session = await Session.for(dirname(file));
-    projects.set(session, [...(projects.get(session) ?? []), file]);
-  }
-  for (const [session, list] of projects) {
-    const { include, exclude } = session.project.cli;
-    if (!include && !exclude) {continue;}
-    const allowed = new Set(await sqlFiles(session.root, include, exclude));
-    projects.set(session, list.filter((f) => named.has(f) || allowed.has(f)));
-  }
-
-  let typed = 0;
-  const failed: string[] = [];
-  const skipped: string[] = [];
-  const errors: string[][] = [];
-  for (const [session, list] of projects) {
-    if (!list.length) {continue;}
-    const { project } = session;
-    const here = session.root === process.cwd() ? "" : `${shown(session.root)}: `;
-    console.log(paint("dim", `${here}${project.dialect} at ${session.where()} (${project.urlSource})`));
-    // A project that cannot be used at all is said once, above its files.
-    let unusable = project.error ?? (project.url ? undefined : project.missingUrl);
-    // A file that sets `url` alone is told once, under the line that names the connection used
-    // Instead; where there is none, the error says it.
-    if (project.notice && project.url) {console.log(paint("yellow", project.notice));}
-    let offline = false;
-    if (!unusable) {
-      const schema = await session.schema();
-      if (schema.fatal) {unusable = schema.error;}
-      else if (matchesNull(schema.value)) {
-        offline = true;
-        console.log(paint("dim", `${session.cannotConnect(schema.error)}; the files are read from .reylo/ as they are.`));
-      }
-    }
-    if (unusable) {errors.push([paint("red", unusable)]);}
-    const rows: { file: string; ok: boolean }[] = [];
-    for (const file of list) {
-      const fail = (...lines: string[]): void => {
-        rows.push({ file, ok: false });
-        errors.push(lines);
-      };
-      if (unusable) {
-        rows.push({ file, ok: false });
-        continue;
-      }
-      const sql = readFileSync(file, "utf8");
-      const outcome = await session.analyze(sql, { force });
-      if (!outcome.ok) {
-        fail(`${paint("bold", shown(file))}: ${offline ? (force ? "--force needs the database, which cannot be reached" : "not in .reylo/, and the database cannot be reached") : outcome.message}`);
-        continue;
-      }
-      const { diagnostics } = outcome.analysis;
-      if (diagnostics.some((diagnostic) => NOT_A_QUERY.test(diagnostic.message))) {
-        skipped.push(file);
-        continue;
-      }
-      if (diagnostics.length) {
-        fail(...diagnostics.flatMap((diagnostic) => {
-          const { at, frame } = located(sql, diagnostic.start, diagnostic.length);
-          // An error that spans the whole statement has no place in it (SQLite names none).
-          const whole = diagnostic.start === 0 && diagnostic.length >= Buffer.byteLength(sql.trimEnd());
-          return [`${paint("bold", `${shown(file)}:${at}`)}: ${diagnostic.message}`, ...(whole ? [] : frame)];
-        }));
-        continue;
-      }
-      rows.push({ file, ok: true });
-    }
-    const width = Math.max(...rows.map((row) => shown(row.file).length));
-    Iterator.from(rows).forEach(({ file, ok }) => {
-      if (ok) {typed++;}
-      else {failed.push(file);}
-      console.log(`  ${shown(file).padEnd(width)}  ${ok ? paint("green", "✓") : paint("red", "✗")}`);
-    });
-  }
-  for (const session of Session.opened()) {await session.close();}
-
-  Iterator.from(errors).forEach((lines) => {console.log(`\n${lines.join("\n")}`);});
-  if (skipped.length) {
-    const listed = skipped.slice(0, 3).map(shown).join(", ") + (skipped.length > 3 ? ` and ${skipped.length - 3} more` : "");
-    console.log(paint("dim", `\nSkipped ${skipped.length === 1 ? "1 file that is" : `${skipped.length} files that are`} not one query (a migration?): ${listed}`));
-  }
-  const seconds = ((performance.now() - started) / 1000).toFixed(1);
-  const total = typed + failed.length;
-  if (failed.length) {console.log(`\n${paint("red", "✗")} ${failed.length} of ${total} ${total === 1 ? "query" : "queries"} failed (${seconds} s)`);}
-  else if (typed) {console.log(`\n${paint("green", "✓")} ${typed} ${typed === 1 ? "query" : "queries"} typed (${seconds} s)`);}
-  // Nothing to build from: a CI job that carries .reylo/ to a build would fail there instead.
-  else {
-    // The hint names the project's own file where the run covered one project that has one; where
-    // No .sql file opened a project, the file of the one directory searched.
-    const sessions = [...projects.keys()];
-    const own = sessions.length === 1 ? sessions[0]!.project.file : (!sessions.length && paths.length <= 1 ? findProjectFile(resolve(paths[0] ?? ".")) : undefined);
-    console.log(`${skipped.length ? "\n" : ""}No query under ${(paths.length ? paths : ["."]).join(", ")}: name the directory that holds them, or set cli.include in ${own ? shown(own) : PROJECT_FILE}.`);
-    return 1;
-  }
-  return failed.length ? 1 : 0;
+const schemaAvailability = async (session: Session): Promise<Availability> => {
+  const schema = await session.schema();
+  if (schema.fatal === true) {return { offline: false, unusable: nonemptyText(schema.error) };}
+  if (!matchesNull(schema.value)) {return { offline: false };}
+  out(paint("dim", `${session.cannotConnect(schema.error)}; the files are read from .reylo/ as they are.`));
+  return { offline: true };
 };
 
-/** Runs the command `args` names, and answers with the process's exit code. */
-export async function runCli(args: string[]): Promise<number> {
+const availability = async (session: Session): Promise<Availability> => {
+  const { project } = session;
+  const url = nonemptyText(project.url);
+  const notice = nonemptyText(project.notice);
+  if (!matchesUndefined(url) && !matchesUndefined(notice)) {out(paint("yellow", notice));}
+  const unusable = nonemptyText(project.error ?? (matchesUndefined(url) ? project.missingUrl : undefined));
+  return matchesUndefined(unusable) ? schemaAvailability(session) : { offline: false, unusable };
+};
+
+interface AnalysisContext { force: boolean; offline: boolean; result: Result; session: Session }
+
+const failureText = ({ force, offline }: AnalysisContext, message: string): string => {
+  if (!offline) {return message;}
+  return force ? "--force needs the database, which cannot be reached" : "not in .reylo/, and the database cannot be reached";
+};
+
+const reportAnalysis = ({ file, sql }: { file: string; sql: string }, diagnostics: Diagnostic[], result: Result): Row | undefined => {
+  if (diagnostics.some((diagnostic) => NOT_A_QUERY.test(diagnostic.message))) {
+    result.skipped.push(file);
+    return undefined;
+  }
+  if (isEmptyArray(diagnostics)) {return { file, ok: true };}
+  result.errors.push(diagnostics.flatMap((diagnostic) => statementDiagnostic(file, sql, diagnostic)));
+  return { file, ok: false };
+};
+
+const analyzeFile = async (file: string, context: AnalysisContext): Promise<Row | undefined> => {
+  // oxlint-disable-next-line node/no-sync -- Analyze each complete SQL file in the command's ordered read pass.
+  const sql = readFileSync(file, "utf8");
+  const { force, result, session } = context;
+  const outcome = await session.analyze(sql, { force });
+  if (!outcome.ok) {
+    result.errors.push([`${paint("bold", shown(file))}: ${failureText(context, outcome.message)}`]);
+    return { file, ok: false };
+  }
+  return reportAnalysis({ file, sql }, outcome.analysis.diagnostics, result);
+};
+
+const rowsFor = async (files: string[], context: AnalysisContext): Promise<Row[]> => {
+  const rows: Row[] = [];
+  // oxlint-disable-next-line rules/no-for-loops -- Analyze each project's files serially through its open native session.
+  for (const file of files) {
+    // oxlint-disable-next-line eslint/no-await-in-loop -- Finish this file's analysis and cache entry before the next call.
+    const row = await analyzeFile(file, context);
+    if (!matchesUndefined(row)) {rows.push(row);}
+  }
+  return rows;
+};
+
+const projectTitle = (session: Session): void => {
+  const { project } = session;
+  const here = session.root === process.cwd() ? "" : `${shown(session.root)}: `;
+  out(paint("dim", `${here}${project.dialect} at ${session.where()} (${project.urlSource})`));
+};
+
+interface RunOptions { force: boolean; result: Result }
+
+const runProject = async (session: Session, files: string[], { force, result }: RunOptions): Promise<void> => {
+  if (isEmptyArray(files)) {return;}
+  projectTitle(session);
+  const { offline, unusable } = await availability(session);
+  if (matchesUndefined(unusable)) {
+    const rows = await rowsFor(files, { force, offline, result, session });
+    showRows(rows, result);
+    return;
+  }
+  result.errors.push([paint("red", unusable)]);
+  showRows(files.map((file) => ({ file, ok: false })), result);
+};
+
+const runProjects = async (projects: Map<Session, string[]>, force: boolean): Promise<Result> => {
+  const result: Result = { errors: [], failed: [], skipped: [], typed: SUCCESS };
+  // oxlint-disable-next-line rules/no-for-loops -- Project analysis and its printed rows keep the established project order.
+  for (const [session, files] of projects) {
+    // oxlint-disable-next-line eslint/no-await-in-loop -- Each project finishes before opening the next analysis pass.
+    await runProject(session, files, { force, result });
+  }
+  // oxlint-disable-next-line rules/no-for-loops -- Close all native sessions before printing the summary.
+  for (const session of Session.opened()) {
+    // oxlint-disable-next-line eslint/no-await-in-loop -- Keep native session shutdown and failure order stable.
+    await session.close();
+  }
+  return result;
+};
+
+const generatePaths = async (paths: string[], force: boolean): Promise<number> => {
+  const started = performance.now();
+  const targets = await gatherTargets(paths);
+  if (matchesString(targets)) {
+    err(`reylo generate: ${targets}`);
+    return USAGE_ERROR;
+  }
+  const projects = await groupProjects(targets);
+  const result = await runProjects(projects, force);
+  return summarize(result, { paths, projects, started });
+};
+
+const generate = async (args: string[]): Promise<number> => {
+  const force = args.includes("--force");
+  const unknown = args.filter((argument) => argument.startsWith("-") && argument !== "--force");
+  if (!isEmptyArray(unknown)) {
+    err(`reylo generate: unknown option ${unknown.join(", ")}\n\n${USAGE}`);
+    return USAGE_ERROR;
+  }
+  const paths = args.filter((argument) => !argument.startsWith("-"));
+  return generatePaths(paths, force);
+};
+
+/**
+ * Run one command from the native reylo CLI.
+ * @param {string[]} args - The command name and its arguments.
+ * @returns {Promise<number>} The CLI exit status.
+ */
+export const runCli = async function runCli(args: string[]): Promise<number> {
   const [command, ...rest] = args;
   if (command === "generate") {return generate(rest);}
   if (matchesUndefined(command) || command === "help" || command === "--help" || command === "-h") {
-    console.log(USAGE);
-    return 0;
+    out(USAGE);
+    return SUCCESS;
   }
-  console.error(`reylo: unknown command ${command}\n\n${USAGE}`);
-  return 2;
-}
+  err(`reylo: unknown command ${command}\n\n${USAGE}`);
+  return USAGE_ERROR;
+};
