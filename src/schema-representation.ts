@@ -39,6 +39,28 @@ const documentNumberSchema = (format: string, dialect: Dialect): Schema => {
   return dialect === "postgres" ? { anyOf: [finite, { enum: ["NaN", "Infinity", "-Infinity"] }] } : finite;
 };
 
+const KIND_SCHEMAS: Record<ScalarKind, (name: string, dialect: Dialect) => Schema> = {
+  bool: () => ({ type: "boolean" }),
+  bytes: binarySchema,
+  date: () => withFormat("string", "date"),
+  decimal: () => withFormat("string", "decimal"),
+  float: (name, dialect) => withFormat("number", name === "float4" || (dialect === "duckdb" && name === "float") ? "float" : "double"),
+  hstore: hstoreSchema,
+  // A SQLite INTEGER is 64 bits wide, and so is an oid's range past int4's.
+  int: (name, dialect) => withFormat("integer", name === "oid" || dialect === "sqlite" || name === "uinteger" ? "int64" : "int32"),
+  // A BigInt, as the JSON integer it is.
+  int8: () => withFormat("integer", "int64"),
+  // RFC 3339's duration, which JSON Schema's `duration` format names, has no sign and no fraction.
+  interval: () => withDescription("string", "an ISO 8601 duration with its sign in front (P1Y2M3DT4H5M6.789S, -P1D); one whose parts differ in sign signs each part (P1M-1D)"),
+  json: () => ({}),
+  text: () => ({ type: "string" }),
+  // A date and a time with no zone, which RFC 3339's date-time does not admit.
+  timestamp: () => withDescription("string", "a date and time without a time zone, as the database wrote it (2026-10-20T10:00:00.123456)"),
+  timestamptz: () => withFormat("string", "date-time"),
+  unknown: () => ({}),
+  vector: () => arraySchema(withFormat("number", "float")),
+};
+
 /**
  * The JSON form of a value of `kind` as `run` returns it, once JSON: each kind's one representation (src/values.ts).
  * @param {ScalarKind} kind - The scalar representation.
@@ -46,29 +68,7 @@ const documentNumberSchema = (format: string, dialect: Dialect): Schema => {
  * @param {Dialect} dialect - The database dialect.
  * @returns {Schema} The JSON representation of the scalar.
  */
-const kindSchema = function kindSchema(kind: ScalarKind, name: string, dialect: Dialect): Schema {
-  switch (kind) {
-    case "bool": { return { type: "boolean" }; }
-    // A SQLite INTEGER is 64 bits wide, and so is an oid's range past int4's.
-    case "int": { return withFormat("integer", name === "oid" || dialect === "sqlite" || name === "uinteger" ? "int64" : "int32"); }
-    case "float": { return withFormat("number", name === "float4" || (dialect === "duckdb" && name === "float") ? "float" : "double"); }
-    // A BigInt, as the JSON integer it is.
-    case "int8": { return withFormat("integer", "int64"); }
-    case "decimal": { return withFormat("string", "decimal"); }
-    case "timestamptz": { return withFormat("string", "date-time"); }
-    // RFC 3339's duration, which JSON Schema's `duration` format names, has no sign and no fraction.
-    case "interval": { return withDescription("string", "an ISO 8601 duration with its sign in front (P1Y2M3DT4H5M6.789S, -P1D); one whose parts differ in sign signs each part (P1M-1D)"); }
-    case "date": { return withFormat("string", "date"); }
-    // A date and a time with no zone, which RFC 3339's date-time does not admit.
-    case "timestamp": { return withDescription("string", "a date and time without a time zone, as the database wrote it (2026-10-20T10:00:00.123456)"); }
-    case "bytes": { return binarySchema(); }
-    case "vector": { return arraySchema(withFormat("number", "float")); }
-    case "hstore": { return hstoreSchema(); }
-    case "text": { return { type: "string" }; }
-    case "json": { return {}; }
-    case "unknown": { return {}; }
-  }
-};
+const kindSchema = (kind: ScalarKind, name: string, dialect: Dialect): Schema => KIND_SCHEMAS[kind](name, dialect);
 
 const sqliteInputSchema = (name: string): Schema => {
   switch (name) {

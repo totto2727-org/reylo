@@ -25,8 +25,12 @@ interface Analysis {
  * @returns {Schema | JsonSchema} The schema that also admits null.
  */
 const nullable = function (schema: Schema | JsonSchema): Schema | JsonSchema {
-  if (schema === true || (hasObjectType(schema) && Object.keys(schema).length === 0)) {return schema;}
-  if (hasObjectType(schema) && Object.keys(schema).length === 1 && matchesString(schema.type)) {return { type: [schema.type, "null"] };}
+  if (schema === true) {return schema;}
+  if (hasObjectType(schema)) {
+    const [first, second] = Object.keys(schema);
+    if (matchesUndefined(first)) {return schema;}
+    if (matchesUndefined(second) && matchesString(schema.type)) {return { type: [schema.type, "null"] };}
+  }
   return { anyOf: [schema, { type: "null" }] };
 };
 
@@ -56,69 +60,105 @@ const object = function <Field extends { name: string }>(
     if (previous !== MISSING_KEY) {required.splice(previous, SINGLE_KEY);}
     if (!optional(field)) {required.push(field.name);}
   });
+  // oxlint-disable-next-line eslint/sort-keys -- Keep the field order of the emitted object schema.
   return { type: "object", properties, required, ...(closed ? { additionalProperties: false } : {}) };
 };
 
 const withNull = (schema: Schema | JsonSchema, acceptsNull: boolean): Schema | JsonSchema =>
   acceptsNull ? nullable(schema) : schema;
 
+type SchemaPosition = [input?: boolean, inJson?: boolean, inRow?: boolean];
+
+interface ValuePosition {
+  inJson: boolean;
+  inRow: boolean;
+  input: boolean;
+}
+
+type StructuredType = Extract<EngineType, { kind: "composite" | "map" | "object" | "rows" | "struct" | "tuple" | "union" }>;
+
+type RenderNested = (valueType: EngineType, ...position: SchemaPosition) => Schema | JsonSchema;
+
+const sequenceSchema = (valueType: Extract<EngineType, { kind: "array" | "list" }>, { inJson, inRow, input }: ValuePosition, render: RenderNested): Schema => {
+  if (valueType.kind === "list") {
+    return arraySchema(withNull(render(valueType.of, input, true), valueType.nullable_items));
+  }
+  // A result's elements may be null unless the statement shows they are not; a parameter's
+  // Are strict, but a structured parameter's member keeps them (src/render.ts).
+  const items = render(valueType.of, input, inJson, inRow);
+  const acceptsNull = input ? inRow || (valueType.nullable_items ?? false) : valueType.nullable_items !== false;
+  return arraySchema(withNull(items, acceptsNull));
+};
+
+const structuredParameterSchema = (valueType: Extract<StructuredType, { kind: "rows" }>, render: RenderNested): Schema => {
+  // A JSON member's schema as written, with its defaults and formats.
+  const row = object(valueType.fields, (field) => withNull(field.schema ?? render(field.type, true, false, true), field.nullable), {
+    closed: true,
+    optional: (field) => field.optional,
+  });
+  return valueType.one ? row : arraySchema(row);
+};
+
+// oxlint-disable-next-line typescript/consistent-return -- All supported structured kinds return schemas. Unknown native kinds keep the existing undefined fallback.
+const structuredSchema = (valueType: StructuredType, { inJson, input }: Pick<ValuePosition, "inJson" | "input">, render: RenderNested): Schema => {
+  // oxlint-disable-next-line eslint/default-case -- TypeScript checks the supported kinds. Missing native cases deliberately keep the existing undefined fallback.
+  switch (valueType.kind) {
+    case "composite":
+    case "object": {
+      if (valueType.kind === "composite" && !inJson) {return withDescription("string", `the row value of ${valueType.name} as Postgres prints it`);}
+      return object(valueType.fields, (field) => withNull(render(field.type, input, true), field.nullable));
+    }
+    case "rows": {return structuredParameterSchema(valueType, render);}
+    // A DuckDB struct's fields, map's entries and union's value stand as a row's values do, each may be null.
+    case "struct": {return object(valueType.fields, (field) => nullable(render(field.type, input)));}
+    case "map": {
+      const entries = [
+        { name: "key", schema: render(valueType.key, input) },
+        { name: "value", schema: nullable(render(valueType.value, input)) },
+      ];
+      return arraySchema(object(entries, (entry) => entry.schema));
+    }
+    case "tuple": {
+      // oxlint-disable-next-line eslint/sort-keys -- Keep the field order of the emitted tuple schema.
+      return { type: "array", prefixItems: valueType.items.map((item) => nullable(render(item, input))), items: false, minItems: valueType.items.length };
+    }
+    case "union": {
+      return { anyOf: valueType.members.map((member) => object([
+        { name: "tag", schema: { const: member.name } },
+        { name: "value", schema: nullable(render(member.type, input)) },
+      ], (field) => field.schema)) };
+    }
+  }
+};
+
+const forDialect = (dialect: Dialect): RenderNested => {
+  const render: RenderNested = (valueType, ...position) => {
+    const [input = false, inJson = false, inRow = false] = position;
+    // oxlint-disable-next-line typescript/switch-exhaustiveness-check -- The default passes the remaining typed structures to their own exhaustive dispatch.
+    switch (valueType.kind) {
+      case "scalar": {return scalarSchema(valueType.name, dialect, { inJson, input });}
+      case "enum": {
+        // oxlint-disable-next-line eslint/sort-keys -- Keep the type before the enum labels in the emitted schema.
+        return { type: "string", enum: valueType.labels };
+      }
+      case "array": case "list": {return sequenceSchema(valueType, { inJson, inRow, input }, render);}
+      case "json": {return valueType.schema ?? {};}
+      case "unknown": {return {};}
+      default: {return structuredSchema(valueType, { inJson, input }, render);}
+    }
+  };
+  return render;
+};
+
 /**
  * The JSON Schema of a value of `valueType`, as a result column (`input` false) or a parameter the caller passes (`input` true), or a structured parameter's member (`inRow`).
  * @param {EngineType} valueType - The value's database type.
  * @param {Dialect} dialect - The database dialect.
- * @param {boolean} input - Whether the caller passes the value as a parameter.
- * @param {boolean} inJson - Whether the value occurs inside a JSON document.
- * @param {boolean} inRow - Whether the value is a member of a structured parameter.
+ * @param {SchemaPosition} position - Whether the value is a parameter, occurs inside JSON, or belongs to a structured parameter.
  * @returns {Schema | JsonSchema} The schema for the value in this position.
  */
-export const typeSchema = function typeSchema(valueType: EngineType, dialect: Dialect, input = false, inJson = false, inRow = false): Schema | JsonSchema {
-  switch (valueType.kind) {
-    case "scalar": {return scalarSchema(valueType.name, dialect, { inJson, input });}
-    case "enum": {return { type: "string", enum: valueType.labels };}
-    case "array": {
-      // A result's elements may be null unless the statement shows they are not; a parameter's
-      // Are strict, but a structured parameter's member keeps them (src/render.ts).
-      const items = typeSchema(valueType.of, dialect, input, inJson, inRow);
-      const acceptsNull = input ? inRow || (valueType.nullable_items ?? false) : valueType.nullable_items !== false;
-      return arraySchema(withNull(items, acceptsNull));
-    }
-    case "composite":
-    case "object": {
-      if (valueType.kind === "composite" && !inJson) {return withDescription("string", `the row value of ${valueType.name} as Postgres prints it`);}
-      return object(valueType.fields, (field) => withNull(typeSchema(field.type, dialect, input, true), field.nullable));
-    }
-    case "list": {
-      const items = typeSchema(valueType.of, dialect, input, true);
-      return arraySchema(withNull(items, valueType.nullable_items));
-    }
-    case "json": {return valueType.schema ?? {};}
-    // What the caller passes: each key as a parameter of its type takes it.
-    case "rows": {
-      // A JSON member's schema as written, with its defaults and formats.
-      const row = object(valueType.fields, (field) => withNull(field.schema ?? typeSchema(field.type, dialect, true, false, true), field.nullable), {
-        closed: true,
-        optional: (field) => field.optional,
-      });
-      return valueType.one ? row : arraySchema(row);
-    }
-    // A DuckDB struct's fields, map's entries and union's value stand as a row's values do, each may be null.
-    case "struct": {return object(valueType.fields, (field) => nullable(typeSchema(field.type, dialect, input)));}
-    case "map": {
-      const entries = [
-        { name: "key", schema: typeSchema(valueType.key, dialect, input) },
-        { name: "value", schema: nullable(typeSchema(valueType.value, dialect, input)) },
-      ];
-      return arraySchema(object(entries, (entry) => entry.schema));
-    }
-    case "tuple": {return { type: "array", prefixItems: valueType.items.map((item) => nullable(typeSchema(item, dialect, input))), items: false, minItems: valueType.items.length };}
-    case "union": {
-      return { anyOf: valueType.members.map((member) => object([
-        { name: "tag", schema: { const: member.name } },
-        { name: "value", schema: nullable(typeSchema(member.type, dialect, input)) },
-      ], (field) => field.schema)) };
-    }
-    case "unknown": {return {};}
-  }
+export const typeSchema = function typeSchema(valueType: EngineType, dialect: Dialect, ...position: SchemaPosition): Schema | JsonSchema {
+  return forDialect(dialect)(valueType, ...position);
 };
 
 const outputSchema = (row: Schema, cardinality: Analysis["cardinality"]): Schema => {
@@ -135,9 +175,10 @@ const outputSchema = (row: Schema, cardinality: Analysis["cardinality"]): Schema
  * @returns {{ input: Schema, output: Schema }} The input and output JSON schemas.
  */
 export const querySchemas = function querySchemas(analysis: Analysis, dialect: Dialect): { input: Schema; output: Schema } {
+  const render = forDialect(dialect);
   // A typed JSON parameter's schema as written, with its defaults; one with a `default` at its root may be left out, as may one that takes null.
   const input = object(analysis.params, (parameter) => {
-    const schema = parameter.schema ?? typeSchema(parameter.type, dialect, true);
+    const schema = parameter.schema ?? render(parameter.type, true);
     return withNull(schema, parameter.nullable);
   }, {
     closed: true,
@@ -146,7 +187,7 @@ export const querySchemas = function querySchemas(analysis: Analysis, dialect: D
       return parameter.nullable || (!matchesNull(schema) && hasObjectType(schema) && !matchesUndefined(schema) && "default" in schema);
     },
   });
-  const row = object(analysis.columns, (column) => withNull(typeSchema(column.type, dialect), column.nullable));
+  const row = object(analysis.columns, (column) => withNull(render(column.type), column.nullable));
   const output = outputSchema(row, analysis.cardinality);
   return { input: { $schema: "https://json-schema.org/draft/2020-12/schema", ...input }, output: { $schema: "https://json-schema.org/draft/2020-12/schema", ...output } };
 };
