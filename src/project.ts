@@ -13,12 +13,12 @@
 // Defaults to SQLite for cached analysis.
 // oxlint-disable-next-line rules/no-node-imports -- This server-side entry point uses this built-in to resolve paths using the host platform's filesystem conventions.
 import nodePath from "node:path";
-import { MissingEngine } from './engine.ts';
-import type { Engine } from './engine.ts';
-import { matchesUndefined } from "./native-predicates.ts";
+import type { Engine, MissingEngine } from "./engine.ts";
+import { matchesUndefined, nonemptyText } from "./native-predicates.ts";
 
 import { commandOutput } from "./project-command.ts";
-import { findProjectFile, hasProjectPath, hostEnvironment, packageDir, PROJECT_FILE, PROJECT_FILES, readEnvFile, readProjectText } from "./project-files.ts";
+import { readProjectConfig } from "./project-config.ts";
+import { findProjectFile, hasProjectPath, hostEnvironment, packageDir, PROJECT_FILE, PROJECT_FILES, readEnvFile } from "./project-files.ts";
 import { inUserinfo, urlParts } from "./project-url-template.ts";
 import { dialectOf, hclPath } from "./project-address.ts";
 import type { Dialect } from "./project-address.ts";
@@ -30,6 +30,7 @@ export { findProjectFile, packageDir, PROJECT_FILE, PROJECT_FILES, readEnvFile, 
 const { dirname, isAbsolute, join, relative, resolve, sep } = nodePath;
 
 /** What the engine reads out of `.reylo.yaml`: the keys the library looks at. */
+// oxlint-disable-next-line typescript/consistent-type-definitions -- Preserve the exported configuration type's structural Record assignability.
 export type ProjectFile = {
   /** Never the type check's connection: read only to say so. */
   url?: string;
@@ -42,8 +43,10 @@ export type ProjectFile = {
 };
 
 /** The files `reylo generate` analyzes, as globs relative to the project file's directory. */
+// oxlint-disable-next-line typescript/consistent-type-definitions -- Keep the exported CLI configuration assignable to structural record consumers.
 export type Cli = { include?: string[]; exclude?: string[] };
 
+// oxlint-disable-next-line typescript/consistent-type-definitions -- Keep the resolved configuration assignable to existing structural record consumers.
 export type ResolvedProject = {
   /** The project file, when there is one. */
   file: string | undefined;
@@ -78,58 +81,25 @@ export type ResolvedProject = {
 };
 
 const DEFAULT_ENV_FILES = [".env.local", ".env"];
-const FIRST_FILE_BYTE = 0;
-const FIRST_COLUMN = 1;
-const FINAL_LINE = -1;
-
-/** 1-based line and column of a byte offset, for a message that names the place in the file. */
-const place = function (text: string, offset: number): string {
-  const before = Buffer.from(text, "utf8").subarray(FIRST_FILE_BYTE, offset).toString("utf8");
-  const lines = before.split("\n");
-  return `${lines.length}:${(lines.at(FINAL_LINE) ?? "").length + FIRST_COLUMN}`;
-};
-
-/**
- * Where the project file sets `types`, which was removed on 2026-10-20: Reylo gives every value
- * its type itself, one representation per SQL type on every driver (src/values.ts), so nothing
- * is left to set. The engine still reads the key, so the loader refuses it first.
- */
-const TYPES_KEY = /^types[ \t]*:/mu;
-
 /**
  * The project `projectDir` belongs to. `engine` reads the project file: any database's engine does
  * (src/engine.ts, `anyEngine`), and where none is installed a project file is the project's error.
+ * @param {Engine | MissingEngine} engine The engine used to validate the configuration.
+ * @param {string} projectDir The directory used to find the project.
+ * @param {Record<string, string | undefined>} env The environment used for URL and file settings.
+ * @returns {ResolvedProject} The native project settings and any configuration diagnostic.
  */
 export const resolveProject = function resolveProject(engine: Engine | MissingEngine, projectDir: string, env: Record<string, string | undefined> = hostEnvironment()): ResolvedProject {
   const file = findProjectFile(projectDir, env);
-  const root = file ? dirname(file) : packageDir(projectDir);
+  const root = matchesUndefined(file) ? packageDir(projectDir) : dirname(file);
   const shown = (path: string): string => (isAbsolute(path) ? relative(projectDir, path).split(sep).join("/") || path : path);
-  let config: ProjectFile = {};
-  let error: string | undefined;
-  if (file) {
-    let text: string | undefined;
-    try {
-      text = readProjectText(file);
-    } catch (error_) {
-      error = `Cannot read ${shown(file)}: ${(error_ as Error).message}`;
-    }
-    const types = matchesUndefined(text) ? null : TYPES_KEY.exec(text);
-    if (types) {
-      error = `${shown(file)}:${place(text!, Buffer.byteLength(text!.slice(0, types.index)))}: types: the types section was removed on 2026-10-20. Reylo now gives every value one type on every driver, whatever the driver's settings: a 64-bit integer is a BigInt, a decimal its exact text, a timestamptz its ISO 8601 text in UTC, a date and a timestamp their text, JSON parsed and binary data a Uint8Array. Delete the section.`;
-    } else if (!matchesUndefined(text)) {
-      if (engine instanceof MissingEngine) {error = `${shown(file)}: ${engine.message}`;}
-      else {
-        const r = engine.call({ op: "config", text });
-        if (r.status === "config") {config = r.config as ProjectFile;}
-        else if (r.status === "configError") {error = `${shown(file)}:${place(text, r.error.start)}: ${r.error.message}`;}
-        else {error = `${shown(file)}: ${r.status === "error" ? r.message : `unexpected ${r.status}`}`;}
-      }
-    }
-  }
+  const parsed = readProjectConfig(engine, file, shown);
+  const { config } = parsed;
+  let error = parsed.error;
   // Both names beside one package.json: whichever were read, edits to the other would do nothing.
   const both = PROJECT_FILES.map((name) => join(root, name));
-  if (!env.REYLO_CONFIG && both.every((path) => hasProjectPath(path))) {error = `${both.map(shown).join(" and ")} are both project files; keep one.`;}
-  const envFiles = (config.env ?? DEFAULT_ENV_FILES).map((f) => resolve(root, f));
+  if (matchesUndefined(nonemptyText(env.REYLO_CONFIG)) && both.every((filePath) => hasProjectPath(filePath))) {error = `${both.map(shown).join(" and ")} are both project files; keep one.`;}
+  const envFiles = (config.env ?? DEFAULT_ENV_FILES).map((filename) => resolve(root, filename));
   // The process environment wins; among the files, the first that sets a variable does.
   const lookup = (name: string): { value: string; source: string } | undefined => {
     if (!matchesUndefined(env[name])) {return { value: env[name], source: `${name} in the environment` };}
