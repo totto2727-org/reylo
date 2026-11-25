@@ -14,9 +14,10 @@ import { randomBytes, timingSafeEqual } from "node:crypto";
 import { createServer, connect } from 'node:net';
 // oxlint-disable-next-line rules/no-node-imports -- This server-side entry point uses this built-in to type the host's native address and socket.
 import type { AddressInfo, Socket } from 'node:net';
-// oxlint-disable-next-line rules/no-node-imports -- This server-side entry point uses this built-in to resolve paths using the host platform's filesystem conventions.
-import { resolve } from "node:path";
 import { Unreachable } from "./connection.ts";
+import { joinHost, prepareHostUrl, splitPair, withHost } from "./host-url-address.ts";
+import type { SocketAddress } from "./host-url-address.ts";
+import { hostEnvironment } from "./project-files.ts";
 import { matchesUndefined } from "./native-predicates.ts";
 
 /**
@@ -24,18 +25,14 @@ import { matchesUndefined } from "./native-predicates.ts";
  * the connection, and why the bridge could not open its socket, which the engine sees only as a
  * connection closed.
  */
+// oxlint-disable-next-line typescript/consistent-type-definitions -- Keep the exported native connection shape assignable to structural record consumers.
 export type HostUrl = { url: string; bridge?: string; close: () => void; failure?: () => Error | undefined };
-
-/** The Postgres URL parameters that name a file. */
-const FILES = ["sslrootcert", "sslcert", "sslkey"];
 
 /** The connection attribute a MySQL login through the bridge carries its token in (upstream engine/native/src/mysql.rs). */
 const MYSQL_ATTRIBUTE = "reylo_bridge";
 
 /** How long a connection to the bridge may take to show its token. */
 const TOKEN_TIMEOUT = 10_000;
-const SCHEME_SEPARATOR = "://";
-const DEFAULT_POSTGRES_PORT = "5432";
 const MYSQL_PACKET_HEADER_BYTES = 4;
 const MYSQL_LENGTH_BYTES = 3;
 const MYSQL_PACKET_SEQUENCE_OFFSET = MYSQL_LENGTH_BYTES;
@@ -54,7 +51,6 @@ const BRIDGE_TOKEN_BYTES = 24;
 const LOOPBACK = "127.0.0.1";
 const EPHEMERAL_PORT = 0;
 const EMPTY_BUFFER_BYTES = 0;
-const URL_START = 0;
 const NOT_FOUND = -1;
 
 const MYSQL_INLINE_LENGTH_LIMIT = 0xFB;
@@ -69,111 +65,6 @@ const MYSQL_LENGTH_THREE_BYTE_LIMIT = 0x1_00_00_00;
 const MYSQL_LENGTH_TAG_BYTES = 1;
 const MYSQL_AUTH_LENGTH_BYTES = 1;
 const MAX_BUFFER_INTEGER_BYTES = 6;
-
-type SocketDialect = "postgres" | "mysql";
-
-const splitQuery = function splitQuery(url: string): [string, string?] {
-  const separator = "?";
-  const queryStart = url.indexOf(separator);
-  return queryStart === NOT_FOUND ? [url] : [url.slice(URL_START, queryStart), url.slice(queryStart + separator.length)];
-};
-
-const decodeQueryPart = (part: string): string => {
-  try {
-    return decodeURIComponent(part);
-  } catch {
-    return part;
-  }
-};
-
-const splitPair = function splitPair(pair: string): [string, string] {
-  const separator = "=";
-  const assignment = pair.indexOf(separator);
-  return assignment === NOT_FOUND
-    ? [decodeQueryPart(pair), ""]
-    : [decodeQueryPart(pair.slice(URL_START, assignment)), decodeQueryPart(pair.slice(assignment + separator.length))];
-};
-
-const join = function join(base: string, pairs: string[]): string {
-  return pairs.length ? `${base}?${pairs.join("&")}` : base;
-};
-
-const detectDialect = (url: string): SocketDialect | undefined => {
-  const separator = url.indexOf(SCHEME_SEPARATOR);
-  const scheme = separator === NOT_FOUND ? "" : url.slice(URL_START, separator).toLowerCase();
-  if (scheme === "postgres" || scheme === "postgresql") {return "postgres";}
-  if (scheme === "mysql") {return "mysql";}
-  return undefined;
-};
-
-/** Find the authority after the scheme and user information and before the path. */
-const authorityRange = (base: string): { end: number; start: number } => {
-  const authorityStart = base.indexOf(SCHEME_SEPARATOR) + SCHEME_SEPARATOR.length;
-  const pathStart = base.indexOf("/", authorityStart);
-  const end = pathStart === NOT_FOUND ? base.length : pathStart;
-  const firstAt = base.indexOf("@", authorityStart);
-  const start = firstAt >= authorityStart && firstAt < end ? firstAt + "@".length : authorityStart;
-  return { end, start };
-};
-
-/** `base` with its host and port replaced, its user, password and path kept. */
-const withHost = (base: string, host: string): string => {
-  const { end, start } = authorityRange(base);
-  return `${base.slice(URL_START, start)}${host}${base.slice(end)}`;
-};
-
-const resolvePostgresFile = (pair: string): string => {
-  const [key, value] = splitPair(pair);
-  if (!FILES.includes(key) || value === "" || value === "system") {return pair;}
-  return `${key}=${encodeURIComponent(resolve(value))}`;
-};
-
-/**
- * `url` as the engine opens it: files resolved, a Unix socket bridged. On Windows,
- * where Node opens no Unix socket, a Postgres URL that names one is an Unreachable that says so.
- */
-export const hostUrl = async function hostUrl(url: string, env: Record<string, string | undefined> = process.env, platform: NodeJS.Platform = process.platform): Promise<HostUrl> {
-  const dialect = detectDialect(url);
-  if (matchesUndefined(dialect)) {return { url, close: () => {} };}
-  const postgres = dialect === "postgres";
-  const [base, query = ""] = splitQuery(url);
-  const options = query ? query.split("&") : [];
-  const pairs = postgres ? options.map((pair) => resolvePostgresFile(pair)) : options;
-  const socket = postgres ? postgresSocket(base, pairs, env) : mysqlSocket(pairs);
-  if (!socket) {return { url: join(base, pairs), close: () => {} };}
-  if (postgres && platform === "win32") {
-    throw new Unreachable(new Error(`the URL names the Unix socket ${socket.path}, which Node cannot open on Windows: name the server's host and port, as host=localhost&port=5432`));
-  }
-  const token = randomBytes(BRIDGE_TOKEN_BYTES).toString("hex");
-  const bridge = await openBridge(socket.path, dialect, token);
-  const rest = pairs.filter((pair) => !socket.params.includes(splitPair(pair)[0]));
-  return { url: join(withHost(base, `${LOOPBACK}:${bridge.port}`), rest), bridge: token, close: bridge.close, failure: bridge.failure };
-};
-
-/**
- * The socket file a Postgres URL names, as libpq reads it: a `host` that is a directory, in the
- * query or percent-encoded in the authority, or `PGHOST` where the URL names no host at all, and the
- * port's file in it (the URL's port, else `PGPORT`, else 5432).
- */
-function postgresSocket(base: string, pairs: string[], env: Record<string, string | undefined>): { path: string; params: string[] } | undefined {
-  const params = new Map(pairs.map((pair) => splitPair(pair)));
-  const { end, start } = authorityRange(base);
-  const authority = base.slice(start, end);
-  const { encodedHost = "", port: authorityPort } = /^(?<encodedHost>.*?)(?::(?<port>\d+))?$/u.exec(authority)?.groups ?? {};
-  const host = params.get("host") ?? (encodedHost ? decodeURIComponent(encodedHost) : (params.get("hostaddr") ? undefined : env.PGHOST));
-  if (!host?.startsWith("/") || host.includes(",")) {return undefined;}
-  const port = params.get("port") || authorityPort || env.PGPORT || DEFAULT_POSTGRES_PORT;
-  return { path: `${host.replace(/\/$/u, "")}/.s.PGSQL.${port}`, params: ["host", "port", "sslmode"] };
-}
-
-/** The socket file a mysql2 URL names: `socketPath`, or `socket`. */
-function mysqlSocket(pairs: string[]): { path: string; params: string[] } | undefined {
-  const params = new Map(pairs.map((pair) => splitPair(pair)));
-  const path = params.get("socketPath") || params.get("socket");
-  // Its TLS settings too: the bridge takes TLS out of the server's greeting (`gateMysql`), and a
-  // Unix socket carries none.
-  return path ? { path, params: ["socketPath", "socket", "ssl", "ssl-mode", "sslmode", "ssl_mode", "sslaccept"] } : undefined;
-}
 
 /**
  * A TCP port on the loopback interface piped to the Unix socket at `path`, for the connections that
@@ -384,3 +275,32 @@ export function takeAttribute(login: Buffer, name: string): { value: string; log
   } catch {}
   return undefined;
 }
+
+const directAddress = (url: string): HostUrl => {
+  // oxlint-disable-next-line eslint/sort-keys -- Keep the established URL resource field order.
+  return { url, close: () => { /* This address owns no socket bridge. */ } };
+};
+
+const socketAddress = async ({ base, dialect, pairs, socket }: SocketAddress, platform: NodeJS.Platform): Promise<HostUrl> => {
+  if (dialect === "postgres" && platform === "win32") {
+    // oxlint-disable-next-line rules/require-tagged-error -- Unreachable retains the native host error as its cause for the existing callers.
+    throw new Unreachable(new Error(`the URL names the Unix socket ${socket.path}, which Node cannot open on Windows: name the server's host and port, as host=localhost&port=5432`));
+  }
+  const token = randomBytes(BRIDGE_TOKEN_BYTES).toString("hex");
+  const bridge = await openBridge(socket.path, dialect, token);
+  const rest = pairs.filter((pair) => !socket.params.includes(splitPair(pair)[0]));
+  // oxlint-disable-next-line eslint/sort-keys -- Keep the established URL resource field order for bridged connections.
+  return { url: joinHost(withHost(base, `${LOOPBACK}:${bridge.port}`), rest), bridge: token, close: bridge.close, failure: bridge.failure };
+};
+
+/**
+ * Adapts a database URL to the host runtime, resolving TLS paths or opening a Unix socket bridge.
+ * @param {string} url The database URL.
+ * @param {Record<string, string | undefined>} env The host environment for Postgres fallback settings.
+ * @param {NodeJS.Platform} platform The platform that will open the connection.
+ * @returns {Promise<HostUrl>} The URL and its connection resources.
+ */
+export const hostUrl = async function hostUrl(url: string, env: Record<string, string | undefined> = hostEnvironment(), platform: NodeJS.Platform = process.platform): Promise<HostUrl> {
+  const address = prepareHostUrl(url, env);
+  return "url" in address ? directAddress(address.url) : socketAddress(address, platform);
+};
