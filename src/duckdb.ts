@@ -1,221 +1,107 @@
-// The type check's DuckDB. DuckDB runs inside the app, so the engine's needs (a statement's
-// Describe, a catalog query) are answered by the project's own DuckDB, `@duckdb/node-api` loaded
-// From the project, as its prepared statement reports a statement's types: the engine
-// Carries no DuckDB (upstream engine/native/src/duckdb.rs). The database file is opened read-only for each
-// Analysis and closed after it: DuckDB lets no other process open a file one process holds for
-// Writing, nor open it for writing while another process holds it at all, so a type check that kept
-// It open would stop the app from starting. Where the app holds it, the type check reads a copy.
-// A relative path in the statement (`read_parquet('logs/*.parquet')`) is read from the project's
-// Directory, where the app usually runs.
-// oxlint-disable-next-line rules/no-node-imports -- This server-side entry point uses this built-in to inspect or write files through the host filesystem.
-import { constants, copyFileSync, existsSync, mkdtempSync, rmSync, statSync } from "node:fs";
-// oxlint-disable-next-line rules/no-node-imports -- This server-side entry point uses this built-in to use the host resolver for the installed driver or fixture package.
-import { createRequire } from "node:module";
-// oxlint-disable-next-line rules/no-node-imports -- This server-side entry point uses this built-in to select the host's real temporary directory.
-import { tmpdir } from "node:os";
-// oxlint-disable-next-line rules/no-node-imports -- This server-side entry point uses this built-in to resolve paths using the host platform's filesystem conventions.
-import { basename, join } from "node:path";
+// DuckDB analysis uses the project's optional driver in read-only mode. This fork retains the
+// Shared adapter, while its published engine tooling supports SQLite and static Atlas HCL.
 import { Unreachable } from "./connection.ts";
-import type { DuckdbDescribed, DuckdbType, EngineIo } from "./engine-core.ts";
-import { matchesUndefined } from "./native-predicates.ts";
+import { nodeApi } from "./duckdb-api.ts";
+import type { DbConnection, Instance, NodeApi } from "./duckdb-api.ts";
+import { copyOf } from "./duckdb-copy.ts";
+import { describe } from "./duckdb-describe.ts";
+import type { EngineIo } from "./engine-core.ts";
+import { nativeErrorText } from "./native-error-text.ts";
+import { matchesUndefined, nonemptyText } from "./native-predicates.ts";
 
-/** The slice of `@duckdb/node-api` the type check uses. */
-interface NodeApi {
-  DuckDBInstance: { create(path?: string, options?: Record<string, string>): Promise<Instance> };
-  DuckDBTypeId: Record<number, string>;
-  StatementType: Record<number, string>;
-}
-interface Instance { connect: () => Promise<DbConnection>; closeSync: () => void }
-interface DbConnection {
-  prepare(sql: string): Promise<Prepared>;
-  runAndReadAll(sql: string, values?: unknown[]): Promise<{ getRowsJson: () => unknown[][] }>;
-  closeSync: () => void;
-}
-interface Prepared {
-  statementType: number;
-  parameterCount: number;
-  parameterName(i: number): string;
-  parameterTypeId(i: number): number;
-  parameterType(i: number): NodeType;
-  columnCount: number;
-  columnName(i: number): string;
-  columnType(i: number): NodeType;
-  destroySync?: () => void;
-}
-interface NodeType {
-  typeId: number;
-  alias?: string;
-  toString: () => string;
-  width?: number;
-  scale?: number;
-  valueType?: NodeType;
-  length?: number;
-  entryNames?: string[];
-  entryTypes?: NodeType[];
-  keyType?: NodeType;
-  memberTags?: string[];
-  memberTypes?: NodeType[];
-  values?: string[];
-}
+export { NoDuckdbDriver } from "./duckdb-api.ts";
 
-/** Why the type check cannot read a DuckDB database: no `@duckdb/node-api` in the project. */
-export class NoDuckdbDriver extends Error {
-  public constructor(root: string) {
-    super(`DuckDB statements are typed on the project's own DuckDB, and ${root} has no @duckdb/node-api: npm install @duckdb/node-api`);
-    this.name = "NoDuckdbDriver";
-  }
-}
-
-const loaded = new Map<string, NodeApi>();
-
-/** `@duckdb/node-api` as the project at `root` resolves it, loaded once per project. */
-const nodeApi = function (root: string): NodeApi {
-  let api = loaded.get(root);
-  if (!api) {
-    try {
-      api = createRequire(join(root, "package.json"))("@duckdb/node-api") as NodeApi;
-    } catch {
-      throw new NoDuckdbDriver(root);
-    }
-    loaded.set(root, api);
-  }
-  return api;
+const opened = (error: unknown): never => {
+  // oxlint-disable-next-line rules/no-instanceof-error -- Keep the optional driver's native Error as the cause without importing Effect.
+  if (error instanceof Error) {throw new Unreachable(error);}
+  // oxlint-disable-next-line rules/require-tagged-error -- Preserve the native wrapper for a driver that throws a non-Error value.
+  throw new Unreachable(new Error(String(error)));
 };
 
-/** The type as the upstream engine reads it (engine/duckdb/src/api.rs). */
-const logical = function (api: NodeApi, t: NodeType): DuckdbType {
-  const out: DuckdbType = { id: api.DuckDBTypeId[t.typeId] ?? String(t.typeId), text: t.toString() };
-  if (t.alias) {out.alias = t.alias;}
-  if (!matchesUndefined(t.width) && !matchesUndefined(t.scale)) {Object.assign(out, { width: t.width, scale: t.scale });}
-  if (t.keyType && t.valueType) {return Object.assign(out, { key: logical(api, t.keyType), value: logical(api, t.valueType) });}
-  if (t.valueType) {out.child = logical(api, t.valueType);}
-  if (!matchesUndefined(t.length) && out.id === "ARRAY") {out.size = t.length;}
-  if (t.entryNames && t.entryTypes) {out.fields = t.entryNames.map((name, index) => ({ name, type: logical(api, t.entryTypes![index]!) }));}
-  if (t.memberTags && t.memberTypes) {out.fields = t.memberTags.map((name, index) => ({ name, type: logical(api, t.memberTypes![index]!) }));}
-  if (t.values) {out.values = [...t.values];}
-  return out;
-};
-
-/** The ids of a parameter whose type DuckDB could not tell from where it stands. */
-const UNTYPED = new Set(["INVALID", "ANY", "SQLNULL"]);
-
-/** What the prepared statement of `sql` reports, as the engine reads a describe. */
-const describe = async function (api: NodeApi, c: DbConnection, sql: string): Promise<DuckdbDescribed> {
-  const p = await c.prepare(sql);
-  try {
-    const params: DuckdbDescribed["params"] = [];
-    for (let i = 1; i <= p.parameterCount; i++) {
-      let type: DuckdbType | null = null;
-      if (!UNTYPED.has(api.DuckDBTypeId[p.parameterTypeId(i)] ?? "")) {
-        try {
-          type = logical(api, p.parameterType(i));
-        } catch {}
-      }
-      params.push({ name: p.parameterName(i), type });
-    }
-    const columns: DuckdbDescribed["columns"] = [];
-    for (let i = 0; i < p.columnCount; i++) {
-      // A column of a parameter DuckDB could not type (`select $1`) has no type node-api reads.
-      let type: DuckdbType = { id: "INVALID", text: "" };
-      try {
-        type = logical(api, p.columnType(i));
-      } catch {}
-      columns.push({ name: p.columnName(i), type });
-    }
-    return { kind: "duckdb", statement: api.StatementType[p.statementType] ?? "", params, columns };
-  } finally {
-    p.destroySync?.();
-  }
-};
-
-/** A database DuckDB cannot open (no such file, one it cannot read) is one that cannot be reached: a build runs on `.reylo/`. */
-const opened: (error: unknown) => never = (e) => {
-  throw new Unreachable(e instanceof Error ? e : new Error(String(e)));
-};
-
-/** DuckDB's refusal of a file another process holds. */
 const LOCKED = /Could not set lock on file/u;
+const HELD_ON_WINDOWS = /File is already open in\s+(?<holder>.*?\(PID \d+\))/u;
 
-/**
- * DuckDB's refusal on Windows of a file another process holds, and that process. There DuckDB opens
- * a file it writes with no sharing at all, so no other process can read it, not even to copy it.
- */
-const HELD_ON_WINDOWS = /File is already open in\s+(.*?\(PID \d+\))/;
+type Options = Record<string, string>;
 
-/** The copy of each database file the type check reads while another process holds it, by the file's path. */
-const copies = new Map<string, { key: string; dir: string; file: string }>();
-let cleanup = false;
-
-/**
- * A copy of the database file at `path` and its write-ahead log, as they stand: a clone where the
- * file system makes one (APFS, Btrfs, XFS), so that it takes no space until the app writes. It is
- * made again only when the file or its log has changed, or when `fresh`, and removed at exit.
- */
-const copyOf = function (path: string, fresh = false): string {
-  const wal = `${path}.wal`;
-  const stamp = (p: string): string => (existsSync(p) ? `${statSync(p).size}:${statSync(p).mtimeMs}` : "-");
-  const key = `${stamp(path)}/${stamp(wal)}`;
-  const held = copies.get(path);
-  if (held?.key === key && !fresh) {return held.file;}
-  if (held) {rmSync(held.dir, { force: true, recursive: true });}
-  const dir = mkdtempSync(join(tmpdir(), "reylo-duckdb-"));
-  const file = join(dir, basename(path));
-  copyFileSync(path, file, constants.COPYFILE_FICLONE);
-  if (existsSync(wal)) {copyFileSync(wal, `${file}.wal`, constants.COPYFILE_FICLONE);}
-  copies.set(path, { key, dir, file });
-  if (!cleanup) {
-    cleanup = true;
-    process.once("exit", () => {
-      Iterator.from(copies.values()).forEach(({ dir }) => {rmSync(dir, { force: true, recursive: true });});
-    });
-  }
-  return file;
-};
-
-/** The copy of the database at `path`, opened: a copy made while the app writes the file can catch a write half done, so one more is made before the type check gives up. */
-const openCopy = async function (api: NodeApi, path: string, options: Record<string, string>): Promise<Instance> {
+const openCopy = async (api: NodeApi, filename: string, options: Options): Promise<Instance> => {
   try {
-    return await api.DuckDBInstance.create(copyOf(path), options);
+    return await api.DuckDBInstance.create(copyOf(filename), options);
   } catch {
+    // A snapshot can catch a writer halfway through a WAL update. Retry with a fresh copy.
     try {
-      return await api.DuckDBInstance.create(copyOf(path, true), options);
+      return await api.DuckDBInstance.create(copyOf(filename, true), options);
     } catch (error) {
-      opened(error);
+      return opened(error);
     }
   }
 };
 
+const openDatabase = async (api: NodeApi, filename: string, options: Options): Promise<Instance> => {
+  const pending = api.DuckDBInstance.create(filename, options);
+  try {
+    return await pending;
+  } catch (error) {
+    const message = nativeErrorText(error, "message");
+    if (LOCKED.test(message)) {return openCopy(api, filename, options);}
+    const holder = nonemptyText(HELD_ON_WINDOWS.exec(message)?.groups?.holder);
+    if (!matchesUndefined(holder)) {
+      // oxlint-disable-next-line rules/require-tagged-error -- Return the original native lock error for a reader on Windows.
+      return opened(new Error(`${holder} holds it for writing, and on Windows no other process can read it meanwhile, not even to copy it: type-check while that process is stopped`));
+    }
+    return opened(error);
+  }
+};
+
+const connect = async (instance: Instance): Promise<DbConnection> => {
+  const pending = instance.connect();
+  try {
+    return await pending;
+  } catch (error) {
+    return opened(error);
+  }
+};
+
+type Work<Result> = (io: EngineIo) => Promise<Result>;
+interface DuckdbDatabase {
+  // oxlint-disable-next-line typescript/method-signature-style -- Preserve the adapter's generic native execution method signature.
+  run<Result>(work: Work<Result>): Promise<Result>;
+}
+
+const ioFor = (api: NodeApi, connection: DbConnection): EngineIo => ({
+  describe: async (sql) => describe(api, connection, sql),
+  async query(sql, params) {
+    const rows = await connection.runAndReadAll(sql, params);
+    return rows.getRowsJson();
+  },
+});
+
+const connected = async <Result>(api: NodeApi, instance: Instance, work: Work<Result>): Promise<Result> => {
+  const connection = await connect(instance);
+  try {
+    return await work(ioFor(api, connection));
+  } finally {
+    // oxlint-disable-next-line node/no-sync -- Close the native connection before releasing its database instance.
+    connection.closeSync();
+  }
+};
+
 /**
- * The DuckDB database at `path` (`:memory:` for an empty one), for the project at `root`: each
- * call opens it read-only, runs, and closes it, and where another process holds it for writing,
- * opens a copy of it instead ([`copyOf`]). A NoDuckdbDriver where the project has no
- * `@duckdb/node-api`.
+ * Supply the retained DuckDB analysis adapter using the project's installed native driver.
+ * @param {string} filename - The database path or `:memory:`.
+ * @param {string} root - The root used to resolve the driver and read relative data paths.
+ * @returns {DuckdbDatabase} The per-analysis native database boundary.
  */
-export const duckdbDatabase = function duckdbDatabase(path: string, root: string): { run<T>(work: (io: EngineIo) => Promise<T>): Promise<T> } {
-  // A project without the driver can type nothing: its error is the project's, at once.
+export const duckdbDatabase = function duckdbDatabase(filename: string, root: string): DuckdbDatabase {
   const api = nodeApi(root);
   return {
     async run(work) {
-      const options: Record<string, string> = { file_search_path: root };
-      if (path !== ":memory:") {options.access_mode = "READ_ONLY";}
-      const instance = await api.DuckDBInstance.create(path, options).catch((error: unknown) => {
-        const message = error instanceof Error ? error.message : String(error);
-        if (LOCKED.test(message)) {return openCopy(api, path, options);}
-        const holder = HELD_ON_WINDOWS.exec(message)?.[1];
-        if (holder) {opened(new Error(`${holder} holds it for writing, and on Windows no other process can read it meanwhile, not even to copy it: type-check while that process is stopped`));}
-        return opened(error);
-      });
+      const options: Options = { file_search_path: root };
+      if (filename !== ":memory:") {options.access_mode = "READ_ONLY";}
+      const instance = await openDatabase(api, filename, options);
       try {
-        const c = await instance.connect().catch(opened);
-        try {
-          return await work({
-            describe: (sql) => describe(api, c, sql),
-            query: async (sql, params) => (await c.runAndReadAll(sql, params)).getRowsJson(),
-          });
-        } finally {
-          c.closeSync();
-        }
+        return await connected(api, instance, work);
       } finally {
+        // oxlint-disable-next-line node/no-sync -- Release the read-only database handle on every exit from analysis.
         instance.closeSync();
       }
     },
