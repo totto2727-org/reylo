@@ -9,14 +9,9 @@
 // Turns that check off and runs the same one with the flag in `compiler.runAfterProductionCompile`,
 // Which runs under Turbopack and webpack alike, after the compile and before Next's own type check
 // And the prerender (wiki/nextjs.md).
-// oxlint-disable-next-line rules/no-node-imports -- This server-side entry point uses this built-in to launch the real programs whose stdout, stderr and status are consumed.
-import { spawn } from "node:child_process";
-// oxlint-disable-next-line rules/no-node-imports -- This server-side entry point uses this built-in to inspect or write files through the host filesystem.
-import { existsSync, readFileSync } from "node:fs";
-// oxlint-disable-next-line rules/no-node-imports -- This server-side entry point uses this built-in to use the host resolver for the installed driver or fixture package.
-import { createRequire } from "node:module";
-// oxlint-disable-next-line rules/no-node-imports -- This server-side entry point uses this built-in to resolve paths using the host platform's filesystem conventions.
-import { dirname, join, resolve } from "node:path";
+// oxlint-disable-next-line rules/no-node-imports -- Resolve the selected TypeScript config relative to the project.
+import path from "node:path";
+import { typeCheck } from "./next-type-check.ts";
 
 type AfterCompile = (metadata: { projectDir: string; distDir: string }) => Promise<void>;
 
@@ -27,95 +22,58 @@ type AfterCompile = (metadata: { projectDir: string; distDir: string }) => Promi
 // Fails, reported as excess properties. An index signature would not do: Next's own `NextConfig`
 // And its parts are interfaces, which have none, so they are assignable to one only when its value
 // Is `any`, which lets any value through.
+// oxlint-disable-next-line typescript/no-explicit-any -- Match Next's public callback type for independently installed webpack versions.
+type WebpackHook = (config: any, context: any) => any;
+
 type NextConfig = object & {
   typescript?: object & { ignoreBuildErrors?: boolean; tsconfigPath?: string };
   turbopack?: object & { rules?: Record<string, unknown> };
-  webpack?: ((config: any, context: any) => any) | null;
+  webpack?: WebpackHook | null;
   compiler?: object & { runAfterProductionCompile?: AfterCompile };
 };
 
-// A child Node process's exit code and its output, stdout and stderr in the order they came. A
-// Piped tsc prints no colors unless FORCE_COLOR asks, which Next sets for its own check too.
-function run(args: string[], cwd: string): Promise<{ code: number; output: string }> {
-  return new Promise((done, fail) => {
-    const child = spawn(process.execPath, args, {
-      cwd,
-      stdio: ["ignore", "pipe", "pipe"],
-      env: { ...process.env, ...(process.stdout.isTTY && { FORCE_COLOR: "1" }) },
-    });
-    let output = "";
-    child.stdout.setEncoding("utf8").on("data", (chunk: string) => (output += chunk));
-    child.stderr.setEncoding("utf8").on("data", (chunk: string) => (output += chunk));
-    child.on("error", fail);
-    child.on("close", (code) => done({ code: code ?? 1, output }));
-  });
-}
+interface WebpackContext { isServer: unknown }
+interface WebpackConfig { module: { rules: unknown[] } }
 
-// `next build` prints a failed hook's error whole: a stack would point into Reylo, not at the
-// Errors, which tsc has printed above it.
-function stackless(message: string): Error {
-  const error = new Error(message);
-  error.stack = message;
-  return error;
-}
+const withWebpack = (
+  configured: NextConfig["webpack"], webpackConfig: unknown, context: WebpackContext,
+): unknown => {
+  const output: unknown = configured ? configured(webpackConfig, context) : webpackConfig;
+  const isServer = Boolean(context.isServer);
+  if (isServer) {
+    // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- On the server, Next's webpack hook provides the mutable module rules array.
+    (output as WebpackConfig).module.rules.push({ test: /\.sql$/u, use: "@totto2727/reylo/webpack" });
+  }
+  return output;
+};
 
-// Next's own check (`next/dist/lib/typescript/runTypeCheckCli`), with `--runExternalCode`: the
-// Project's TypeScript, run with this process's Node from the project directory.
-async function typeCheck(dir: string, tsconfig: string): Promise<void> {
-  const require = createRequire(join(dir, "package.json"));
-  let manifest: string;
-  try {
-    manifest = require.resolve("typescript/package.json");
-  } catch {
-    throw stackless("Reylo's type check needs TypeScript 7.1 or later, whose content mappers type .sql imports, and the project has no TypeScript.");
-  }
-  const { version } = JSON.parse(readFileSync(manifest, "utf8")) as { version: string };
-  const [major = 0, minor = 0] = version.split(".").map(Number);
-  if (major < 7 || (major === 7 && minor < 1)) {
-    throw stackless(`Reylo's type check needs TypeScript 7.1 or later, whose content mappers type .sql imports; the project has TypeScript ${version}.`);
-  }
-  // Next writes next-env.d.ts after this hook; `next typegen` writes it on a first build, for a
-  // Project that declares an image import through it.
-  if (!existsSync(join(dir, "next-env.d.ts"))) {
-    const next = require.resolve("next/package.json");
-    const bin = (JSON.parse(readFileSync(next, "utf8")) as { bin: { next: string } }).bin.next;
-    const typegen = await run([join(dirname(next), bin), "typegen", dir], dir);
-    if (typegen.code !== 0) {throw stackless(`next typegen failed:\n${typegen.output}`);}
-  }
-  const tsc = join(dirname(manifest), "lib", "tsc.js");
-  const args = ["--project", tsconfig, "--noEmit", "--declarationMap", "false", "--emitDeclarationOnly", "false", "--runExternalCode"];
-  const { code, output } = await run([tsc, ...args], dir);
-  // Next's spinner pauses for console output, and not for a write to stdout.
-  if (output.trim()) {console.log(output.trimEnd());}
-  if (code !== 0) {throw stackless("Failed to type check (tsc --runExternalCode).");}
-}
-
-export function withReylo<Config extends NextConfig>(config: Config = {} as Config): Config {
+// oxlint-disable-next-line typescript/no-unsafe-type-assertion -- The no-argument form supplies an empty Next config while preserving callers' generic config type.
+export const withReylo = function withReylo<Config extends NextConfig>(config: Config = {} as Config): Config {
   const { typescript, turbopack, webpack, compiler } = config;
   // A project that turned Next's type check off has turned Reylo's off with it.
-  const check = !typescript?.ignoreBuildErrors;
+  const check = !(typescript?.ignoreBuildErrors ?? false);
   return {
     ...config,
     turbopack: {
       ...turbopack,
       // Each .sql file becomes a module that runs its statement, on the server only: a client
       // Component that imports one fails the build. A rule of the project's own for *.sql wins.
+      // oxlint-disable-next-line eslint/sort-keys -- Keep the public Turbopack rule descriptor's existing key order.
       rules: { "*.sql": { condition: { not: "browser" }, loaders: ["@totto2727/reylo/turbopack"], as: "*.js" }, ...turbopack?.rules },
     },
-    webpack(webpackConfig: any, context: any) {
-      const out = webpack ? webpack(webpackConfig, context) : webpackConfig;
-      if (context.isServer) {out.module.rules.push({ test: /\.sql$/u, use: "@totto2727/reylo/webpack" });}
-      return out;
+    webpack(webpackConfig: unknown, context: WebpackContext) {
+      return withWebpack(webpack, webpackConfig, context);
     },
+    // oxlint-disable-next-line eslint/sort-keys -- Preserve the additions' enumeration order in the public Next config.
     ...(check && {
       typescript: { ...typescript, ignoreBuildErrors: true },
       compiler: {
         ...compiler,
         async runAfterProductionCompile(metadata: { projectDir: string; distDir: string }) {
           await compiler?.runAfterProductionCompile?.(metadata);
-          await typeCheck(metadata.projectDir, resolve(metadata.projectDir, typescript?.tsconfigPath ?? "tsconfig.json"));
+          await typeCheck(metadata.projectDir, path.resolve(metadata.projectDir, typescript?.tsconfigPath ?? "tsconfig.json"));
         },
       },
     }),
   };
-}
+};
