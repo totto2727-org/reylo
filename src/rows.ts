@@ -117,6 +117,15 @@ function integer(range: Readonly<[bigint, bigint]>, digits: boolean, written: st
   return n;
 }
 
+const DECIMAL_VALUE = /^[+-]?(?<whole>\d*)(?:\.(?<fraction>\d*))?(?:[eE](?<exponent>[+-]?\d+))?$/u;
+const DECIMAL_MODIFIER = /\(\s*(?<precision>\d+)\s*(?:,\s*(?<scale>-?\d+)\s*)?\)/u;
+const SINGLE_TYPE_MODIFIER = /\(\s*(?<digits>\d+)\s*\)/u;
+const DEFAULT_SCALE = 0;
+const NO_EXPONENT = 0;
+const SINGLE_DIGIT = 1;
+const FIRST_DIGIT_OFFSET = 0;
+const HEX_RADIX = 16;
+
 /**
  * A decimal, as a number or as its digits. `numeric(p,s)` keeps `s` digits after the point and
  * `p` in all: a value with more decimals would be rounded, so it is refused, and so is one with
@@ -130,27 +139,27 @@ function decimal(written: string, v: unknown, fail: (message: string) => never):
   } else if (matchesString(v)) {text = v.trim();}
   else if (matchesBigInt(v)) {text = v.toString();}
   else {return fail(`is ${written}, a decimal: a number or a string of its digits; got ${describe(v)}.`);}
-  const regexMatch = /^([+-]?)(\d*)(?:\.(\d*))?(?:e([+-]?\d+))?$/i.exec(text);
-  if (!regexMatch || (regexMatch[2] === "" && (regexMatch[3] ?? "") === "")) {return fail(`is ${written}, a decimal: a number or a string of its digits; got ${describe(v)}.`);}
-  const mod = /\(\s*(\d+)\s*(?:,\s*(-?\d+)\s*)?\)/u.exec(written);
-  if (mod) {
-    const precision = Number(mod[1]);
-    const scale = Number(mod[2] ?? 0);
-    const exponent = Number(regexMatch[4] ?? 0);
-    let whole = (regexMatch[2] ?? "").replace(/^0+/u, "");
-    let fraction = (regexMatch[3] ?? "").replace(/0+$/u, "");
+  const digits = DECIMAL_VALUE.exec(text)?.groups;
+  if (matchesUndefined(digits) || (digits.whole === "" && (digits.fraction ?? "") === "")) {return fail(`is ${written}, a decimal: a number or a string of its digits; got ${describe(v)}.`);}
+  const modifier = DECIMAL_MODIFIER.exec(written)?.groups;
+  if (!matchesUndefined(modifier)) {
+    const precision = Number(modifier.precision);
+    const scale = Number(modifier.scale ?? DEFAULT_SCALE);
+    const exponent = Number(digits.exponent ?? NO_EXPONENT);
+    let whole = (digits.whole ?? "").replace(/^0+/u, "");
+    let fraction = (digits.fraction ?? "").replace(/0+$/u, "");
     // Shift the point by the exponent.
-    if (exponent > 0) {
-      const moved = fraction.slice(0, exponent).padEnd(exponent, "0");
+    if (exponent > NO_EXPONENT) {
+      const moved = fraction.slice(FIRST_DIGIT_OFFSET, exponent).padEnd(exponent, "0");
       whole = (whole + moved).replace(/^0+/u, "");
       fraction = fraction.slice(exponent);
-    } else if (exponent < 0) {
-      const digits = whole.padStart(-exponent, "0");
-      fraction = (digits.slice(digits.length + exponent) + fraction).replace(/0+$/u, "");
-      whole = digits.slice(0, digits.length + exponent).replace(/^0+/u, "");
+    } else if (exponent < NO_EXPONENT) {
+      const exponentDigits = whole.padStart(-exponent, "0");
+      fraction = (exponentDigits.slice(exponentDigits.length + exponent) + fraction).replace(/0+$/u, "");
+      whole = exponentDigits.slice(FIRST_DIGIT_OFFSET, exponentDigits.length + exponent).replace(/^0+/u, "");
     }
-    if (fraction.length > scale) {fail(`is ${written}, which keeps ${scale} digit${scale === 1 ? "" : "s"} after the point, so ${text} would be rounded.`);}
-    if (whole.length > precision - scale) {fail(`is ${written}, which holds at most ${precision - scale} digit${precision - scale === 1 ? "" : "s"} before the point; got ${text}.`);}
+    if (fraction.length > scale) {fail(`is ${written}, which keeps ${scale} digit${scale === SINGLE_DIGIT ? "" : "s"} after the point, so ${text} would be rounded.`);}
+    if (whole.length > precision - scale) {fail(`is ${written}, which holds at most ${precision - scale} digit${precision - scale === SINGLE_DIGIT ? "" : "s"} before the point; got ${text}.`);}
   }
   return matchesBigInt(v) ? v.toString() : v;
 }
@@ -194,9 +203,9 @@ function scalar(name: string, written: string, v: unknown, dialect: Dialect, fai
     case "name":
     case "citext": {
       if (!matchesString(v)) {return fail(`is ${written}, a string; got ${describe(v)}.`);}
-      const n = /\(\s*(\d+)\s*\)/u.exec(written)?.[1];
+      const limit = SINGLE_TYPE_MODIFIER.exec(written)?.groups?.digits;
       // A length counts characters (code points), as Postgres and MySQL count them.
-      if (!matchesUndefined(n) && [...v].length > Number(n)) {fail(`is ${written}, at most ${n} characters; got ${[...v].length}, which the database would refuse or cut.`);}
+      if (!matchesUndefined(limit) && [...v].length > Number(limit)) {fail(`is ${written}, at most ${limit} characters; got ${[...v].length}, which the database would refuse or cut.`);}
       return v;
     }
     case "vector":
@@ -232,10 +241,10 @@ function scalar(name: string, written: string, v: unknown, dialect: Dialect, fai
       // Binary data travels as hexadecimal text: Postgres's own `\x` form, and bare digits that
       // MySQL's and SQLite's readers decode with unhex().
       if (!(v instanceof Uint8Array)) {return fail(`is ${written}, binary data, a Uint8Array; got ${describe(v)}.`);}
-      const n = /\(\s*(\d+)\s*\)/u.exec(written)?.[1];
-      if (!matchesUndefined(n) && v.length > Number(n)) {fail(`is ${written}, at most ${n} bytes; got ${v.length}, which the database would refuse or cut.`);}
+      const limit = SINGLE_TYPE_MODIFIER.exec(written)?.groups?.digits;
+      if (!matchesUndefined(limit) && v.length > Number(limit)) {fail(`is ${written}, at most ${limit} bytes; got ${v.length}, which the database would refuse or cut.`);}
       let hex = dialect === "postgres" ? String.raw`\x` : "";
-      Iterator.from(v).forEach((byte) => {hex += (byte < 16 ? "0" : "") + byte.toString(16);});
+      Iterator.from(v).forEach((byte) => {hex += (byte < HEX_RADIX ? "0" : "") + byte.toString(HEX_RADIX);});
       return hex;
     }
     case "interval": {
@@ -392,7 +401,6 @@ const MYSQL_INTEGERS: Record<string, IntegerRange> = {
 
 const CLOCK = /^-?(?<hours>\d{1,3}):(?<minutes>\d{2})(?::(?<seconds>\d{2})(?:\.(?<fraction>\d+))?)?$/u;
 const WALL_DATE = /^(?<year>\d{4})-(?<month>\d{2})-(?<day>\d{2})(?:[T ](?<hours>\d{2}):(?<minutes>\d{2})(?::(?<seconds>\d{2})(?:\.(?<fraction>\d+))?)?)?$/u;
-const FRACTION = /\(\s*(?<digits>\d+)\s*\)/u;
 const NO_FRACTION = 0;
 const DATETIME_FRACTION_DIGITS = 6;
 const MYSQL_TIME_HOUR_LIMIT = 838;
@@ -433,7 +441,7 @@ const wallClock = (base: string, written: string, value: unknown, fail: RejectPa
   const example = base === "date" ? '"2026-10-12"' : (base === "time" ? '"19:06:48"' : '"2026-10-12 19:06:48.282"');
   if (!matchesString(value)) {return void fail(`is ${written}, which takes its text (${example}), not ${describe(value)}${value instanceof Date ? ": drivers write a Date's time in different zones" : ""}.`);}
   const text = value.trim();
-  const digits = FRACTION.exec(written)?.groups?.digits;
+  const digits = SINGLE_TYPE_MODIFIER.exec(written)?.groups?.digits;
   const keeps = Number(digits ?? (base === "time" ? NO_FRACTION : DATETIME_FRACTION_DIGITS));
   if (base === "time" ? validMysqlTime(text, keeps) : validMysqlDate(text, base, keeps)) {return;}
   const precision = keeps > NO_FRACTION && base !== "date" ? ` with at most ${keeps} digits after the second's point` : (base === "time" ? " with no fraction of a second" : "");
