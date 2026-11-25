@@ -1,5 +1,5 @@
-import { matchesJsonFormat } from "./json-formats.ts";
-import { hasObjectType, isRecord, matchesBoolean, matchesNull, matchesNumber, matchesString, matchesUndefined } from "./native-predicates.ts";
+import { basicFailure, equal, pointer, regex } from "./json-schema-constraints.ts";
+import { hasObjectType, isRecord, matchesNull, matchesNumber, matchesUndefined } from "./native-predicates.ts";
 
 // A JSON Schema 2020-12 validator for the run time, which has no dependencies: it checks a value
 // Against the schema a statement writes in a `json('…')` member of a column list or, where it is
@@ -10,10 +10,18 @@ import { hasObjectType, isRecord, matchesBoolean, matchesNull, matchesNumber, ma
 // Asserted, as the decision of 2026-10-19 says; a format this file has no rule for checks nothing.
 
 type Schema = boolean | Readonly<Record<string, unknown>>;
-type Object_ = Readonly<Record<string, unknown>>;
 
 /** Why a value fails a schema: the place in the value, as a JSON Pointer, and what it breaks. */
+// oxlint-disable-next-line typescript/consistent-type-definitions -- Keep validation failures assignable to structural Record consumers.
 export type Failure = { path: string; message: string };
+
+const EMPTY_FAILURES = 0;
+
+const fail = (out: Failure[], path: string, message: string): false => {
+  // oxlint-disable-next-line eslint/sort-keys -- Preserve the field order in serialized validation failures.
+  out.push({ path, message });
+  return false;
+};
 
 /**
  * A fresh copy of a JSON value, such as a schema's `default`, so that filling one in never shares
@@ -98,28 +106,8 @@ function check(schema: Schema, value: unknown, path: string, out: Failure[]): Ev
   if (!isRecord(schema)) {return evaluated;}
   const s = schema;
 
-  if (!matchesUndefined(s.type)) {
-    const types = Array.isArray(s.type) ? (s.type as string[]) : [s.type as string];
-    if (!types.some((currentType) => is(currentType, value))) {return fail(out, path, `must be ${types.join(" or ")}, got ${kind(value)}`);}
-  }
-  if (Array.isArray(s.enum) && !s.enum.some((e) => equal(e, value))) {return fail(out, path, `must be one of ${s.enum.map((e) => JSON.stringify(e)).join(", ")}`);}
-  if ("const" in s && !equal(s.const, value)) {return fail(out, path, `must be ${JSON.stringify(s.const)}`);}
-
-  if (matchesNumber(value)) {
-    if (matchesNumber(s.multipleOf) && !multiple(value, s.multipleOf)) {return fail(out, path, `must be a multiple of ${s.multipleOf}`);}
-    if (matchesNumber(s.maximum) && value > s.maximum) {return fail(out, path, `must be at most ${s.maximum}`);}
-    if (matchesNumber(s.exclusiveMaximum) && value >= s.exclusiveMaximum) {return fail(out, path, `must be less than ${s.exclusiveMaximum}`);}
-    if (matchesNumber(s.minimum) && value < s.minimum) {return fail(out, path, `must be at least ${s.minimum}`);}
-    if (matchesNumber(s.exclusiveMinimum) && value <= s.exclusiveMinimum) {return fail(out, path, `must be more than ${s.exclusiveMinimum}`);}
-  }
-  if (matchesString(value)) {
-    // A length counts code points, as JSON Schema says.
-    const {length} = [...value];
-    if (matchesNumber(s.maxLength) && length > s.maxLength) {return fail(out, path, `must be at most ${s.maxLength} characters long`);}
-    if (matchesNumber(s.minLength) && length < s.minLength) {return fail(out, path, `must be at least ${s.minLength} characters long`);}
-    if (matchesString(s.pattern) && !regex(s.pattern).test(value)) {return fail(out, path, `must match the pattern ${s.pattern}`);}
-    if (matchesString(s.format) && !matchesJsonFormat(s.format, value)) {return fail(out, path, `must be a ${s.format}`);}
-  }
+  const message = basicFailure(s, value);
+  if (!matchesUndefined(message)) {return fail(out, path, message);}
   if (Array.isArray(value)) {
     if (matchesNumber(s.maxItems) && value.length > s.maxItems) {return fail(out, path, `must have at most ${s.maxItems} items`);}
     if (matchesNumber(s.minItems) && value.length < s.minItems) {return fail(out, path, `must have at least ${s.minItems} items`);}
@@ -167,7 +155,11 @@ function check(schema: Schema, value: unknown, path: string, out: Failure[]): Ev
       }
       if (named) {evaluated.add(key);}
       else if (!matchesUndefined(s.additionalProperties)) {
-        if (check(s.additionalProperties as Schema, o[key], at, out) === false) {return s.additionalProperties === false ? fail(out, at, `is a key the schema does not allow`, true) : false;}
+        if (check(s.additionalProperties as Schema, o[key], at, out) === false) {
+          if (s.additionalProperties !== false) {return false;}
+          out.length = EMPTY_FAILURES;
+          return fail(out, at, "is a key the schema does not allow");
+        }
         evaluated.add(key);
       }
       if (!matchesUndefined(s.propertyNames) && check(s.propertyNames as Schema, key, at, []) === false) {return fail(out, at, `is a key whose name the schema does not allow`);}
@@ -231,63 +223,4 @@ function check(schema: Schema, value: unknown, path: string, out: Failure[]): Ev
     if (s.unevaluatedProperties === true) {Object.keys(value).forEach((key) => {evaluated.add(key);});}
   }
   return evaluated;
-}
-
-function fail(out: Failure[], path: string, message: string, replace = false): false {
-  if (replace) {out.length = 0;}
-  out.push({ path, message });
-  return false;
-}
-
-function is(type: string, v: unknown): boolean {
-  switch (type) {
-    case "null": { return matchesNull(v); }
-    case "boolean": { return matchesBoolean(v); }
-    case "number": { return matchesNumber(v) && Number.isFinite(v); }
-    case "integer": { return matchesNumber(v) && Number.isInteger(v); }
-    case "string": { return matchesString(v); }
-    case "array": { return Array.isArray(v); }
-    case "object": { return isRecord(v); }
-    default: { return false; }
-  }
-}
-
-function kind(v: unknown): string {
-  if (matchesNull(v)) {return "null";}
-  if (Array.isArray(v)) {return "an array";}
-  if (matchesNumber(v)) {return Number.isInteger(v) ? "an integer" : "a number";}
-  if (hasObjectType(v)) {return "an object";}
-  return `a ${typeof v}`;
-}
-
-/** JSON equality: numbers by value (1 and 1.0 alike), objects by their keys whatever the order. */
-function equal(a: unknown, b: unknown): boolean {
-  if (a === b) {return true;}
-  if (matchesNull(a) || matchesNull(b) || !hasObjectType(a) || !hasObjectType(b)) {return false;}
-  if (Array.isArray(a) !== Array.isArray(b)) {return false;}
-  if (Array.isArray(a)) {return a.length === (b as unknown[]).length && a.every((x, index) => equal(x, (b as unknown[])[index]));}
-  const ka = Object.keys(a);
-  const kb = Object.keys(b);
-  return ka.length === kb.length && ka.every((k) => Object.hasOwn(b, k) && equal((a as Object_)[k], (b as Object_)[k]));
-}
-
-function multiple(value: number, of: number): boolean {
-  const q = value / of;
-  // Within a rounding error of a whole number, as a decimal multiple like 0.01 needs; past the
-  // Largest double, the remainder says it (1e308 is a multiple of 0.5).
-  if (Number.isFinite(q)) {return Math.abs(q - Math.round(q)) < 1e-9;}
-  return value % of === 0;
-}
-
-const regexes = new Map<string, RegExp>();
-/** A pattern as ECMA-262 reads it, with Unicode on, as JSON Schema says. */
-function regex(pattern: string): RegExp {
-  let re = regexes.get(pattern);
-  if (!re) {regexes.set(pattern, (re = new RegExp(pattern, "u")));}
-  return re;
-}
-
-/** A key as one JSON Pointer segment. */
-function pointer(key: string): string {
-  return key.replaceAll('~', "~0").replaceAll('/', "~1");
 }
