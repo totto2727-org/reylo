@@ -3,9 +3,9 @@ import { test } from "node:test";
 // oxlint-disable-next-line rules/no-node-imports -- Nub's Node suite uses native assertions for driver, CLI, and protocol results.
 import assert from "node:assert/strict";
 // oxlint-disable-next-line rules/no-node-imports -- The Nub integration fixtures use this built-in to inspect or write files through the host filesystem.
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, symlinkSync, writeFileSync } from "node:fs";
 // oxlint-disable-next-line rules/no-node-imports -- The Nub integration fixtures use this built-in to await writes and reads through the host filesystem.
-import { writeFile } from "node:fs/promises";
+import { readFile, writeFile } from "node:fs/promises";
 // oxlint-disable-next-line rules/no-node-imports -- The Nub integration fixtures use this built-in to use the host resolver for the installed driver or fixture package.
 import { createRequire } from "node:module";
 // oxlint-disable-next-line rules/no-node-imports -- Exercise the native SQLite driver used by Reylo's Node runtime.
@@ -18,8 +18,11 @@ import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { differences, sqliteDefault } from '#reylo-source/fresh.ts';
 import type { Fresh } from '#reylo-source/fresh.ts';
+import type { TursoClient } from "#reylo-source/execute.ts";
+import type { Cardinality, Query } from "#reylo-source/index.ts";
 import { sqlModule } from "#reylo-source/loader.ts";
-import { DRIVERS, INDEX, closeSessions, requireFixtureValue } from "./helpers.ts";
+import { hasFunctionType, isRecord, matchesString } from "#reylo-source/native-predicates.ts";
+import { DRIVERS, INDEX, closeSessions, plain, requireFixtureValue } from "./helpers.ts";
 
 // The schema freshness check compares the facts a built SQLite query read against the current schema.
 const tursoLive = existsSync(join(DRIVERS, "@tursodatabase", "database")) ? false : "lab/drivers is not installed";
@@ -34,15 +37,36 @@ const project = function (driver?: string): string {
   return root;
 };
 
+type BuiltQuery = Pick<Query<Record<string, unknown>, unknown, Cardinality, "sqlite">, "run" | "runSync">;
+
+interface TursoFixtureClient extends TursoClient {
+  close: () => Promise<void>;
+  prepare: (sql: string) => { all: () => Promise<unknown[]> };
+}
+
+const resultRows = (result: unknown): Record<string, unknown>[] => {
+  assert.ok(Array.isArray(result) && result.every((row) => isRecord(row)));
+  return result;
+};
+
+const validatedBuiltQuery = (query: unknown): BuiltQuery => {
+  assert.ok(isRecord(query));
+  assert.equal(query.dialect, "sqlite");
+  assert.ok(hasFunctionType(query.run) && hasFunctionType(query.runSync));
+  // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- The generated module calls the checked-in SQLite query factory after emitting JavaScript without a paired declaration.
+  return query as BuiltQuery;
+};
+
 /** A module built for `sql` and imported: each call gives a query object of its own, never checked yet. */
-const built = async function (root: string, url: string, name: string, sql: string) {
+const built = async function (root: string, url: string, name: string, sql: string): Promise<BuiltQuery> {
   const file = join(root, `${name}.sql`);
   await writeFile(file, sql);
   await writeFile(join(root, ".env"), `DATABASE_URL=${url}\n`);
   const { code } = await sqlModule(file, sql);
   const out = join(root, `${name}.mjs`);
   await writeFile(out, code.replace(`from "@totto2727/reylo"`, `from ${JSON.stringify(INDEX)}`));
-  return (await import(`${pathToFileURL(out).href}?${Math.random()}`)).default;
+  const queryModule: { default?: unknown } = await import(`${pathToFileURL(out).href}?${Math.random()}`);
+  return validatedBuiltQuery(queryModule.default);
 };
 
 // oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
@@ -113,7 +137,10 @@ test("a SQLite type is compared without its case, as SQLite reads one; a Postgre
 // oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
 test("SQLite on Turso's engine: a query built on node:sqlite runs, whose types Turso spells in lowercase, and a column it names, renamed, fails the call", { skip: tursoLive }, async () => {
   const require = createRequire(join(DRIVERS, "package.json"));
-  const { connect } = await import(pathToFileURL(require.resolve("@tursodatabase/database")).href);
+  const driver: { connect?: unknown } = await import(pathToFileURL(require.resolve("@tursodatabase/database")).href);
+  assert.ok(hasFunctionType(driver.connect));
+  // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- Resolve the optional Turso lab package at runtime and use its connect contract without making root type checking depend on the lab install.
+  const connect = driver.connect as (file: string) => Promise<TursoFixtureClient>;
   const root = project();
   const file = join(root, "app.db");
   const setup = new DatabaseSync(file);
@@ -125,11 +152,17 @@ test("SQLite on Turso's engine: a query built on node:sqlite runs, whose types T
   const db = await connect(file);
   try {
     const read = await built(root, url, "read", "select id, email, n, ok from users order by id");
-    const builtSource = readFileSync(join(root, "read.mjs"), "utf8");
+    const builtSource = await readFile(join(root, "read.mjs"), "utf8");
     const rowShape = requireFixtureValue(/"rows":(\[\[.*?\]\]),"inserts"/.exec(builtSource));
-    const facts = JSON.parse(requireFixtureValue(rowShape[1])) as string[][];
-    assert.deepEqual(facts.map((r) => r[2]), ["TEXT", "INTEGER", "bigInt", "boolean"], "the facts node:sqlite gave the build, the names it knows upper-cased");
-    assert.deepEqual((await db.prepare("select type from pragma_table_xinfo('users')").all()).map((r: { type: string }) => r.type), ["integer", "text", "bigInt", "boolean"], "the control: Turso's engine gives each type as declared");
+    const facts: unknown = JSON.parse(requireFixtureValue(rowShape[1]));
+    assert.ok(Array.isArray(facts) && facts.every((row) => Array.isArray(row) && row.every((field) => matchesString(field))));
+    assert.deepEqual(facts.map((row) => row[2]), ["TEXT", "INTEGER", "bigInt", "boolean"], "the facts node:sqlite gave the build, the names it knows upper-cased");
+    const tursoColumns = await db.prepare("select type from pragma_table_xinfo('users')").all();
+    const tursoTypes = tursoColumns.map((column) => {
+      assert.ok(isRecord(column) && matchesString(column.type));
+      return column.type;
+    });
+    assert.deepEqual(tursoTypes, ["integer", "text", "bigInt", "boolean"], "the control: Turso's engine gives each type as declared");
     // A column declared BIGINT, in any case, is a BigInt.
     assert.deepEqual(await read.run(db), [{ id: 1, email: "a@x", n: BigInt("7"), ok: true }]);
     // A structured insert built on node:sqlite copies the defaults node:sqlite reads, which Turso
@@ -154,12 +187,13 @@ test("SQLite: a query whose columns changed fails, naming them; one whose table 
   const url = "file:./app.db";
   try {
     const read = await built(root, url, "read", "select id, email from users order by id");
-    assert.deepEqual((await read.run(db)).map((r: object) => ({ ...r })), [{ email: "a@x", id: 1 }]);
+    const rows = resultRows(await read.run(db));
+    assert.deepEqual(plain(rows), [{ email: "a@x", id: 1 }]);
     // A column the statement does not name: no fact, so the query runs on.
     db.exec("alter table users add column bio text");
     const read2 = await built(root, url, "read2", "select id, email from users order by id");
     db.exec("alter table users add column age integer");
-    assert.equal((await read2.run(db)).length, 1);
+    assert.equal(resultRows(await read2.run(db)).length, 1);
     // A column it names, renamed: the call fails before the statement runs, synchronously too.
     const read3 = await built(root, url, "read3", "select id, email from users order by id");
     db.exec("alter table users rename column email to mail");
@@ -187,16 +221,18 @@ test("SQLite: a default a structured insert copied, changed after the build, fai
   const insert = "insert into accounts :a::rows(name text not null, role? text not null) returning role";
   try {
     const q = await built(root, url, "insert_accounts", insert);
-    assert.deepEqual((await q.run(db, { a: [{ name: "Ada" }, { name: "Grace", role: "admin" }] })).map((r: object) => ({ ...r })), [{ role: "member" }, { role: "admin" }]);
+    const rows = resultRows(await q.run(db, { a: [{ name: "Ada" }, { name: "Grace", role: "admin" }] }));
+    assert.deepEqual(plain(rows), [{ role: "member" }, { role: "admin" }]);
     // A table rebuilt with another default: the module would still write 'member'.
     const stale = await built(root, url, "insert_accounts2", insert);
     db.exec(`create table accounts_new (id integer primary key, name text not null, role text not null default 'guest');
       insert into accounts_new select * from accounts; drop table accounts; alter table accounts_new rename to accounts`);
     await assert.rejects(stale.run(db, { a: [{ name: "Linus" }] }), /The database changed after insert_accounts2\.sql was built: accounts\.role had the default 'member', which the insert writes for a row that leaves its key out, and now has the default 'guest'\. Build it again/u);
-    assert.equal((db.prepare("select count(*) as n from accounts").get() as { n: number }).n, 2);
+    const count = requireFixtureValue(db.prepare("select count(*) as n from accounts").get());
+    assert.equal(count.n, 2);
     // A query that does not copy the default runs on.
     const read = await built(root, url, "read", "select name, role from accounts order by id");
-    assert.equal((await read.run(db)).length, 2);
+    assert.equal(resultRows(await read.run(db)).length, 2);
   } finally {
     db.close();
     await closeSessions();
