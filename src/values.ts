@@ -29,10 +29,12 @@ import {
   matchesNumber, matchesString, matchesUndefined,
 } from "./native-predicates.ts";
 
+import { bytea } from "./value-bytes.ts";
 import { describe } from "./value-errors.ts";
 import { instant, instantOfDate, isoDate as date, timestamp, utcText } from "./value-time.ts";
 import { bigInteger, DecodeError, exactInteger, float32s, truth } from "./value-numbers.ts";
 
+export { bytea, utf8 } from "./value-bytes.ts";
 export { describe, ParameterError } from "./value-errors.ts";
 export { instant, instantOfDate, postgresYear, zoned } from "./value-time.ts";
 export { bigInteger, DecodeError, exactInteger, float32s, refuseTruth, truth } from "./value-numbers.ts";
@@ -299,60 +301,6 @@ export const postgresInterval = (text: string): string => {
   return parts?.sign === "+"
     ? durationText
     : durationText.replaceAll(/(?<magnitude>\d+(?:[.,]\d+)?)(?<unit>[YMWDHSymwdhs])/gu, "-$<magnitude>$<unit>");
-};
-
-interface BufferClass { from(data: string, encoding: string): Uint8Array; isBuffer(v: unknown): boolean }
-const NodeBuffer = (globalThis as { Buffer?: BufferClass }).Buffer;
-// TextDecoder is a global in every runtime Reylo supports; it is typed here rather than through
-// The DOM lib or Node's, which a project that type-checks Reylo's sources need not have.
-const Utf8 = (globalThis as unknown as { TextDecoder: new (label?: string) => { decode(bytes: Uint8Array): string } }).TextDecoder;
-const utf8Decoder = new Utf8("utf8");
-
-/** UTF-8 bytes as text: a Buffer's own toString where the bytes are one. */
-export const utf8 = function utf8(bytes: Uint8Array): string {
-  return NodeBuffer?.isBuffer(bytes) ? (bytes as Uint8Array & { toString(encoding: string): string }).toString("utf8") : utf8Decoder.decode(bytes);
-};
-const {fromHex} = (Uint8Array as unknown as { fromHex?: (hex: string) => Uint8Array });
-
-const BYTE_ESCAPE = "\\";
-const BYTE_HEX_PREFIX = "\\x";
-const HEX_DIGITS_PER_BYTE = 2;
-const HEX_RADIX = 16;
-const OCTAL_DIGITS_PER_BYTE = 3;
-const OCTAL_RADIX = 8;
-const BACKSLASH_BYTE = 0x5C;
-
-/**
- * @param {string} text - The PostgreSQL bytea text in the default hex or escape format.
- * @returns {Uint8Array} The bytes in their original order.
- */
-export const bytea = function bytea(text: string): Uint8Array {
-  if (text.startsWith(BYTE_HEX_PREFIX)) {
-    const hex = text.slice(BYTE_HEX_PREFIX.length);
-    if (NodeBuffer) {return NodeBuffer.from(hex, "hex");}
-    if (fromHex) {return fromHex(hex);}
-    return Uint8Array.from({ length: hex.length / HEX_DIGITS_PER_BYTE }, (_unused, index) => {
-      const start = index * HEX_DIGITS_PER_BYTE;
-      return Number.parseInt(hex.slice(start, start + HEX_DIGITS_PER_BYTE), HEX_RADIX);
-    });
-  }
-  const bytes: number[] = [];
-  let offset = TEXT_START;
-  while (offset < text.length) {
-    const afterEscape = offset + BYTE_ESCAPE.length;
-    if (text[offset] !== BYTE_ESCAPE) {
-      // oxlint-disable-next-line unicorn/prefer-code-point -- Bytea's fallback consumes a UTF-16 code unit at a time, including escape text a driver passes through.
-      bytes.push(text.charCodeAt(offset));
-      offset = afterEscape;
-    } else if (text[afterEscape] === BYTE_ESCAPE) {
-      bytes.push(BACKSLASH_BYTE);
-      offset = afterEscape + BYTE_ESCAPE.length;
-    } else {
-      offset = afterEscape + OCTAL_DIGITS_PER_BYTE;
-      bytes.push(Number.parseInt(text.slice(afterEscape, offset), OCTAL_RADIX));
-    }
-  }
-  return Uint8Array.from(bytes);
 };
 
 interface TextCursor {
