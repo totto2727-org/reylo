@@ -16,7 +16,7 @@ import type { TemplateParts, TemplateToken } from './parser-template-tokens.ts';
 import { parseStringLiteralToken } from './string-literal.ts';
 import { trimLeadingWhitespace as trimLeft, trimTrailingWhitespace as trimRight } from './whitespace.ts';
 import { rangeBetween as between, emptyRangeAt, rangeString, isStringLiteral } from './types.ts';
-import type { Attribute, Block, Body, Diagnostic, Expression, ObjectKey, Pos, Range, Token, TraversalStep } from './types.ts';
+import type { Anonymous, Attribute, Block, Body, Diagnostic, Expression, Literal, ObjectKey, Pos, Range, Token, TraversalStep } from './types.ts';
 // oxlint-disable-next-line import/no-relative-parent-imports -- Reuse the package's native guards without loading Effect.
 import { isEmptyString, matchesNumber, matchesString, matchesUndefined } from "../native-predicates.ts";
 
@@ -70,6 +70,31 @@ interface ForClause {
 
 const INVALID_FOR = "Invalid 'for' expression";
 
+interface TraversalState {
+  base: Expression;
+  diagnosticsStart: number;
+  result: Expression;
+}
+
+interface SplatTail {
+  first: Range;
+  last: Range;
+  steps: TraversalStep[];
+}
+
+const NO_LEGACY_DOT = -1;
+const NO_SPLAT_STEP = undefined;
+const LEGACY_INDEX_START = 0;
+const SKIP_LEGACY_DOT = 1;
+
+const dynamicIndex = (range: Range): TraversalStep =>
+  // oxlint-disable-next-line eslint/sort-keys -- Preserve the public dynamic index step fields and their order.
+  ({ kind: "index", value: HCL_NULL, dynamic: true, range });
+
+const attributeStep = (dot: Token, attribute: Token): TraversalStep =>
+  // oxlint-disable-next-line eslint/sort-keys -- Preserve the public traversal step order.
+  ({ kind: "attribute", value: text(attribute), range: between(dot.range, attribute.range) });
+
 interface ParsedExpression {
   expression: Expression;
   failed: boolean;
@@ -110,6 +135,50 @@ const zeroPosition = (): Pos =>
 const zeroRange = (): Range =>
   // oxlint-disable-next-line eslint/sort-keys -- Preserve the public range's filename, start, end order.
   ({ filename: "", start: zeroPosition(), end: zeroPosition() });
+
+const RECOVERY_START_DEPTH = 0;
+const RECOVERY_DEPTH_STEP = 1;
+const BODY_OPENERS = new Set([
+  "TokenOBrace", "TokenOBrack", "TokenOParen", "TokenOQuote", "TokenOHeredoc", "TokenTemplateInterp", "TokenTemplateControl",
+]);
+const BODY_CLOSERS = new Set(["TokenCBrace", "TokenCBrack", "TokenCParen", "TokenCQuote", "TokenCHeredoc"]);
+
+interface RecoveryDepth {
+  depth: number;
+}
+
+interface RecoveryTokens {
+  end: string;
+  start: string;
+}
+
+const matchesRecoveryEnd = (type: string, { end, start }: RecoveryTokens, nesting: RecoveryDepth): boolean => {
+  if (type === start) {
+    nesting.depth += RECOVERY_DEPTH_STEP;
+    return false;
+  }
+  if (type !== end) {return type === "TokenEOF";}
+  if (nesting.depth < RECOVERY_DEPTH_STEP) {return true;}
+  nesting.depth -= RECOVERY_DEPTH_STEP;
+  return false;
+};
+
+const discardOpenersThrough = (open: string[], matches: (type: string | undefined) => boolean): void => {
+  while (open.length) {
+    if (matches(open.pop())) {return;}
+  }
+};
+
+const updateBodyRecovery = (open: string[], type: string): void => {
+  if (BODY_OPENERS.has(type)) {
+    open.push(type);
+  } else if (BODY_CLOSERS.has(type)) {
+    const opener = opposite(type);
+    discardOpenersThrough(open, (candidate) => candidate === opener);
+  } else if (type === "TokenTemplateSeqEnd") {
+    discardOpenersThrough(open, (candidate) => candidate === "TokenTemplateInterp" || candidate === "TokenTemplateControl");
+  }
+};
 
 const binaryOps: Record<string, string>[] = [
   { TokenOr: '||' }, { TokenAnd: '&&' }, { TokenEqualOp: '==', TokenNotEqual: '!=' },
@@ -169,6 +238,25 @@ const relativeTraversal = function relativeTraversal(expression: Expression, ste
   // oxlint-disable-next-line eslint/sort-keys -- Preserve the public traversal AST key order.
   return { kind: 'relativeTraversal', source: expression, steps: [step], range: between(expression.range, step.range) };
 };
+const literalIndex = ({ value, numberText }: Literal, range: Range): TraversalStep => {
+  const spelling = matchesUndefined(numberText) || isEmptyString(numberText) ? {} : { numberText };
+  // oxlint-disable-next-line eslint/sort-keys -- Preserve literal index AST fields before optional numeric spelling.
+  return { kind: "index", value, range, ...spelling };
+};
+
+const indexExpression = (state: TraversalState, { key, open, range }: { key: Expression; open: Token; range: Range }): Expression => {
+  if (key.kind === "literal") {return relativeTraversal(state.result, literalIndex(key, range));}
+  if (key.kind === "dynamic" && !key.diagnostics) {return relativeTraversal(state.result, dynamicIndex(range));}
+  if (isStringLiteral(key)) {
+    const part = key.parts[FIRST_EXPRESSION];
+    // oxlint-disable-next-line eslint/sort-keys -- Preserve the string index AST field order.
+    const step: TraversalStep = part.kind === "literal" ? { kind: "index", value: part.value, range } : dynamicIndex(range);
+    return relativeTraversal(state.result, step);
+  }
+  // oxlint-disable-next-line eslint/sort-keys -- Preserve the public computed index expression fields.
+  return { kind: "index", collection: state.result, key, range: between(state.base.range, range), openRange: open.range, bracketRange: range };
+};
+
 /** Stateful translation of the upstream recursive-descent parser. */
 export class Parser extends Peeker {
   public recovery = false;
@@ -947,146 +1035,223 @@ export class Parser extends Peeker {
     }
   }
 
-  private parseExpressionTraversals(from: Expression): Expression {
-    const diagnosticsStart = this.diagnostics.length;
-    let result = from;
-    traversal: for (;;) {
+  private invalidSplatAttribute(marker: Token): void {
+    if (!this.recovery) {
       const next = this.peek();
-      if (next.type === 'TokenDot') {
-        const dot = this.read();
-        let attr = this.peek();
-        if (attr.type === 'TokenIdent') {
-          attr = this.read();
-          result = relativeTraversal(result, { kind: 'attribute', value: text(attr), range: between(dot.range, attr.range) });
-        } else if (attr.type === 'TokenNumberLit') {
-          attr = this.read();
-          result = relativeTraversal(result, this.legacyIndex(dot, attr, false, attr.range));
-        } else if (attr.type === 'TokenStar') {
-          const marker = this.read(); const steps: TraversalStep[] = [];
-          const firstRange = this.nextRange();
-          let lastRange = marker.range;
-          while (this.peek().type === 'TokenDot') {
-            const stepDot = this.read();
-            if (this.peek().type === 'TokenNumberLit') {
-              const num = this.read(); steps.push(this.legacyIndex(stepDot, num, true, attr.range)); lastRange = num.range; continue;
-            }
-            if (this.peek().type !== 'TokenIdent') {
-              if (!this.recovery) {
-                if (this.peek().type === 'TokenStar') {this.diag('Nested splat expression not allowed', 'A splat expression (*) cannot be used inside another attribute-only splat expression.', this.peek().range);}
-                else {this.diag('Invalid attribute name', 'An attribute name is required after a dot.', attr.range);}
-              }
-              this.recovery = true;
-              continue traversal;
-            }
-            const attrToken = this.read();
-            steps.push({ kind: 'attribute', value: text(attrToken), range: between(stepDot.range, attrToken.range) }); lastRange = attrToken.range;
-          }
-          const item: Expression & { kind: 'anonymous' } = { kind: 'anonymous', range: between(dot.range, marker.range) };
-          const each: Expression = steps.length ? { kind: 'relativeTraversal', source: item, steps, range: between(firstRange, lastRange) } : item;
-          result = { kind: 'splat', source: result, each, item, attributeOnly: true, range: between(from.range, lastRange), markerRange: between(dot.range, marker.range) };
-        } else {
-          this.diag('Invalid attribute name', 'An attribute name is required after a dot.', attr.range);
-          result = dynamic(between(from.range, dot.range), this.diagnostics.slice(diagnosticsStart)); this.recovery = true;
-        }
-      } else if (next.type === 'TokenOBrack') {
-        const open = this.read();
-        if (this.peek().type === 'TokenStar') {
-          this.read(); let close = this.read();
-          if (close.type !== 'TokenCBrack' && !this.recovery) {
-            this.diag('Missing close bracket on splat index', 'The star for a full splat operator must be immediately followed by a closing bracket ("]").', close.range);
-            close = this.recover('TokenCBrack');
-          }
-          const item: Expression & { kind: 'anonymous' } = { kind: 'anonymous', range: between(open.range, close.range) };
-          const each = this.parseExpressionTraversals(item);
-          result = { kind: 'splat', source: result, each, item, attributeOnly: false, range: between(from.range, each.range), markerRange: between(open.range, close.range) };
-        } else {
-          this.pushIncludeNewlines(false);
-          const before = this.diagnostics.length; const key = this.parseExpression();
-          let close: Token;
-          if (this.failedSince(before)) {close = this.recover('TokenCBrack');}
-          else {
-            close = this.read();
-            if (close.type !== 'TokenCBrack' && !this.recovery) {
-              this.diag('Missing close bracket on index', 'The index operator must end with a closing bracket ("]").', close.range); close = this.recover('TokenCBrack');
-            }
-          }
-          this.popIncludeNewlines();
-          const range = between(open.range, close.range);
-          if (key.kind === 'literal') {result = relativeTraversal(result, { kind: 'index', value: key.value, range, ...(key.numberText ? { numberText: key.numberText } : {}) });}
-          else if (key.kind === 'dynamic' && !key.diagnostics) {result = relativeTraversal(result, { kind: 'index', value: null, dynamic: true, range });}
-          else if (isStringLiteral(key)) {
-            const part = key.parts[0];
-            result = relativeTraversal(result, part.kind === 'literal' ? { kind: 'index', value: part.value, range } : { kind: 'index', value: null, dynamic: true, range });
-          }
-          else {result = { kind: 'index', collection: result, key, range: between(from.range, range), openRange: open.range, bracketRange: range };}
-        }
-      } else {break;}
+      if (next.type === "TokenStar") {
+        this.diag("Nested splat expression not allowed", "A splat expression (*) cannot be used inside another attribute-only splat expression.", next.range);
+      } else {
+        this.diag("Invalid attribute name", "An attribute name is required after a dot.", marker.range);
+      }
     }
+    this.recovery = true;
+  }
+
+  private nextSplatAttribute(marker: Token): { range: Range; step: TraversalStep } | undefined {
+    const dot = this.read();
+    const next = this.peek();
+    if (next.type === "TokenNumberLit") {
+      const index = this.read();
+      return { range: index.range, step: this.legacyIndex(dot, index, marker.range) };
+    }
+    if (next.type !== "TokenIdent") {
+      this.invalidSplatAttribute(marker);
+      return NO_SPLAT_STEP;
+    }
+    const attr = this.read();
+    return { range: attr.range, step: attributeStep(dot, attr) };
+  }
+
+  private splatTail(marker: Token, subject: Token): SplatTail | undefined {
+    const tail: SplatTail = { first: this.nextRange(), last: marker.range, steps: [] };
+    while (this.peek().type === "TokenDot") {
+      const step = this.nextSplatAttribute(subject);
+      if (!step) {return undefined;}
+      tail.steps.push(step.step);
+      tail.last = step.range;
+    }
+    return tail;
+  }
+
+  private attributeSplat(state: TraversalState, dot: Token, subject: Token): Expression {
+    const marker = this.read();
+    const tail = this.splatTail(marker, subject);
+    if (!tail) {return state.result;}
+    const markerRange = between(dot.range, marker.range);
+    const item: Anonymous = { kind: "anonymous", range: markerRange };
+    const { first, last, steps } = tail;
+    const each: Expression = steps.length
+      // oxlint-disable-next-line eslint/sort-keys -- Preserve the public relative traversal order inside a splat.
+      ? { kind: "relativeTraversal", source: item, steps, range: between(first, last) }
+      : item;
+    // oxlint-disable-next-line eslint/sort-keys -- Preserve the public attribute splat AST field order.
+    return { kind: "splat", source: state.result, each, item, attributeOnly: true, range: between(state.base.range, last), markerRange: between(dot.range, marker.range) };
+  }
+
+  private invalidAttribute(state: TraversalState, dot: Token, attribute: Token): Expression {
+    this.diag("Invalid attribute name", "An attribute name is required after a dot.", attribute.range);
+    const result = dynamic(between(state.base.range, dot.range), this.diagnostics.slice(state.diagnosticsStart));
+    this.recovery = true;
     return result;
   }
 
-  private legacyIndex(dot: Token, number: Token, splat: boolean, subject: Range): TraversalStep {
-    const numberText = text(number); const dotIndex = numberText.indexOf('.'); const range = between(dot.range, number.range);
-    if (dotIndex !== -1) {
-      const first = numberText.slice(0, dotIndex); const second = numberText.slice(dotIndex + 1);
-      this.diag('Invalid legacy index syntax', `When using the legacy index syntax, chaining two indexes together is not permitted. Use the proper index syntax${splat ? ' with a full splat expression [*]' : ''} instead, like [${first}][${second}].`, subject);
-      return { kind: 'index', value: null, dynamic: true, range };
+  private dotTraversal(state: TraversalState): Expression {
+    const dot = this.read();
+    const attribute = this.peek();
+    switch (attribute.type) {
+      case "TokenIdent": {return relativeTraversal(state.result, attributeStep(dot, this.read()));}
+      case "TokenNumberLit": {return relativeTraversal(state.result, this.legacyIndex(dot, this.read()));}
+      case "TokenStar": {return this.attributeSplat(state, dot, attribute);}
+      default: {return this.invalidAttribute(state, dot, attribute);}
     }
-    const value = this.numberLiteral(number);
-    return value.kind === 'literal' ? { kind: 'index', value: value.value, numberText, range } : { kind: 'index', value: null, dynamic: true, range };
   }
 
-  private parseQuotedStringLiteral(): { value: string; range: Range } {
+  private readIndexClose(mode: "index" | "splat"): Token {
+    const close = this.read();
+    if (close.type === "TokenCBrack" || this.recovery) {return close;}
+    if (mode === "splat") {
+      this.diag("Missing close bracket on splat index", 'The star for a full splat operator must be immediately followed by a closing bracket ("]").', close.range);
+    } else {
+      this.diag("Missing close bracket on index", 'The index operator must end with a closing bracket ("]").', close.range);
+    }
+    return this.recover("TokenCBrack");
+  }
+
+  private fullSplat(state: TraversalState, open: Token): Expression {
+    this.read();
+    const close = this.readIndexClose("splat");
+    const item: Anonymous = { kind: "anonymous", range: between(open.range, close.range) };
+    const each = this.parseExpressionTraversals(item);
+    // oxlint-disable-next-line eslint/sort-keys -- Preserve the public full splat AST field order.
+    return { kind: "splat", source: state.result, each, item, attributeOnly: false, range: between(state.base.range, each.range), markerRange: between(open.range, close.range) };
+  }
+
+  private readBracketKey(): { close: Token; key: Expression } {
+    this.pushIncludeNewlines(false);
+    const { expression: key, failed } = this.expressionAttempt(() => this.parseExpression());
+    const close = failed ? this.recover("TokenCBrack") : this.readIndexClose("index");
+    this.popIncludeNewlines();
+    return { close, key };
+  }
+
+  private bracketTraversal(state: TraversalState): Expression {
     const open = this.read();
-    if (open.type !== 'TokenOQuote') { this.diag('Invalid string literal', 'A quoted string is required here.', open.range); return { value: '', range: open.range } }
-    let value = ''; let endRange: Range;
+    if (this.peek().type === "TokenStar") {return this.fullSplat(state, open);}
+    const { close, key } = this.readBracketKey();
+    const range = between(open.range, close.range);
+    return indexExpression(state, { key, open, range });
+  }
+
+  private parseExpressionTraversals(from: Expression): Expression {
+    const state: TraversalState = { base: from, diagnosticsStart: this.diagnostics.length, result: from };
+    // oxlint-disable-next-line rules/no-for-loops -- Traversals consume a step or end at the first token outside the traversal.
+    for (;;) {
+      const next = this.peek();
+      if (next.type === "TokenDot") {state.result = this.dotTraversal(state);}
+      else if (next.type === "TokenOBrack") {state.result = this.bracketTraversal(state);}
+      else {return state.result;}
+    }
+  }
+
+  private invalidLegacyIndex(numberText: string, dotIndex: number, marker: { range: Range; splatSubject: Range | undefined; subject: Range }): TraversalStep {
+    const first = numberText.slice(LEGACY_INDEX_START, dotIndex);
+    const second = numberText.slice(dotIndex + SKIP_LEGACY_DOT);
+    this.diag("Invalid legacy index syntax", `When using the legacy index syntax, chaining two indexes together is not permitted. Use the proper index syntax${marker.splatSubject ? " with a full splat expression [*]" : ""} instead, like [${first}][${second}].`, marker.subject);
+    return dynamicIndex(marker.range);
+  }
+
+  private legacyIndex(dot: Token, number: Token, splatSubject?: Range): TraversalStep {
+    const numberText = text(number);
+    const dotIndex = numberText.indexOf(".");
+    const range = between(dot.range, number.range);
+    if (dotIndex !== NO_LEGACY_DOT) {
+      return this.invalidLegacyIndex(numberText, dotIndex, { range, splatSubject, subject: splatSubject ?? number.range });
+    }
+    const value = this.numberLiteral(number);
+    // oxlint-disable-next-line eslint/sort-keys -- Preserve legacy numeric index field order.
+    return value.kind === "literal" ? { kind: "index", value: value.value, numberText, range } : dynamicIndex(range);
+  }
+
+  private appendRejectedInterpolation(open: Token, token: Token, content: { value: string }): void {
+    const which = token.type === "TokenTemplateControl" ? "%" : "$";
+    this.diag("Invalid string literal", `Template sequences are not allowed in this string. To include a literal ${JSON.stringify(which)}, double it (as "${which}${which}") to escape it.`, token.range, between(open.range, token.range));
+    content.value += `${which}{ ... }`;
+    this.recover("TokenTemplateSeqEnd");
+  }
+
+  private appendQuotedChunk(open: Token, token: Token, content: { value: string }): boolean {
+    if (token.type === "TokenQuotedLit") {
+      const result = parseStringLiteralToken(token);
+      this.diagnostics.push(...result.diagnostics);
+      content.value += result.value;
+      return true;
+    }
+    if (token.type === "TokenTemplateControl" || token.type === "TokenTemplateInterp") {
+      this.appendRejectedInterpolation(open, token, content);
+      return true;
+    }
+    return false;
+  }
+
+  private rejectQuotedToken(open: Token, token: Token): Range {
+    if (token.type === "TokenEOF") {
+      this.diag("Unterminated string literal", "Unable to find the closing quote mark before the end of the file.", token.range, between(open.range, token.range));
+    } else {
+      this.diag("Invalid string literal", "This item is not valid in a string literal.", token.range, between(open.range, token.range));
+      this.recover("TokenCQuote");
+    }
+    return token.range;
+  }
+
+  private readQuotedEnd(open: Token, content: { value: string }): Range {
+    // oxlint-disable-next-line rules/no-for-loops -- Each literal chunk advances the Peeker until the closing quote or invalid token.
     for (;;) {
       const token = this.read();
-      if (token.type === 'TokenCQuote') { endRange = token.range; break }
-      if (token.type === 'TokenQuotedLit') {
-        const result = parseStringLiteralToken(token); this.diagnostics.push(...result.diagnostics); value += result.value; continue;
-      }
-      if (token.type === 'TokenTemplateControl' || token.type === 'TokenTemplateInterp') {
-        const which = token.type === 'TokenTemplateControl' ? '%' : '$';
-        this.diag('Invalid string literal', `Template sequences are not allowed in this string. To include a literal ${JSON.stringify(which)}, double it (as "${which}${which}") to escape it.`, token.range, between(open.range, token.range));
-        value += `${which}{ ... }`; this.recover('TokenTemplateSeqEnd'); continue;
-      }
-      if (token.type === 'TokenEOF') {this.diag('Unterminated string literal', 'Unable to find the closing quote mark before the end of the file.', token.range, between(open.range, token.range));}
-      else { this.diag('Invalid string literal', 'This item is not valid in a string literal.', token.range, between(open.range, token.range)); this.recover('TokenCQuote') }
-      endRange = token.range; break;
+      if (token.type === "TokenCQuote") {return token.range;}
+      if (!this.appendQuotedChunk(open, token, content)) {return this.rejectQuotedToken(open, token);}
     }
-    return { value, range: between(open.range, endRange) };
+  }
+
+  private parseQuotedStringLiteral(): { range: Range; value: string } {
+    const open = this.read();
+    if (open.type !== "TokenOQuote") {
+      this.diag("Invalid string literal", "A quoted string is required here.", open.range);
+      return { range: open.range, value: "" };
+    }
+    const content = { value: "" };
+    const end = this.readQuotedEnd(open, content);
+    return { range: between(open.range, end), value: content.value };
   }
 
   public recover(end: string): Token {
-    const start = opposite(end); this.recovery = true;
-    let nest = 0;
+    const delimiters = { end, start: opposite(end) };
+    this.recovery = true;
+    const nesting = { depth: RECOVERY_START_DEPTH };
+    // oxlint-disable-next-line rules/no-for-loops -- Recovery consumes the nested delimiter stream through the match or EOF.
     for (;;) {
       const token = this.read();
-      let {type} = token;
-      if (end === 'TokenTemplateSeqEnd' && type === 'TokenTemplateControl') {type = 'TokenTemplateInterp';}
-      if (type === start) {nest++;}
-      else if (type === end) { if (nest < 1) {return token;} nest-- }
-      else if (type === 'TokenEOF') {return token;}
+      const type = end === "TokenTemplateSeqEnd" && token.type === "TokenTemplateControl" ? "TokenTemplateInterp" : token.type;
+      if (matchesRecoveryEnd(type, delimiters, nesting)) {return token;}
     }
   }
+
   private recoverOver(start: string): void {
-    for (;;) { const token = this.read(); if (token.type === start || token.type === 'TokenEOF') {break} }
+    // oxlint-disable-next-line rules/no-for-loops -- Skip source tokens to the requested opener or EOF before balancing its sequence.
+    for (;;) {
+      const { type } = this.read();
+      if (type === start || type === "TokenEOF") {break;}
+    }
     this.recover(opposite(start));
   }
+
   private recoverAfterBodyItem(): void {
     this.recovery = true;
     const open: string[] = [];
+    // oxlint-disable-next-line rules/no-for-loops -- Consume the broken body item to the next un-nested newline or EOF.
     for (;;) {
-      const token = this.read();
-      if ((token.type === 'TokenNewline' && !open.length) || token.type === 'TokenEOF') {break;}
-      if (['TokenOBrace', 'TokenOBrack', 'TokenOParen', 'TokenOQuote', 'TokenOHeredoc', 'TokenTemplateInterp', 'TokenTemplateControl'].includes(token.type)) {open.push(token.type);}
-      else if (['TokenCBrace', 'TokenCBrack', 'TokenCParen', 'TokenCQuote', 'TokenCHeredoc'].includes(token.type)) {
-        const opener = opposite(token.type); while (open.length && open.at(-1) !== opener) {open.pop();} if (open.length) {open.pop();}
-      } else if (token.type === 'TokenTemplateSeqEnd') {
-        while (open.length && open.at(-1) !== 'TokenTemplateInterp' && open.at(-1) !== 'TokenTemplateControl') {open.pop();}
-        if (open.length) {open.pop();}
-      }
+      const { type } = this.read();
+      if (type === "TokenEOF" || (type === "TokenNewline" && !open.length)) {return;}
+      updateBodyRecovery(open, type);
     }
   }
 
