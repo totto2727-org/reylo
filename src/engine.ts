@@ -1,160 +1,79 @@
-// The analysis engine: the `reylo` executable (src/native.ts), which holds every database's engine
-// And serves one database's as `reylo engine <database>`: one JSON request per line on its standard
-// Input, one answer per line on its standard output, each carrying its request's `id` back
-// (upstream engine/native/src/lib.rs). The engine connects to the database itself. Each connection is a
-// Child process of its own, which answers its requests in turn, so that a server slow to answer
-// Holds up no other connection; the requests that need no database go to one child per database
-// (the ping, the lexer, and DuckDB's analysis, whose needs this process answers), and those that
-// Must answer before this thread can go on (the project file's `config`) to `reylo engine
-// <database> call`, which answers the one request on its standard input and exits. A child keeps
-// This process alive only while a request waits on it, as esbuild's service does, so that a build
-// Ends when its work does: the child and its pipes are unreferenced once, when it starts, and a
-// Timer holds the process while a request waits. Bun keeps a process alive for good once a child
-// It unreferenced is referenced again in a Bun.build plugin's hook, which is where the esbuild
-// Plugin asks the engine, so the child is never referenced again; a timer is held and let go alike
-// In every runtime.
-// oxlint-disable-next-line rules/no-node-imports -- This server-side entry point uses this built-in to launch the real programs whose stdout, stderr and status are consumed.
-import { spawn, spawnSync } from 'node:child_process';
-// oxlint-disable-next-line rules/no-node-imports -- This server-side entry point uses this built-in to type the real subprocess status and streams.
-import type { ChildProcessWithoutNullStreams } from 'node:child_process';
-// oxlint-disable-next-line rules/no-node-imports -- This server-side entry point uses this built-in to inspect or write files through the host filesystem.
+// The published native engine answers JSON lines. Each connection gets its own process, and one
+// An idle process per engine serves ping, lexing, and analysis that uses externally supplied data.
+// The synchronous config path starts a one-shot child. See engine-channel.ts for ownership of the
+// See that module for the streams and keep-alive timer.
+// oxlint-disable-next-line rules/no-node-imports -- Read the installed runtime's package version during initialization.
 import { readFileSync } from "node:fs";
-// oxlint-disable-next-line rules/no-node-imports -- This server-side entry point uses this built-in to resolve paths using the host platform's filesystem conventions.
-import { resolve } from "node:path";
-import { hostUrl } from './host-url.ts';
-import type { HostUrl } from './host-url.ts';
-import { NotMysql, Unreachable } from "./connection.ts";
-import { EngineCore } from './engine-core.ts';
-import type { Analysis, Described, Dialect, Lexed, Response } from './engine-core.ts';
-import { nativeBinary } from "./native.ts";
+import { Channel } from "./engine-channel.ts";
+import type { ChannelAnswer } from "./engine-channel.ts";
+import { EngineCore, expectLexed } from "./engine-core.ts";
+import type { Dialect, Lexed, Response } from "./engine-core.ts";
+import { callSync } from "./engine-launch.ts";
+import { MissingEngine, missingEngine } from "./engine-missing.ts";
+import { openEngineSession } from "./engine-session.ts";
+import type { Connection } from "./engine-session.ts";
 import { ENGINE_VERSION } from "./engine-version.ts";
-import { matchesNull, matchesUndefined } from "./native-predicates.ts";
+import { nativeBinary } from "./native.ts";
+import { matchesUndefined } from "./native-predicates.ts";
 
-export type { EngineType } from "./engine-type.ts";
 export { reason, Unreachable } from "./connection.ts";
-export type { Analysis, Answer, DbError, Described, Diagnostic, Dialect, DuckdbDescribed, DuckdbType, EngineIo, Lexed, MysqlDescribed, Need, Response } from "./engine-core.ts";
+export type { Analysis, Answer, DbError, Described, Diagnostic, Dialect, DuckdbDescribed, DuckdbType, EngineType, EngineIo, Lexed, MysqlDescribed, Need, Response } from "./engine-core.ts";
 export { AnswerCache, EngineCore } from "./engine-core.ts";
+export { MissingEngine } from "./engine-missing.ts";
+export type { Connection } from "./engine-session.ts";
+
+const PACKAGE_LOCATIONS = ["./package.json", "../package.json"];
+
+const versionAt = (filename: string): { version: string } | undefined => {
+  try {
+    // oxlint-disable-next-line node/no-sync -- REYLO_VERSION remains available synchronously on import.
+    const manifest: unknown = JSON.parse(readFileSync(new URL(filename, import.meta.url), "utf8"));
+    // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- Read the original package version field from the installed manifest.
+    return { version: (manifest as { version: string }).version };
+  } catch {
+    return undefined;
+  }
+};
+
+const ownVersion = (): string => {
+  const result = Iterator.from(PACKAGE_LOCATIONS).map((filename) => versionAt(filename))
+    .find((version) => !matchesUndefined(version));
+  if (!matchesUndefined(result)) {return result.version;}
+  // oxlint-disable-next-line rules/require-tagged-error -- Preserve the native package initialization error without importing Effect.
+  throw new Error("reylo cannot find the package.json of its own package");
+};
 
 /** The fork package version, shared by the runtime and SQLite tooling packages. */
-export const REYLO_VERSION: string = (() => {
-  for (const at of ["./package.json", "../package.json"]) {
-    try {
-      return JSON.parse(readFileSync(new URL(at, import.meta.url), "utf8")).version;
-    } catch {}
-  }
-  throw new Error("reylo cannot find the package.json of its own package");
-})();
+export const REYLO_VERSION: string = ownVersion();
 
-/** An engine reylo cannot run: none installed, or a different upstream native release. Reported as the project's error. */
-export class MissingEngine extends Error {
-  public constructor(message: string) {
-    super(message);
-    this.name = "MissingEngine";
-  }
-}
-
-const engines = new Map<string, Promise<Engine>>();
-
-/** How long the engine has to answer its first request, a ping: it answers in milliseconds, so a binary that does not answer at all is not the engine. */
-const PING_TIMEOUT = 10_000;
-
-/**
- * The engine of one database, loaded once per process and binary. It rejects with a MissingEngine
- * where there is no binary, where it is another upstream native release, and where it does not answer
- * as one database's engine.
- */
-export const engine = function engine(dialect: Dialect): Promise<Engine> {
-  if (dialect !== "sqlite") {return Promise.reject(new MissingEngine(`This fork supports SQLite analysis only, not ${dialect} statements`));}
-  let binary: string;
-  try {
-    binary = nativeBinary();
-  } catch (error) {
-    return Promise.reject(new MissingEngine((error as Error).message));
-  }
-  const key = `${binary}\0${dialect}`;
-  let loading = engines.get(key);
-  if (!loading) {
-    loading = (async () => {
-      // The child that answers this database's requests that need no database, the ping first.
-      const core = new Channel(binary, dialect);
-      let timer: ReturnType<typeof setTimeout> | undefined;
-      const late = new Promise<Answer>((done) => (timer = setTimeout(() => done({ status: "error", message: `it did not answer a ping in ${PING_TIMEOUT / 1000} s` }), PING_TIMEOUT)));
-      const answer = await Promise.race([core.ask({ op: "ping" }), late]);
-      clearTimeout(timer);
-      const ping = answer as unknown as Response;
-      const refuse = (message: string) => {
-        core.kill();
-        return new MissingEngine(message);
-      };
-      if (ping.status !== "ok") {throw refuse(`the engine ${binary} does not answer: ${answer.message ?? answer.status}`);}
-      if (ping.version !== ENGINE_VERSION) {
-        throw refuse(`reylo ${REYLO_VERSION} runs with its engine at ${ENGINE_VERSION}, and ${binary} is ${ping.version}: install reylo again with optional dependencies enabled, or point REYLO_ENGINE_PATH at the engine of reylo ${ENGINE_VERSION}`);
-      }
-      if (ping.database !== dialect) {throw refuse(`${binary} serves ${ping.database ?? "no one database"}'s engine when asked for ${dialect}'s`);}
-      return new Engine(binary, dialect, ping.fingerprint, core);
-    })();
-    // A failure is not kept: the binary may be installed or rebuilt while the process runs.
-    loading.catch(() => engines.delete(key));
-    engines.set(key, loading);
-  }
-  return loading;
-};
-
-/**
- * An engine to read the project file with, before the URL in it names the database: the core,
- * which parses the file, is every database's. A MissingEngine where there is none to run.
- */
-export const anyEngine = async function anyEngine(): Promise<Engine | MissingEngine> {
-  return engine("sqlite").catch((error: unknown) => (error instanceof MissingEngine ? error : new MissingEngine((error as Error).message)));
-};
-
-type Answer = { status: string; id?: number; message?: string; code?: string; conn?: number; analysis?: Analysis; rows?: unknown[][]; server?: string; params?: number[]; columns?: Described["columns"] };
-
-/** What a session asks of a connection the engine holds. */
-export interface Connection {
-  analyze(sql: string): Promise<Analysis>;
-  /** A query, its parameters bound and its rows read as the engine's catalog queries are. */
-  query(sql: string, params: unknown[]): Promise<unknown[][]>;
-  /** A statement described as the engine's own describe reads it, for a host that runs the engine's analysis itself (EngineCore's `analyze`); Postgres only. */
-  describe(sql: string): Promise<Described>;
-  /** The schema changed: the answers the engine keeps for this connection are stale. */
-  forget(): Promise<void>;
-  close(): Promise<void>;
-}
-
-/** The key a request's answer is kept by, for the requests whose answer is the same for the same request: `config` and `lex`. */
-const keptKey = function (request: object): string | undefined {
-  const {op} = (request as { op?: unknown });
+const keptKey = (request: object): string | undefined => {
+  const { op } = request as { op?: unknown };
   return op === "config" || op === "lex" ? JSON.stringify(request) : undefined;
 };
 
-/** How many answers to `config` and `lex` are kept: each is the same for the same request, and a type check asks again for each file it transforms. */
 const KEPT_ANSWERS = 512;
 
-/**
- * An answer as the session reads it. A refused login and a database that cannot be reached are an
- * Unreachable, its cause carrying the server's code, so that `refusedLogin` reads it
- * (src/connection.ts); a MariaDB server, which the type check refuses, is a NotMysql; any other
- * failure is an Error.
- */
-const settled = function settled(answer: Answer): Answer {
-  if (answer.status === "notMysql") {throw new NotMysql(answer.server!);}
-  if (answer.status === "unreachable" || answer.status === "refused") {throw new Unreachable(Object.assign(new Error(answer.message), answer.code && { code: answer.code }));}
-  if (answer.status === "error") {throw Object.assign(new Error(answer.message), answer.code && { code: answer.code });}
-  return answer;
+const decodeCoreResponse = (answer: ChannelAnswer): Response => {
+  const decoded: unknown = answer;
+  // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- The native host emits the published response union on this channel.
+  return decoded as Response;
 };
 
-/** One database's engine, as the `reylo` executable serves it. */
+/** One database's engine, as the native executable serves it. */
 export class Engine extends EngineCore {
+  // oxlint-disable-next-line rules/no-readonly -- Preserve the public read-only executable path.
   public readonly binary: string;
+  // oxlint-disable-next-line rules/no-readonly -- Preserve the public read-only dialect.
   public readonly dialect: Dialect;
-  /** The engine's fingerprint, core's sources and its database's, which names the `.reylo/` entries it writes. */
+  /** The native engine fingerprint identifies entries in .reylo. */
+  // oxlint-disable-next-line rules/no-readonly -- Preserve the public read-only fingerprint.
   public readonly fingerprint: string;
-  /** The child that answers this database's requests that need no database, started again where it stopped. */
   #core: Channel;
-  readonly #kept = new Map<string, Response>();
+  #kept = new Map<string, Response>();
 
+  // oxlint-disable-next-line eslint/max-params -- Preserve the public engine constructor signature.
   public constructor(binary: string, dialect: Dialect, fingerprint: string, core: Channel) {
+    // oxlint-disable-next-line node/no-sync -- The public Engine.call method preserves the native synchronous request.
     super((request) => callSync(binary, dialect, request));
     this.binary = binary;
     this.dialect = dialect;
@@ -163,208 +82,136 @@ export class Engine extends EngineCore {
   }
 
   /**
-   * The answer to a request that needs no database, while this thread waits: `reylo engine
-   * <database> call`, a process of its own, for a caller that cannot wait (the project file's
-   * `config`). The answers to `config` and `lex`, the same for the same request, are kept.
+   * Send a synchronous config or lexer request to a one-shot native process.
+   * @param {object} request - The engine operation and its inputs.
+   * @returns {Response} The native answer, cached for config and lex requests.
    */
   public override call(request: object): Response {
     const key = keptKey(request);
-    return (key && this.#kept.get(key)) || this.#remember(key, super.call(request));
+    const remembered = this.#cached(key);
+    if (remembered) {return remembered;}
+    return this.#remember(key, super.call(request));
   }
 
-  /** The lexer's reading of `sql`, through the long-lived child, for a caller that can wait: a round trip, where the one-shot form starts a process. */
+  /**
+   * Read the lexer's answer over the long-lived native channel.
+   * @param {string} sql - Statement text.
+   * @param {Dialect} dialect - The dialect used by the lexer.
+   * @returns {Promise<Lexed>} The lexer's reading of the statement.
+   */
   public async lexAsync(sql: string, dialect: Dialect): Promise<Lexed> {
+    // oxlint-disable-next-line eslint/sort-keys -- Keep the existing wire request and cache key order.
     const request = { op: "lex", sql, dialect };
     const key = keptKey(request);
-    const r = (key && this.#kept.get(key)) || this.#remember(key, await this.ask(request));
-    if (r.status !== "lexed") {throw new Error(r.status === "error" ? r.message : `unexpected ${r.status}`);}
-    return r.lexed;
+    const remembered = this.#cached(key);
+    if (remembered) {return expectLexed(remembered);}
+    return expectLexed(this.#remember(key, await this.ask(request)));
+  }
+
+  #cached(key: string | undefined): Response | undefined {
+    return matchesUndefined(key) ? undefined : this.#kept.get(key);
   }
 
   #remember(key: string | undefined, answer: Response): Response {
     if (matchesUndefined(key) || answer.status === "error") {return answer;}
-    if (this.#kept.size >= KEPT_ANSWERS) {this.#kept.delete(this.#kept.keys().next().value!);}
+    if (this.#kept.size >= KEPT_ANSWERS) {
+      const oldest = this.#kept.keys().next().value;
+      if (!matchesUndefined(oldest)) {this.#kept.delete(oldest);}
+    }
     this.#kept.set(key, answer);
     return answer;
   }
 
-  /** A request that needs no database, through this database's long-lived child: the rounds of an analysis whose needs this process answers, and the lexer for a caller that can wait. */
+  /**
+   * Run an engine request that can wait on the shared channel.
+   * @param {object} request - An operation that uses no engine-owned database connection.
+   * @returns {Promise<Response>} The native response, after restarting a closed channel if necessary.
+   */
   protected override async ask(request: object): Promise<Response> {
     if (this.#core.ended) {this.#core = new Channel(this.binary, this.dialect);}
     const answer = await this.#core.ask(request);
-    if (answer.status === "unreachable") {throw new Error(answer.message);}
-    return answer as unknown as Response;
+    if (answer.status === "unreachable") {
+      // oxlint-disable-next-line rules/require-tagged-error -- A failed core request exposes the native Error expected by callers.
+      throw new Error(answer.message);
+    }
+    return decodeCoreResponse(answer);
   }
 
   /**
-   * A connection to the database `url` names (a SQLite database's path), opened by the engine in a
-   * child of its own, so that a server slow to answer holds up no other connection; an Unreachable
-   * where it cannot be opened.
+   * Open a connection in its own native worker.
+   * @param {string} url - The database URL or local SQLite path.
+   * @returns {Promise<Connection>} A session that owns its worker and any host bridge.
    */
   public async open(url: string): Promise<Connection> {
-    const target: HostUrl = url.includes("://") ? await hostUrl(url) : { url, close: () => {} };
-    const channel = new Channel(this.binary, this.dialect);
-    const ask = async (request: object) => settled(await channel.ask(request));
-    let conn: number;
-    try {
-      conn = (await ask({ op: "open", url: target.url, ...(target.bridge && { bridge: target.bridge }) })).conn!;
-    } catch (error) {
-      channel.end();
-      target.close();
-      // A socket the bridge could not open: its reason, rather than the connection it closed.
-      const failure = target.failure?.();
-      throw failure ? new Unreachable(failure) : error;
-    }
-    return {
-      analyze: async (sql) => (await ask({ op: "run", conn, sql })).analysis!,
-      query: async (sql, params) => (await ask({ op: "query", conn, sql, params })).rows!,
-      describe: async (sql) => {
-        const answer = await ask({ op: "describe", conn, sql });
-        return { params: answer.params!.map((oid) => ({ oid })), columns: answer.columns! };
-      },
-      forget: async () => void (await ask({ op: "forget", conn })),
-      close: async () => {
-        await ask({ op: "close", conn }).catch(() => {});
-        channel.end();
-        target.close();
-      },
-    };
+    return openEngineSession(this.binary, this.dialect, url);
   }
 }
 
-/** The variables that name a file the engine reads: Node's extra roots, and libpq's TLS files. */
-const FILE_VARIABLES = ["NODE_EXTRA_CA_CERTS", "PGSSLROOTCERT", "PGSSLCERT", "PGSSLKEY"];
+const engines = new Map<string, Promise<Engine>>();
+const PING_SECONDS = 10;
+const MILLISECONDS = 1000;
 
-/**
- * The engine's environment: this process's, with each variable that names a file resolved from
- * this process's working directory as Node and libpq resolve it, now, so that a later `chdir` here
- * changes nothing for a child already running.
- */
-const engineEnv = function (): NodeJS.ProcessEnv {
-  const env = { ...process.env };
-  Iterator.from(FILE_VARIABLES).forEach((name) => {if (env[name] && env[name] !== "system") {env[name] = resolve(env[name]);}});
-  return env;
+const pendingPing = async (core: Channel): Promise<ChannelAnswer> => {
+  const { promise, resolve } = Promise.withResolvers<ChannelAnswer>();
+  const late = setTimeout(() => {
+    // oxlint-disable-next-line eslint/sort-keys -- Match the native error response used by the startup check.
+    resolve({ status: "error", message: `it did not answer a ping in ${PING_SECONDS} s` });
+  }, PING_SECONDS * MILLISECONDS);
+  try {
+    return await Promise.race([core.ask({ op: "ping" }), promise]);
+  } finally {
+    clearTimeout(late);
+  }
 };
 
-/** The answer of `reylo engine <database> call` to `request`, or why there is none, as the engine words a failure. */
-const oneShot = function (binary: string, run: { error?: Error; status: number | null; signal: NodeJS.Signals | null; stdout: string; stderr: string }): string {
-  if (run.error) {return JSON.stringify({ status: "error", message: `the engine ${binary} could not start: ${run.error.message}` });}
-  const line = run.stdout.trim();
-  if (run.status === 0 && line) {return line;}
-  const said = run.stderr.trim().split("\n").slice(-3).join("\n");
-  return JSON.stringify({ status: "error", message: `the engine ${binary} ${matchesNull(run.status) ? `ended on ${run.signal}` : `exited with code ${run.status}`}${said ? `: ${said}` : ""}` });
+const refuse = (core: Channel, message: string): MissingEngine => {
+  core.kill();
+  return new MissingEngine(message);
 };
 
-/** One request that needs no database, answered by the one-shot form while this thread waits. */
-function callSync(binary: string, dialect: Dialect, request: string): string {
-  const run = spawnSync(binary, ["engine", dialect, "call"], { input: request, encoding: "utf8", env: engineEnv(), maxBuffer: 1 << 30, windowsHide: true });
-  return oneShot(binary, run);
-}
+const launchEngine = async (binary: string, dialect: Dialect): Promise<Engine> => {
+  const core = new Channel(binary, dialect);
+  const answer = await pendingPing(core);
+  const ping = decodeCoreResponse(answer);
+  if (ping.status !== "ok") {throw refuse(core, `the engine ${binary} does not answer: ${answer.message ?? answer.status}`);}
+  if (ping.version !== ENGINE_VERSION) {
+    throw refuse(core, `reylo ${REYLO_VERSION} runs with its engine at ${ENGINE_VERSION}, and ${binary} is ${ping.version}: install reylo again with optional dependencies enabled, or point REYLO_ENGINE_PATH at the engine of reylo ${ENGINE_VERSION}`);
+  }
+  if (ping.database !== dialect) {throw refuse(core, `${binary} serves ${ping.database ?? "no one database"}'s engine when asked for ${dialect}'s`);}
+  return new Engine(binary, dialect, ping.fingerprint, core);
+};
 
-/** The period of the timer that holds the process while a request waits: long, since it only has to exist. */
-const HOLD_INTERVAL = 1 << 30;
-
-/** How much of what the engine writes to its standard error is kept, for the message of a child that stopped. */
-const STDERR_KEPT = 4096;
+// oxlint-disable-next-line typescript/promise-function-async -- Return the original in-flight Promise stored for this engine.
+const loadEngine = (binary: string, dialect: Dialect): Promise<Engine> => {
+  const key = `${binary}\0${dialect}`;
+  const active = engines.get(key);
+  if (active) {return active;}
+  const loading = launchEngine(binary, dialect);
+  // oxlint-disable-next-line promise/prefer-await-to-then -- Observe rejection to release the cache and return the original shared Promise to callers.
+  loading.catch(() => {engines.delete(key);});
+  engines.set(key, loading);
+  return loading;
+};
 
 /**
- * One child, `reylo engine <database>`, answering its requests in turn. It keeps this process alive
- * only while a request waits on it; a child that fails to start or stops answers what waits on it,
- * and everything after, as a database that cannot be reached, and the session opens another.
+ * Load a native engine once per process and binary.
+ * @param {Dialect} dialect - The database whose native engine should run.
+ * @returns {Promise<Engine>} The shared engine load, or a MissingEngine rejection.
  */
-class Channel {
-  readonly #child: ChildProcessWithoutNullStreams;
-  readonly #pending = new Map<number, (answer: Answer) => void>();
-  #next = 1;
-  #buffered = "";
-  #stderr = "";
-  #ended: string | undefined;
-  /** What holds this process while a request waits: a timer, which never fires. */
-  #waiting: ReturnType<typeof setInterval> | undefined;
-
-  public constructor(binary: string, dialect: Dialect) {
-    const child = spawn(binary, ["engine", dialect], { env: engineEnv(), windowsHide: true });
-    this.#child = child;
-    child.stdout.setEncoding("utf8").on("data", (chunk: string) => {
-      this.#buffered += chunk;
-      let end: number;
-      while ((end = this.#buffered.indexOf("\n")) !== -1) {
-        const line = this.#buffered.slice(0, end);
-        this.#buffered = this.#buffered.slice(end + 1);
-        this.#answer(line);
-      }
-    });
-    child.stderr.setEncoding("utf8").on("data", (chunk: string) => (this.#stderr = (this.#stderr + chunk).slice(-STDERR_KEPT)));
-    // A child that stopped closes its input under a request being written: the exit says why.
-    child.stdin.on("error", () => {});
-    child.on("error", (error: Error) => this.#end(`the engine ${binary} could not start: ${error.message}`));
-    // `close`, after the child's output has been read to its end, rather than `exit`.
-    child.on("close", (code, signal) => {
-      const said = this.#stderr.trim().split("\n").slice(-3).join("\n");
-      this.#end(`the engine ${binary} stopped (${code ?? signal})${said ? `: ${said}` : ""}`);
-    });
-    // Neither the child nor its pipes keep this process alive, from the start (`#hold`).
-    child.unref();
-    Iterator.from([child.stdin, child.stdout, child.stderr]).forEach((stream) => {(stream as unknown as { unref?: () => void }).unref?.();});
+// oxlint-disable-next-line typescript/promise-function-async -- Existing callers receive the same in-flight Promise from this native cache.
+export const engine = function engine(dialect: Dialect): Promise<Engine> {
+  if (dialect !== "sqlite") {
+    return Promise.reject(new MissingEngine(`This fork supports SQLite analysis only, not ${dialect} statements`));
   }
+  try {return loadEngine(nativeBinary(), dialect);}
+  catch (error) {return Promise.reject(missingEngine(error));}
+};
 
-  public get ended(): boolean {
-    return !matchesUndefined(this.#ended);
-  }
-
-  public ask(request: object): Promise<Answer> {
-    if (this.#ended) {return Promise.resolve({ status: "unreachable", message: this.#ended });}
-    const id = this.#next++;
-    return new Promise<Answer>((resolve) => {
-      this.#pending.set(id, resolve);
-      this.#hold(true);
-      this.#child.stdin.write(`${JSON.stringify({ ...request, id })}\n`);
-    });
-  }
-
-  /** The child stopped, with what it held: its input closed, at which it exits. */
-  public end(): void {
-    this.#ended ??= "the connection is closed";
-    this.#child.stdin.end();
-    this.#hold(false);
-  }
-
-  /** The child stopped at once, for one that is no engine to talk to. */
-  public kill(): void {
-    this.end();
-    this.#child.kill();
-  }
-
-  #answer(line: string): void {
-    let answer: Answer;
-    try {
-      answer = JSON.parse(line);
-    } catch {
-      return;
-    }
-    // A line the engine could not read as a request is answered without its `id`: the child answers
-    // In turn, so the answer is the oldest request's.
-    const id = answer.id ?? this.#pending.keys().next().value;
-    const resolve = matchesUndefined(id) ? undefined : this.#pending.get(id);
-    if (!resolve) {return;}
-    this.#pending.delete(id!);
-    resolve(answer);
-    if (this.#pending.size === 0) {this.#hold(false);}
-  }
-
-  #end(why: string): void {
-    const message = (this.#ended ??= why);
-    Iterator.from(this.#pending.values()).forEach((resolve) => {resolve({ status: "unreachable", message });});
-    this.#pending.clear();
-    this.#hold(false);
-  }
-
-  /** Whether this process is held for the requests waiting on the child: by a timer, since the child itself is never referenced again once it starts. */
-  #hold(held: boolean): void {
-    if (held) {this.#waiting ??= setInterval(() => {}, HOLD_INTERVAL);}
-    else if (!matchesUndefined(this.#waiting)) {
-      clearInterval(this.#waiting);
-      this.#waiting = undefined;
-    }
-  }
-}
+/**
+ * Load the engine used to read project configuration.
+ * @returns {Promise<Engine | MissingEngine>} The engine or its native initialization failure.
+ */
+export const anyEngine = async function anyEngine(): Promise<Engine | MissingEngine> {
+  try {return await engine("sqlite");}
+  catch (error) {return error instanceof MissingEngine ? error : missingEngine(error);}
+};

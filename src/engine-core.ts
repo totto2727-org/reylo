@@ -136,6 +136,11 @@ const unexpected = (reply: Response): Error =>
   // oxlint-disable-next-line rules/require-tagged-error -- The synchronous and asynchronous engine calls expose a native protocol Error.
   new Error(reply.status === "error" ? reply.message : `unexpected ${reply.status}`);
 
+export const expectLexed = (reply: Response): Lexed => {
+  if (reply.status !== "lexed") {throw unexpected(reply);}
+  return reply.lexed;
+};
+
 interface RoundHost {
   answers: Record<string, Answer>;
   cache: AnswerCache;
@@ -178,9 +183,7 @@ export class EngineCore {
 
   public lex(sql: string, dialect: Dialect): Lexed {
     // oxlint-disable-next-line eslint/sort-keys -- Keep the existing request field order for native engine callers.
-    const reply = this.call({ op: "lex", sql, dialect });
-    if (reply.status !== "lexed") {throw unexpected(reply);}
-    return reply.lexed;
+    return expectLexed(this.call({ op: "lex", sql, dialect }));
   }
 
   /**
