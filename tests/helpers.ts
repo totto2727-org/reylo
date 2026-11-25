@@ -1,6 +1,6 @@
 // Shared SQLite driver fixtures and the content mapper run over its JSON-RPC protocol.
 // oxlint-disable-next-line rules/no-node-imports -- Assert the presence of fixture data with Nub's native test runner.
-import { fail } from "node:assert/strict";
+import { equal, fail, ok } from "node:assert/strict";
 // oxlint-disable-next-line rules/no-node-imports -- Exercise Node CLI entry points and streaming protocols in native subprocesses.
 import { execFile, spawn } from "node:child_process";
 // oxlint-disable-next-line rules/no-node-imports -- The Nub integration fixtures use this built-in to use the host resolver for the installed driver or fixture package.
@@ -9,13 +9,36 @@ import { createRequire } from "node:module";
 import { join } from "node:path";
 // oxlint-disable-next-line rules/no-node-imports -- The Nub integration fixtures use this built-in to convert local module URLs with the host platform's path rules.
 import { pathToFileURL } from "node:url";
-// oxlint-disable-next-line import/no-relative-parent-imports -- The native test runner loads this private guard directly from the source tree.
-import { hasObjectType, matchesNull, matchesNumber, matchesString, matchesUndefined } from "#reylo-source/native-predicates.ts";
+import type { Cardinality, Query } from "#reylo-source/index.ts";
+// oxlint-disable-next-line import/no-relative-parent-imports -- The native test runner loads these private guards directly from the source tree.
+import { hasFunctionType, hasObjectType, isRecord, matchesNull, matchesNumber, matchesString, matchesUndefined } from "#reylo-source/native-predicates.ts";
 
 export const ROOT = join(import.meta.dirname, "..");
 export const DRIVERS = join(ROOT, "lab", "drivers", "node_modules");
 export const MAPPER = join(ROOT, "src", "mapper.ts");
 export const INDEX = pathToFileURL(join(ROOT, "src", "index.ts")).href;
+
+export type SqliteQueryFixture<Rows extends Cardinality> = Pick<
+  Query<Record<string, unknown>, Record<string, unknown>, Rows, "sqlite">,
+  "run" | "runSync" | "sql" | "inputSchema" | "outputSchema" | "~standard"
+>;
+
+export const importSqliteQueryFixture = async <Rows extends Cardinality>(
+  specifier: string,
+  cardinality?: Rows,
+): Promise<SqliteQueryFixture<Rows>> => {
+  const queryModule: { default?: unknown } = await import(specifier);
+  const query = queryModule.default;
+  ok(isRecord(query) && query.dialect === "sqlite", "Expected a generated SQLite query");
+  if (!matchesUndefined(cardinality)) {equal(query.cardinality, cardinality);}
+  ok(hasFunctionType(query.run) && hasFunctionType(query.runSync));
+  ok(Object.hasOwn(query, "sql") && Object.hasOwn(query, "inputSchema") && Object.hasOwn(query, "outputSchema"));
+  const standard = query["~standard"];
+  ok(isRecord(standard) && isRecord(standard.jsonSchema) && hasFunctionType(standard.jsonSchema.input));
+  // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- The fixture is emitted without a paired declaration and calls the checked-in SQLite query factory.
+  return query as SqliteQueryFixture<Rows>;
+};
+
 
 // oxlint-disable-next-line unicorn/no-null -- These fixtures bind or receive SQL NULL as JavaScript null.
 export const SQL_NULL = null;

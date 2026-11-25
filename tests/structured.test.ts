@@ -16,7 +16,8 @@ import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { Session } from "#reylo-source/analyze.ts";
 import { sqlModule } from "#reylo-source/loader.ts";
-import { DRIVERS, INDEX, closeSessions, plain, requireFixtureValue } from "./helpers.ts";
+import { DRIVERS, INDEX, closeSessions, importSqliteQueryFixture, plain, requireFixtureValue } from "./helpers.ts";
+import type { SqliteQueryFixture } from "./helpers.ts";
 
 // Structured parameters (wiki/structured-params.md): a parameter cast to `rows(…)` or `row(…)` is
 // Typed by its column list and written for its position; the run time checks each value, and a key
@@ -33,14 +34,14 @@ const project = function (driver?: string): string {
 };
 
 /** The module a build step writes for `sql`, imported. */
-const built = async function (root: string, url: string, name: string, sql: string) {
+const built = async function (root: string, url: string, name: string, sql: string): Promise<SqliteQueryFixture<"many">> {
   const file = join(root, `${name}.sql`);
   await writeFile(file, sql);
   await writeFile(join(root, ".env"), `DATABASE_URL=${url}\n`);
   const { code } = await sqlModule(file, sql);
   const out = join(root, `${name}.mjs`);
   await writeFile(out, code.replace(`from "@totto2727/reylo"`, `from ${JSON.stringify(INDEX)}`));
-  return (await import(pathToFileURL(out).href)).default;
+  return importSqliteQueryFixture(pathToFileURL(out).href, "many");
 };
 
 const analysis = async function (root: string, url: string, sql: string) {
@@ -327,9 +328,10 @@ test("binary data in a column list travels as hexadecimal text, which each reade
   try {
     const insert = await built(root, "file:./app.db", "insert_files", "insert into files :files::rows(id integer not null, data blob not null) returning id, data");
     const [row] = await insert.run(db, { files: [{ id: 1, data: bytes }] });
-    same(row.data);
+    same(requireFixtureValue(row).data);
     const read = await built(root, "file:./app.db", "read_files", "select f.data from :files::rows(data blob not null) as f");
-    same((await read.run(db, { files: [{ data: bytes }] }))[0].data);
+    const [roundTrip] = await read.run(db, { files: [{ data: bytes }] });
+    same(requireFixtureValue(roundTrip).data);
     await assert.rejects(insert.run(db, { files: [{ id: 2, data: "00ff" }] }), /"data" is blob, binary data, a Uint8Array; got "00ff"/u);
   } finally {
     db.close();

@@ -19,10 +19,11 @@ import { pathToFileURL } from "node:url";
 import { differences, sqliteDefault } from '#reylo-source/fresh.ts';
 import type { Fresh } from '#reylo-source/fresh.ts';
 import type { TursoClient } from "#reylo-source/execute.ts";
-import type { Cardinality, Query } from "#reylo-source/index.ts";
+import type { Cardinality } from "#reylo-source/index.ts";
 import { sqlModule } from "#reylo-source/loader.ts";
 import { hasFunctionType, isRecord, matchesString } from "#reylo-source/native-predicates.ts";
-import { DRIVERS, INDEX, closeSessions, plain, requireFixtureValue } from "./helpers.ts";
+import { DRIVERS, INDEX, closeSessions, importSqliteQueryFixture, plain, requireFixtureValue } from "./helpers.ts";
+import type { SqliteQueryFixture } from "./helpers.ts";
 
 // The schema freshness check compares the facts a built SQLite query read against the current schema.
 const tursoLive = existsSync(join(DRIVERS, "@tursodatabase", "database")) ? false : "lab/drivers is not installed";
@@ -37,8 +38,6 @@ const project = function (driver?: string): string {
   return root;
 };
 
-type BuiltQuery = Pick<Query<Record<string, unknown>, unknown, Cardinality, "sqlite">, "run" | "runSync">;
-
 interface TursoFixtureClient extends TursoClient {
   close: () => Promise<void>;
   prepare: (sql: string) => { all: () => Promise<unknown[]> };
@@ -49,24 +48,15 @@ const resultRows = (result: unknown): Record<string, unknown>[] => {
   return result;
 };
 
-const validatedBuiltQuery = (query: unknown): BuiltQuery => {
-  assert.ok(isRecord(query));
-  assert.equal(query.dialect, "sqlite");
-  assert.ok(hasFunctionType(query.run) && hasFunctionType(query.runSync));
-  // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- The generated module calls the checked-in SQLite query factory after emitting JavaScript without a paired declaration.
-  return query as BuiltQuery;
-};
-
 /** A module built for `sql` and imported: each call gives a query object of its own, never checked yet. */
-const built = async function (root: string, url: string, name: string, sql: string): Promise<BuiltQuery> {
+const built = async function (root: string, url: string, name: string, sql: string): Promise<SqliteQueryFixture<Cardinality>> {
   const file = join(root, `${name}.sql`);
   await writeFile(file, sql);
   await writeFile(join(root, ".env"), `DATABASE_URL=${url}\n`);
   const { code } = await sqlModule(file, sql);
   const out = join(root, `${name}.mjs`);
   await writeFile(out, code.replace(`from "@totto2727/reylo"`, `from ${JSON.stringify(INDEX)}`));
-  const queryModule: { default?: unknown } = await import(`${pathToFileURL(out).href}?${Math.random()}`);
-  return validatedBuiltQuery(queryModule.default);
+  return importSqliteQueryFixture(`${pathToFileURL(out).href}?${Math.random()}`);
 };
 
 // oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
