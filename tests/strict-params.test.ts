@@ -2,101 +2,91 @@
 import { test } from "node:test";
 // oxlint-disable-next-line rules/no-node-imports -- Nub's Node suite uses native assertions for driver, CLI, and protocol results.
 import assert from "node:assert/strict";
-// oxlint-disable-next-line rules/no-node-imports -- The Nub integration fixtures use this built-in to inspect or write files through the host filesystem.
-import { mkdirSync, mkdtempSync, symlinkSync, writeFileSync } from "node:fs";
-// oxlint-disable-next-line rules/no-node-imports -- The Nub integration fixtures use this built-in to await writes and reads through the host filesystem.
-import { mkdtemp } from "node:fs/promises";
-// oxlint-disable-next-line rules/no-node-imports -- Exercise the native SQLite driver used by Reylo's Node runtime.
-import { DatabaseSync } from "node:sqlite";
-// oxlint-disable-next-line rules/no-node-imports -- The Nub integration fixtures use this built-in to select the host's real temporary directory.
+// oxlint-disable-next-line rules/no-node-imports -- Write real mapper project files in an isolated temporary directory.
+import { mkdtemp, writeFile } from "node:fs/promises";
+// oxlint-disable-next-line rules/no-node-imports -- Locate temporary fixtures outside the repository.
 import { tmpdir } from "node:os";
-// oxlint-disable-next-line rules/no-node-imports -- The Nub integration fixtures use this built-in to resolve paths using the host platform's filesystem conventions.
-import { join } from "node:path";
-import { transform, DRIVERS, requireFixtureValue } from "./helpers.ts";
-import { matchesUndefined } from "#reylo-source/native-predicates.ts";
+// oxlint-disable-next-line rules/no-node-imports -- Resolve the independent database and mapper project files.
+import path from "node:path";
+import { forEachFixtureInOrder, requireFixtureValue, transform } from "./helpers.ts";
+import { withProject } from "./sqlite-project-fixture.ts";
 
 // A parameter nothing in the statement types is error reylo12 in the type check unless the project
 // File says `strict_params: false`. The content
 // Mapper runs as the type check runs it, through its own JSON-RPC process.
 
-const project = function (url: string, reylo: string | undefined, driver?: string, name = ".reylo.yaml"): string {
-  const root = mkdtempSync(join(tmpdir(), "reylo-strict-"));
-  writeFileSync(join(root, "package.json"), "{}");
-  writeFileSync(join(root, ".env"), `DATABASE_URL=${url}\n`);
-  if (!matchesUndefined(reylo)) {writeFileSync(join(root, name), reylo);}
-  if (driver) {
-    mkdirSync(join(root, "node_modules"));
-    symlinkSync(join(DRIVERS, driver), join(root, "node_modules", driver));
-  }
+interface ReyloConfig { file?: string; source: string }
+const project = async (url: string, config?: ReyloConfig): Promise<string> => {
+  const root = await mkdtemp(path.join(tmpdir(), "reylo-strict-"));
+  await writeFile(path.join(root, "package.json"), "{}");
+  await writeFile(path.join(root, ".env"), `DATABASE_URL=${url}\n`);
+  if (config) {await writeFile(path.join(root, config.file ?? ".reylo.yaml"), config.source);}
   return root;
 };
 
+const mapper = async (url: string, sql: Record<string, string>, config?: ReyloConfig): ReturnType<typeof transform> =>
+  transform(await project(url, config), sql);
+
 const message = (written: string, file = ".reylo.yaml"): string => `Nothing in the statement gives the parameter ${written} a type; cast it, as in ${written}::text, or set strict_params: false in ${file}.`;
 
-/** On MySQL every `::` cast types its parameter, through the server's describe of the cast. */
-const CASTS = {
-  "casts.sql": "select :a::int as a, :b::bigint unsigned as b, :c::numeric(10,2) as c, :d::double precision as d, :e::date as e, :f::time as f, :g::datetime as g, :h::varbinary(4) as h, :i::varchar(5) as i, :j::uuid as j from users limit :n::int\n",
-  "where.sql": "select name from users where id = :id::bigint and name like concat(:prefix::text, '%')\n",
+const checkTypedCasts = async (url: string): Promise<void> => {
+  // A statement the engine refused keeps its own error alone: a parameter written twice is untyped
+  // Because the analysis stopped there.
+  const repeated = await mapper(url, { "repeated.sql": "select :q as a, :q as b\n" });
+  assert.deepEqual(requireFixtureValue(repeated["repeated.sql"]).diagnostics.map((diagnostic) => diagnostic.code), [3]);
+  // The cast the message suggests types it.
+  const cast = await mapper(url, { "cast.sql": "select :x::text as x\n" });
+  assert.deepEqual(requireFixtureValue(cast["cast.sql"]).diagnostics, []);
+  const json = await mapper(url, { "cast.sql": "select :x::text as x\n", "json.sql": "select json_extract(:doc::json, '$.a') as a\n" });
+  assert.deepEqual(requireFixtureValue(json["json.sql"]).diagnostics, []);
+  assert.deepEqual(requireFixtureValue(json["cast.sql"]).diagnostics, []);
 };
-const CAST_TYPES = /export type Params = \{ a: number; b: number; c: string; d: number; e: string; f: string; g: string; h: Uint8Array; i: string; j: string; n: number \}/u;
 
-/** A JSON cast without a schema types its parameter as JSON, which is no `unknown`, so it is never flagged; the TypeScript type of any JSON value is `unknown` all the same. */
-const jsonCast = async function (url: string, json: string, driver?: string): Promise<void> {
-  const out = await transform(project(url, undefined, driver), { "json.sql": json, "cast.sql": "select :x::text as x\n" });
-  assert.deepEqual(requireFixtureValue(out["json.sql"]).diagnostics, []);
-  assert.deepEqual(requireFixtureValue(out["cast.sql"]).diagnostics, []);
+const checkStrictness = async (url: string): Promise<void> => {
+  // SQLite types no bare parameter in a select list: by default each is an error at its first use.
+  const sql = { "bare.sql": "select :x as x, :y as y\n" };
+  const strict = await mapper(url, sql);
+  assert.deepEqual(requireFixtureValue(strict["bare.sql"]).diagnostics, [
+    { code: 12, length: 2, messageText: message(":x"), start: 7 },
+    { code: 12, length: 2, messageText: message(":y"), start: 16 },
+  ]);
+  // A project file without the key takes the default too, and so does `strict_params: true`.
+  await forEachFixtureInOrder(["env: [.env]\n", "strict_params: true\n"], async (source) => {
+    const output = await mapper(url, sql, { source });
+    const { diagnostics } = requireFixtureValue(output["bare.sql"]);
+    assert.deepEqual(diagnostics.map((diagnostic) => diagnostic.code), [12, 12], source);
+  });
+  // A project whose file is `.reylo.yml` is told to set the key there, not in a `.reylo.yaml` it lacks.
+  const yml = await mapper(url, sql, { file: ".reylo.yml", source: "strict_params: true\n" });
+  assert.deepEqual(requireFixtureValue(yml["bare.sql"]).diagnostics.map((diagnostic) => diagnostic.messageText), [message(":x", ".reylo.yml"), message(":y", ".reylo.yml")]);
+  // `strict_params: false` keeps such a parameter `unknown`, with no error.
+  const loose = await mapper(url, sql, { source: "strict_params: false\n" });
+  assert.deepEqual(requireFixtureValue(loose["bare.sql"]).diagnostics, []);
+  assert.match(requireFixtureValue(loose["bare.sql"]).text, /export type Params = \{ x: unknown; y: unknown \}/u);
+  await checkTypedCasts(url);
 };
 
 // oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
 test("SQLite: a parameter nothing types is an error by default, and strict_params: false keeps it unknown", async () => {
-  const root = await mkdtemp(join(tmpdir(), "reylo-strict-db-"));
-  const db = new DatabaseSync(join(root, "app.db"));
-  db.exec("create table users (id integer primary key)");
-  db.close();
-  const url = `file:${join(root, "app.db")}`;
-  // SQLite types no bare parameter in a select list: by default each is an error at its first use.
-  const sql = { "bare.sql": "select :x as x, :y as y\n" };
-  const strict = await transform(project(url, undefined), sql);
-  assert.deepEqual(requireFixtureValue(strict["bare.sql"]).diagnostics, [
-    { messageText: message(":x"), start: 7, length: 2, code: 12 },
-    { messageText: message(":y"), start: 16, length: 2, code: 12 },
-  ]);
-  // A project file without the key takes the default too, and so does `strict_params: true`.
-  for (const file of ["env: [.env]\n", "strict_params: true\n"]) {
-    const output = await transform(project(url, file), sql);
-    const { diagnostics } = requireFixtureValue(output["bare.sql"]);
-    assert.deepEqual(diagnostics.map((diagnostic) => diagnostic.code), [12, 12], file);
-  }
-  // A project whose file is `.reylo.yml` is told to set the key there, not in a `.reylo.yaml` it lacks.
-  const yml = await transform(project(url, "strict_params: true\n", undefined, ".reylo.yml"), sql);
-  assert.deepEqual(requireFixtureValue(yml["bare.sql"]).diagnostics.map((diagnostic) => diagnostic.messageText), [message(":x", ".reylo.yml"), message(":y", ".reylo.yml")]);
-  // `strict_params: false` keeps such a parameter `unknown`, with no error.
-  const loose = await transform(project(url, "strict_params: false\n"), sql);
-  assert.deepEqual(requireFixtureValue(loose["bare.sql"]).diagnostics, []);
-  assert.match(requireFixtureValue(loose["bare.sql"]).text, /export type Params = \{ x: unknown; y: unknown \}/u);
-  // A statement the engine refused keeps its own error alone: a parameter written twice is untyped
-  // Because the analysis stopped there.
-  const repeated = await transform(project(url, undefined), { "repeated.sql": "select :q as a, :q as b\n" });
-  assert.deepEqual(requireFixtureValue(repeated["repeated.sql"]).diagnostics.map((diagnostic) => diagnostic.code), [3]);
-  // The cast the message suggests types it.
-  const cast = await transform(project(url, undefined), { "cast.sql": "select :x::text as x\n" });
-  assert.deepEqual(requireFixtureValue(cast["cast.sql"]).diagnostics, []);
-  await jsonCast(url, "select json_extract(:doc::json, '$.a') as a\n");
+  await withProject("create table users (id integer primary key)", async ({ database, root }) => {
+    database.close();
+    await checkStrictness(`file:${path.join(root, "app.db")}`);
+  });
 });
 
-// oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
-test("SQLite: a parameter as a whole sort or group key is error reylo17 at the parameter, and the statement is typed all the same", async () => {
-  const root = await mkdtemp(join(tmpdir(), "reylo-strict-db-"));
-  const db = new DatabaseSync(join(root, "app.db"));
-  db.exec("create table users (id integer primary key, name text not null)");
-  db.close();
-  const url = `file:${join(root, "app.db")}`;
-  const sorted = "select id, name from users order by :sort::text\n";
-  const grouped = "select count(*) as n from users group by :g\n";
-  const chosen = "select id, name from users order by case :sort::text when 'name' then name end, id\n";
-  const out = await transform(project(url, undefined), { "sorted.sql": sorted, "grouped.sql": grouped, "chosen.sql": chosen });
+
+const sorted = "select id, name from users order by :sort::text\n";
+const grouped = "select count(*) as n from users group by :g\n";
+const chosen = "select id, name from users order by case :sort::text when 'name' then name end, id\n";
+
+const sortQueries = Object.fromEntries([
+  ["sorted.sql", sorted], ["grouped.sql", grouped], ["chosen.sql", chosen],
+]);
+
+const checkOrderAndGroup = async (url: string): Promise<void> => {
+  const out = await mapper(url, sortQueries);
   const why = "since a parameter is a value and not a column's name; choose the column with";
-  assert.deepEqual(requireFixtureValue(out["sorted.sql"]).diagnostics, [{ messageText: `order by :sort sorts every row by the same value, ${why} case :sort when 'name' then name end`, start: sorted.indexOf(":sort"), length: ":sort::text".length, code: 17 }]);
+  assert.deepEqual(requireFixtureValue(out["sorted.sql"]).diagnostics, [{ code: 17, length: ":sort::text".length, messageText: `order by :sort sorts every row by the same value, ${why} case :sort when 'name' then name end`, start: sorted.indexOf(":sort") }]);
   assert.match(requireFixtureValue(out["sorted.sql"]).text, /export type Params = \{ sort: string \}/u);
   assert.match(requireFixtureValue(out["sorted.sql"]).text, /export type Row = \{ id: number; name: string \}/u);
   // A parameter nothing else types stays unknown with no second error: the key is the one to fix.
@@ -104,4 +94,12 @@ test("SQLite: a parameter as a whole sort or group key is error reylo17 at the p
   assert.match(requireFixtureValue(out["grouped.sql"]).text, /export type Row = \{ n: number \}/u);
   // The case the message suggests chooses the column with the parameter.
   assert.deepEqual(requireFixtureValue(out["chosen.sql"]).diagnostics, []);
+};
+
+// oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
+test("SQLite: a parameter as a whole sort or group key is error reylo17 at the parameter, and the statement is typed all the same", async () => {
+  await withProject("create table users (id integer primary key, name text not null)", async ({ database, root }) => {
+    database.close();
+    await checkOrderAndGroup(`file:${path.join(root, "app.db")}`);
+  });
 });

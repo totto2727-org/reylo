@@ -2,26 +2,16 @@
 import { test } from "node:test";
 // oxlint-disable-next-line rules/no-node-imports -- Nub's Node suite uses native assertions for driver, CLI, and protocol results.
 import assert from "node:assert/strict";
-// oxlint-disable-next-line rules/no-node-imports -- The Nub integration fixtures use this built-in to launch the real programs whose stdout, stderr and status are consumed.
-import { spawnSync } from "node:child_process";
-// oxlint-disable-next-line rules/no-node-imports -- The Nub integration fixtures use this built-in to inspect or write files through the host filesystem.
-import { mkdtempSync, realpathSync, symlinkSync, writeFileSync } from "node:fs";
-// oxlint-disable-next-line rules/no-node-imports -- The Nub integration fixtures use this built-in to await writes and reads through the host filesystem.
-import { mkdir, writeFile } from "node:fs/promises";
-// oxlint-disable-next-line rules/no-node-imports -- Exercise the native SQLite driver used by Reylo's Node runtime.
+// oxlint-disable-next-line rules/no-node-imports -- Execute the mapped query through the native database in the fixture project.
 import { DatabaseSync } from "node:sqlite";
-// oxlint-disable-next-line rules/no-node-imports -- The Nub integration fixtures use this built-in to select the host's real temporary directory.
-import { tmpdir } from "node:os";
-// oxlint-disable-next-line rules/no-node-imports -- The Nub integration fixtures use this built-in to resolve paths using the host platform's filesystem conventions.
-import { join } from "node:path";
-// oxlint-disable-next-line rules/no-node-imports -- The Nub integration fixtures use this built-in to convert local module URLs with the host platform's path rules.
-import { pathToFileURL } from "node:url";
-import { sqlModule } from "#reylo-source/loader.ts";
+// oxlint-disable-next-line rules/no-node-imports -- Resolve the same SQLite database that TypeScript inspected.
+import path from "node:path";
 import { reyloImport } from "#reylo-source/module-types.ts";
-import { closeSessions, declarations, INDEX, ROOT, requireFixtureValue } from "./helpers.ts";
+import { isRecord } from "#reylo-source/native-predicates.ts";
+import { declarations, requireFixtureValue, SQL_NULL } from "./helpers.ts";
+import { importBuiltSqliteQuery } from "./sqlite-project-fixture.ts";
+import { typeCheck, withCompilerProject, writeSql, writeTypeScript } from "./tsc-project-fixture.ts";
 
-// A value nothing types inside JSON a statement builds is Json, exported by the runtime.
-const TSC = join(ROOT, "node_modules", "typescript", "bin", "tsc");
 const QUERY_ONLY = `import type { Query } from "@totto2727/reylo";`;
 const WITH_JSON = `import type { Json, Query } from "@totto2727/reylo";`;
 
@@ -36,28 +26,19 @@ test("a module imports Json only where one of its types names it", () => {
   assert.equal(reyloImport("Record<never, never>", `{\n  /** a " quote */\n  id: number;\n  /** Json" */\n  n: number;\n}`), QUERY_ONLY);
 });
 
-// oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
-test("SQLite: untyped JSON values use Json through the content mapper, and JSON null differs from SQL NULL", async () => {
-  const root = realpathSync(mkdtempSync(join(tmpdir(), "reylo-json-")));
-  await writeFile(join(root, "package.json"), `{ "type": "module" }`);
-  await writeFile(join(root, ".env"), "DATABASE_URL=file:./app.db\n");
-  const db = new DatabaseSync(join(root, "app.db"));
-  db.exec("create table docs (id integer primary key, doc text not null)");
-  db.close();
-  await mkdir(join(root, "node_modules", "@totto2727"), { recursive: true });
-  symlinkSync(ROOT, join(root, "node_modules", "@totto2727", "reylo"));
-  symlinkSync(join(ROOT, "packages", "sqlite"), join(root, "node_modules", "@totto2727", "reylo-sqlite"));
-  const compilerOptions = { target: "esnext", module: "nodenext", lib: ["esnext"], types: [], strict: true, noUnusedLocals: true, noEmit: true, skipLibCheck: true, allowImportingTsExtensions: true };
-  await writeFile(join(root, "tsconfig.json"), JSON.stringify({ compilerOptions, contentMappers: [{ package: "@totto2727/reylo", extensions: [".sql"] }], include: ["main.ts"] }));
-  const files = {
-    "built.sql": "select json_object('k', json_extract(doc, '$.a'), 'n', id) as f from docs\n",
-    "plain.sql": "select json_object('Json', id) as Json from docs\n",
-  };
-  Object.entries(files).forEach(([name, text]) => {writeFileSync(join(root, name), text);});
+const files = {
+  "built.sql": "select json_object('k', json_extract(doc, '$.a'), 'n', id) as f from docs\n",
+  "plain.sql": "select json_object('Json', id) as Json from docs\n",
+};
+
+const keep = `select coalesce(:doc::json, json('"kept"')) as doc, coalesce(:keep::nullable(json), json('"kept"')) as keep\n`;
+
+const assertImportedTypes = async (root: string): Promise<void> => {
+  await writeSql(root, files);
   const declared = await declarations(root, files);
   assert.deepEqual(requireFixtureValue(declared["built.sql"]).split("\n").slice(0, 3), [WITH_JSON, "export type Params = Record<never, never>;", "export type Row = { f: { k: Json; n: number } };"]);
   assert.deepEqual(requireFixtureValue(declared["plain.sql"]).split("\n").slice(0, 3), [QUERY_ONLY, "export type Params = Record<never, never>;", "export type Row = { Json: { Json: number } };"]);
-  await writeFile(join(root, "main.ts"), [
+  await writeTypeScript(root, [
     `import type { Json } from "@totto2727/reylo";`,
     `import type { Row } from "./built.sql";`,
     `import type { Row as Plain } from "./plain.sql";`,
@@ -71,23 +52,34 @@ test("SQLite: untyped JSON values use Json through the content mapper, and JSON 
     `export const key: number = plain.Json.Json;`,
     "",
   ].join("\n"));
-  const commandResult = spawnSync(process.execPath, [TSC, "-p", "tsconfig.json", "--runExternalCode", "--pretty", "false"], { cwd: root, encoding: "utf8" });
-  assert.equal(commandResult.stdout + commandResult.stderr, "");
-  assert.equal(commandResult.status, 0);
-  const keep = `select coalesce(:doc::json, json('"kept"')) as doc, coalesce(:keep::nullable(json), json('"kept"')) as keep\n`;
-  const declaration = (await declarations(root, { "keep.sql": keep }))["keep.sql"]!;
+  const result = await typeCheck(root);
+  assert.equal(result.stdout + result.stderr, "");
+  assert.equal(result.status, 0);
+};
+
+// oxlint-disable-next-line unicorn/no-null -- The non-nullable JSON parameter encodes the JSON literal null.
+const JSON_NULL = null;
+
+const assertNullableJson = async (root: string): Promise<void> => {
+  const declarationsByFile = await declarations(root, { "keep.sql": keep });
+  const declaration = requireFixtureValue(declarationsByFile["keep.sql"]);
   assert.deepEqual(declaration.split("\n").filter((line) => /^export type (?:Params|Row) = /u.test(line) || line.startsWith("import type")), [WITH_JSON, "export type Params = { doc: Json; keep?: Json };", "export type Row = { doc: string; keep: string };"]);
-  await closeSessions();
-  const lite = new DatabaseSync(join(root, "app.db"));
+  const query = await importBuiltSqliteQuery(root, "keep", keep);
+  const database = new DatabaseSync(path.join(root, "app.db"));
   try {
-    const file = join(root, "keep.sql");
-    const { code } = await sqlModule(file, keep);
-    const out = join(root, "keep.mjs");
-    await writeFile(out, code.replace(`from "@totto2727/reylo"`, `from ${JSON.stringify(INDEX)}`));
-    const { default: query } = await import(pathToFileURL(out).href);
-    assert.deepEqual({ ...await query.run(lite, { doc: null, keep: null }) }, { doc: "null", keep: '"kept"' });
+    const result = await query.run(database, { doc: JSON_NULL, keep: SQL_NULL });
+    assert.ok(isRecord(result));
+    assert.deepEqual({ ...result }, { doc: "null", keep: '"kept"' });
   } finally {
-    lite.close();
-    await closeSessions();
+    database.close();
   }
+};
+
+// oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
+test("SQLite: untyped JSON values use Json through the content mapper, and JSON null differs from SQL NULL", async () => {
+  const schema = "create table docs (id integer primary key, doc text not null)";
+  await withCompilerProject({ noUnusedLocals: true, schema }, async (root) => {
+    await assertImportedTypes(root);
+    await assertNullableJson(root);
+  });
 });
