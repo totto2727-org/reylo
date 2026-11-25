@@ -5,11 +5,9 @@
 // And while it does not, or no URL names it, the entries are used as they are, so a build that
 // Cannot reach the database runs on what `reylo generate` or an earlier type check wrote.
 // oxlint-disable-next-line rules/no-node-imports -- This server-side entry point uses this built-in to inspect or write files through the host filesystem.
-import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 // oxlint-disable-next-line rules/no-node-imports -- This server-side entry point uses this built-in to compute the existing digest using the host's hash implementation.
 import { createHash } from "node:crypto";
-// oxlint-disable-next-line rules/no-node-imports -- This server-side entry point uses this built-in to resolve paths using the host platform's filesystem conventions.
-import { join } from "node:path";
 import { anyEngine, AnswerCache, engine, reason, MissingEngine, Unreachable } from './engine.ts';
 import type { Analysis, Engine, Lexed } from './engine.ts';
 import { duckdbPath, hclPath, packageDir, resolveProject, sqlitePath } from './project.ts';
@@ -18,17 +16,10 @@ import { duckdbDatabase } from "./duckdb.ts";
 import { NotMysql, refusedLogin } from "./connection.ts";
 import type { SqliteDriver } from "./sqlite-drivers.ts";
 import { matchesNull, matchesNullish, matchesUndefined } from "./native-predicates.ts";
+import { CACHE_ENTRY_VERSION, cacheEntryFile, readCacheEntry, readOfflineEntry, writeCacheEntry } from "./analysis-cache.ts";
 import { FINGERPRINT } from "./schema-fingerprint.ts";
 
-/** What `.reylo/` holds for one statement. */
-export type Entry = {
-  version: 1;
-  dialect: ResolvedProject["dialect"];
-  schema: string;
-  analysis: Analysis;
-  /** When it was written, in milliseconds since 1970: a copy of `.reylo/` keeps it where it may not keep the file's time. */
-  at: number;
-};
+export type { Entry } from "./analysis-cache.ts";
 
 export type Outcome =
   | { ok: true; analysis: Analysis; source: "cache" | "database"; entry: string }
@@ -51,7 +42,6 @@ const sha256 = (text: string): string => createHash("sha256").update(text).diges
 
 const digestPrefix = (text: string, length: number): string => sha256(text).slice(DIGEST_START, length);
 
-const ENTRY_VERSION = 1;
 // How long a schema fingerprint is trusted, as long as a statement answer: a migration shows up
 // In a running dev server or editor within seconds. Once the database is found unreachable, the
 // Session stays offline for a minute instead of paying the connect timeout per file.
@@ -73,35 +63,6 @@ const openProject = async function (dir: string, env: Record<string, string | un
   const project = resolveProject(await anyEngine(), dir, env);
   const own = await engine(project.dialect).catch((error: unknown) => (error instanceof MissingEngine ? error : new MissingEngine((error as Error).message)));
   return { project, engine: own };
-};
-
-const readEntry = function readEntry(file: string): Entry | undefined {
-  if (!existsSync(file)) {return undefined;}
-  try {
-    const entry = JSON.parse(readFileSync(file, "utf8")) as Entry;
-    return entry.version === ENTRY_VERSION ? entry : undefined;
-  } catch {
-    return undefined;
-  }
-};
-
-// Several processes write `.reylo/` at once (an editor's type check, a dev server, a build), so an
-// Entry is written to a file of its own and renamed into place: a reader sees a whole entry or
-// None. `.reylo/.gitignore` keeps the directory out of git, as pytest's and ruff's caches do. The
-// Cache is only for speed, so a directory that cannot be written (a read-only checkout) is not an
-// Error.
-const writeEntry = function writeEntry(root: string, file: string, entry: Entry): void {
-  const dir = join(root, ".reylo");
-  const tmp = `${file}.${process.pid}.${Math.random().toString(36).slice(2)}.tmp`;
-  try {
-    mkdirSync(join(dir, "queries"), { recursive: true });
-    const ignore = join(dir, ".gitignore");
-    if (!existsSync(ignore)) {writeFileSync(ignore, "# reylo's cache: written by the type check, the build steps and reylo generate; never committed.\n*\n");}
-    writeFileSync(tmp, `${JSON.stringify(entry)  }\n`);
-    renameSync(tmp, file);
-  } catch {
-    rmSync(tmp, { force: true });
-  }
 };
 
 export class Session {
@@ -190,34 +151,21 @@ export class Session {
    * statement where it has none of its own (`#offlineEntry`).
    */
   public entryFile(sql: string): string {
-    return join(this.root, ".reylo", "queries", `${this.#statementKey(sql)}-${digestPrefix(this.#server(), SERVER_DIGEST_LENGTH)}.json`);
+    return this.#cacheFile(this.#statementKey(sql));
+  }
+
+  #cacheFile(statementKey: string): string {
+    return cacheEntryFile(this.root, statementKey, digestPrefix(this.#server(), SERVER_DIGEST_LENGTH));
   }
 
   #statementKey(sql: string): string {
-    return digestPrefix(JSON.stringify([ENTRY_VERSION, this.#engineFingerprint, this.project.dialect, sql]), STATEMENT_DIGEST_LENGTH);
+    return digestPrefix(JSON.stringify([CACHE_ENTRY_VERSION, this.#engineFingerprint, this.project.dialect, sql]), STATEMENT_DIGEST_LENGTH);
   }
 
   /** The statement's entry from this session's server, else the newest from any other: for a session that cannot reach its database, or has no URL. */
-  #offlineEntry(sql: string): { file: string; entry: Entry } | undefined {
-    const own = this.entryFile(sql);
-    const entry = readEntry(own);
-    if (entry) {return { file: own, entry };}
-    const dir = join(this.root, ".reylo", "queries");
-    const prefix = `${this.#statementKey(sql)}-`;
-    let names: string[];
-    try {
-      names = readdirSync(dir).filter((n) => n.startsWith(prefix) && n.endsWith(".json"));
-    } catch {
-      return undefined;
-    }
-    // Newest by the time the entry records, since a copy (`cp -r`, `fs.cpSync`, a CI artifact) may
-    // Reset the file's.
-    let newest: { file: string; entry: Entry } | undefined;
-    Iterator.from(names.map((name) => join(dir, name))).forEach((file) => {
-      const other = readEntry(file);
-      if (other && (!newest || (other.at ?? -Infinity) > (newest.entry.at ?? -Infinity))) {newest = { file, entry: other };}
-    });
-    return newest;
+  async #offlineEntry(sql: string): ReturnType<typeof readOfflineEntry> {
+    const statementKey = this.#statementKey(sql);
+    return readOfflineEntry(this.root, statementKey, this.#cacheFile(statementKey));
   }
 
   /**
@@ -269,7 +217,7 @@ export class Session {
     // With no URL, `.reylo/` answers as it does where the database cannot be reached (the dialect
     // Is the installed engine's), and a statement it lacks needs a URL.
     if (!this.project.url) {
-      const hit = this.#engine instanceof MissingEngine || options.force ? undefined : this.#offlineEntry(sql);
+      const hit = this.#engine instanceof MissingEngine || options.force ? undefined : await this.#offlineEntry(sql);
       return hit ? { ok: true, analysis: hit.entry.analysis, source: "cache", entry: hit.file } : { ok: false, message: this.project.missingUrl, code: 4 };
     }
     // The URL names the database, whose engine package the project has to have installed.
@@ -279,11 +227,11 @@ export class Session {
     const schema = await this.schema();
     if (schema.fatal) {return { ok: false, message: schema.error!, code: 5 };}
     if (matchesNull(schema.value)) {
-      const hit = options.force ? undefined : this.#offlineEntry(sql);
+      const hit = options.force ? undefined : await this.#offlineEntry(sql);
       if (hit) {return { ok: true, analysis: hit.entry.analysis, source: "cache", entry: hit.file };}
       return { ok: false, message: `${this.cannotConnect(schema.error)}; .reylo has no analysis of this statement, so run reylo generate where the database can be reached.`, code: 5 };
     }
-    const entry = options.force || options.store === false ? undefined : readEntry(file);
+    const entry = options.force || options.store === false ? undefined : await readCacheEntry(file);
     if (entry && entry.schema === schema.value) {return { ok: true, analysis: entry.analysis, source: "cache", entry: file };}
     let analysis: Analysis;
     const io = this.#connection();
@@ -303,7 +251,7 @@ export class Session {
       }
       return { ok: false, message: (error as Error).message, code: 5 };
     }
-    if (options.store !== false) {writeEntry(this.root, file, { version: ENTRY_VERSION, dialect: this.project.dialect, schema: schema.value, analysis, at: Date.now() });}
+    if (options.store !== false) {await writeCacheEntry(this.root, file, { version: CACHE_ENTRY_VERSION, dialect: this.project.dialect, schema: schema.value, analysis, at: Date.now() });}
     return { ok: true, analysis, source: "database", entry: file };
   }
 
