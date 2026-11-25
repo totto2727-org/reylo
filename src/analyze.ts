@@ -52,12 +52,23 @@ const OFFLINE_TTL = 60_000;
 // (`releaseConnections`), and a loader (webpack, Rspack, Turbopack) has no such signal. The type
 // Check's session keeps its connection.
 const BUILD_IDLE = 250;
+const NO_ACTIVE_ANALYSIS = 0;
+const ONE_ANALYSIS = 1;
+
+// oxlint-disable-next-line rules/no-js-date -- Query entries persist wall-clock milliseconds so copied caches can compare timestamps across processes.
+const cacheTime = (): number => Date.now();
+
+// oxlint-disable-next-line node/no-process-env -- The public Session factories default to the current host environment when the caller supplies none.
+const hostEnvironment = (): NodeJS.ProcessEnv => process.env;
 
 const sessions = new Map<string, Session>();
 
 /**
  * The project a directory belongs to, its file read by the engine's core, and the engine of its own
  * database, or why that cannot be run.
+ * @param {string} dir Directory used to find the project.
+ * @param {Record<string, string | undefined>} env Environment used to resolve the project configuration.
+ * @returns {Promise<{ project: ResolvedProject; engine: Engine | MissingEngine }>} The resolved configuration and its engine, or the reason the engine is missing.
  */
 const openProject = async function (dir: string, env: Record<string, string | undefined>): Promise<{ project: ResolvedProject; engine: Engine | MissingEngine }> {
   const project = resolveProject(await anyEngine(), dir, env);
@@ -80,7 +91,7 @@ export class Session {
   #io: Promise<Io> | undefined;
   /** The URL the connection opens: the project's, until a command in `direct_url` gives a fresh one. */
   #url: string | undefined;
-  #busy = 0;
+  #busy = NO_ACTIVE_ANALYSIS;
   #timer: ReturnType<typeof setTimeout> | undefined;
   #schema: { value: string | null; at: number; error?: string; fatal?: boolean } | undefined;
   #hclHash: string | undefined;
@@ -114,8 +125,13 @@ export class Session {
     this.#schema = undefined;
   }
 
-  /** The build steps' session for the project a file or directory belongs to: one per project (and connection) and process. */
-  public static async for(from: string, env: Record<string, string | undefined> = process.env): Promise<Session> {
+  /**
+   * Reuses a build session for matching project and connection settings in this process.
+   * @param {string} from File or directory in the project.
+   * @param {Record<string, string | undefined>} env Environment used to resolve connection settings.
+   * @returns {Promise<Session>} The build session for those settings.
+   */
+  public static async for(from: string, env: Record<string, string | undefined> = hostEnvironment()): Promise<Session> {
     // From the package's directory, so that a message names a file as the project sees it.
     const dir = packageDir(from);
     const { project, engine } = await openProject(dir, env);
@@ -127,13 +143,22 @@ export class Session {
     return session;
   }
 
-  /** A session of its own, for a caller that must not share one (the type check, a test); it keeps its connection until closed. */
-  public static async open(from: string, env: Record<string, string | undefined> = process.env, idle = Infinity): Promise<Session> {
+  /**
+   * Opens an independent session for callers such as the type checker.
+   * @param {string} from File or directory in the project.
+   * @param {Record<string, string | undefined>} env Environment used to resolve connection settings.
+   * @param {number} idle Milliseconds before releasing an idle connection. The default keeps it open.
+   * @returns {Promise<Session>} An independent session.
+   */
+  public static async open(from: string, env: Record<string, string | undefined> = hostEnvironment(), idle = Infinity): Promise<Session> {
     const { project, engine } = await openProject(from, env);
     return new Session(engine, project, idle, from, env);
   }
 
-  /** Every build-step session this process opened, for a caller that ends them (`reylo generate`). */
+  /**
+   * Lists build sessions so callers such as `reylo generate` can close them.
+   * @returns {Session[]} The build sessions this process opened.
+   */
   public static opened(): Session[] {
     return [...sessions.values()];
   }
@@ -149,6 +174,8 @@ export class Session {
    * holds object ids, so a dev and a test database built by the same migrations still differ. A
    * session that cannot reach its database, or has no URL, reads another server's entry for the
    * statement where it has none of its own (`#offlineEntry`).
+   * @param {string} sql The SQL statement used to compute the cache key.
+   * @returns {string} The absolute path of this server's cache entry.
    */
   public entryFile(sql: string): string {
     return this.#cacheFile(this.#statementKey(sql));
@@ -162,7 +189,11 @@ export class Session {
     return digestPrefix(JSON.stringify([CACHE_ENTRY_VERSION, this.#engineFingerprint, this.project.dialect, sql]), STATEMENT_DIGEST_LENGTH);
   }
 
-  /** The statement's entry from this session's server, else the newest from any other: for a session that cannot reach its database, or has no URL. */
+  /**
+   * Finds an entry to use if the server is unreachable or has no URL.
+   * @param {string} sql The SQL statement used to compute the cache key.
+   * @returns {ReturnType<typeof readOfflineEntry>} This server's entry if present, otherwise the newest entry from another server.
+   */
   async #offlineEntry(sql: string): ReturnType<typeof readOfflineEntry> {
     const statementKey = this.#statementKey(sql);
     return readOfflineEntry(this.root, statementKey, this.#cacheFile(statementKey));
@@ -172,20 +203,29 @@ export class Session {
    * The statement's analysis: from `.reylo/` when the entry matches the schema, else from the
    * database. `store: false` neither reads nor writes `.reylo/`, for a statement that is no file of
    * the project (`reylo play`'s, analyzed at each keystroke).
+   * @param {string} sql The SQL statement to analyze.
+   * @param {{ force?: boolean; store?: boolean }} options Controls for refreshing existing results and storing live analysis.
+   * @returns {Promise<Outcome>} The analysis or a diagnostic with an error code.
    */
   public async analyze(sql: string, options: { force?: boolean; store?: boolean } = {}): Promise<Outcome> {
     clearTimeout(this.#timer);
-    this.#busy++;
+    this.#busy += ONE_ANALYSIS;
     try {
       await this.#reread();
       const outcome = await this.#analyze(sql, options);
       return outcome.ok && this.project.dialect === "sqlite" ? await this.#onDrivers(sql, outcome) : outcome;
     } finally {
-      if (--this.#busy === 0 && this.#io && Number.isFinite(this.#idle)) {this.#timer = setTimeout(() => this.#release(), this.#idle).unref();}
+      this.#busy -= ONE_ANALYSIS;
+      if (this.#busy === NO_ACTIVE_ANALYSIS && this.#io && Number.isFinite(this.#idle)) {this.#timer = setTimeout(() => this.#release(), this.#idle).unref();}
     }
   }
 
-  /** Rows of a catalog query on the session's connection, as arrays of values: what `reylo play` completes. */
+  /**
+   * Runs a catalog query on the session's connection.
+   * @param {string} sql The catalog query.
+   * @param {unknown[]} params Bound positional values.
+   * @returns {Promise<unknown[][]>} The result rows, with each row represented as an array of values.
+   */
   public async query(sql: string, params: unknown[] = []): Promise<unknown[][]> {
     return (await this.#connection()).query(sql, params);
   }
@@ -196,6 +236,9 @@ export class Session {
    * `.reylo/`, since the drivers are the project's and not the database's; a session that cannot
    * open the database checks nothing. One whose connection was released while its schema is still
    * trusted opens it again, so a `.reylo/` hit is checked however long the session sat idle.
+   * @param {string} sql The original statement, used to locate a diagnostic.
+   * @param {Extract<Outcome, { ok: true }>} outcome The successful analysis to check on the installed drivers.
+   * @returns {Promise<Outcome>} The outcome with a diagnostic if a driver refuses the statement.
    */
   async #onDrivers(sql: string, outcome: Extract<Outcome, { ok: true }>): Promise<Outcome> {
     const { analysis } = outcome;
@@ -241,17 +284,17 @@ export class Session {
       // A dead connection is reopened by the next call; a server error is reported.
       if (error instanceof Unreachable) {
         this.#drop(io);
-        this.#schema = { value: null, at: Date.now(), error: reason(error) };
+        this.#schema = { value: null, at: cacheTime(), error: reason(error) };
         return { ok: false, message: this.cannotConnect(reason(error)), code: 5 };
       }
       if (error instanceof NotMysql) {
         this.#drop(io);
-        this.#schema = { value: null, at: Date.now(), error: this.notMysql(error), fatal: true };
+        this.#schema = { value: null, at: cacheTime(), error: this.notMysql(error), fatal: true };
         return { ok: false, message: this.#schema.error!, code: 5 };
       }
       return { ok: false, message: (error as Error).message, code: 5 };
     }
-    if (options.store !== false) {await writeCacheEntry(this.root, file, { version: CACHE_ENTRY_VERSION, dialect: this.project.dialect, schema: schema.value, analysis, at: Date.now() });}
+    if (options.store !== false) {await writeCacheEntry(this.root, file, { version: CACHE_ENTRY_VERSION, dialect: this.project.dialect, schema: schema.value, analysis, at: cacheTime() });}
     return { ok: true, analysis, source: "database", entry: file };
   }
 
@@ -260,13 +303,15 @@ export class Session {
    * `fatal` when no connection can be made at all (no driver installed) or the server is one the type
    * check refuses (MariaDB, `NotMysql`). A server that refuses the
    * fingerprint query gets a value no entry matches, so every statement is analyzed live.
+   * @returns {Promise<{ value: string | null; error?: string; fatal?: boolean }>} The catalog fingerprint, or the reason it could not be obtained.
    */
   public async schema(): Promise<{ value: string | null; error?: string; fatal?: boolean }> {
-    const now = Date.now();
+    const now = cacheTime();
     const source = this.project.url && hclPath(this.project.url, this.root);
     if (source) {
       // Unlike a remote database, a local source is checked before every cache hit, without a TTL.
       try {
+        // oxlint-disable-next-line node/no-sync -- Capture the local catalog bytes before yielding so every cache check starts with this revision.
         const hash = sha256(readFileSync(source, "utf8"));
         if (hash !== this.#hclHash || matchesNull(this.#schema?.value)) {
           await this.#release();
@@ -310,14 +355,21 @@ export class Session {
     return this.#schema;
   }
 
-  /** Reads the schema's fingerprint again now, however recent the last read; whether it changed. */
+  /**
+   * Refreshes the schema fingerprint even if the current value is still fresh.
+   * @returns {Promise<boolean>} Whether the fingerprint changed.
+   */
   public async recheck(): Promise<boolean> {
     const before = this.#schema?.value;
     if (this.#schema) {this.#schema = { ...this.#schema, at: -Infinity };}
     return (await this.schema()).value !== before;
   }
 
-  /** Where the database was looked for, and where that came from; never the credentials. */
+  /**
+   * Describes the address and the source of its configuration.
+   * @param {string} why An optional connection error to append to the diagnostic.
+   * @returns {string} A connection diagnostic with the address redacted of credentials.
+   */
   public cannotConnect(why?: string): string {
     const { dialect, url, root, urlSource } = this.project;
     if (dialect === "sqlite") {return `Cannot open the database ${sqlitePath(url ?? "", root)} (${urlSource})${why ? `: ${why}` : ""}`;}
@@ -325,12 +377,19 @@ export class Session {
     return `Cannot connect to the database at ${this.where()} (${urlSource})${why ? `: ${why}` : ""}`;
   }
 
-  /** Why a server the type check cannot read is refused, and what to point it at instead. */
+  /**
+   * Explains why an incompatible MySQL server was rejected.
+   * @param {NotMysql} e The error that identifies the server implementation.
+   * @returns {string} A diagnostic describing the required replacement server.
+   */
   public notMysql(e: NotMysql): string {
     return `Cannot type-check against the database at ${this.where()} (${this.project.urlSource}): it is ${e.server}, and Reylo type-checks MySQL statements against MySQL. Point the type check's URL at a MySQL server, 8.4 or later, with the same schema.`;
   }
 
-  /** The server, without credentials, that names this session's entries: none with no URL, which writes none. */
+  /**
+   * Computes the server identifier used in cache filenames.
+   * @returns {string} The database identifier, or an empty string when the session has no URL.
+   */
   #server(): string {
     const { dialect, url, root } = this.project;
     if (!url) {return "";}
@@ -346,7 +405,10 @@ export class Session {
     }
   }
 
-  /** The database as a person names it: host, port and database, or the SQLite file. */
+  /**
+   * Formats the database location for a diagnostic.
+   * @returns {string} The host, port and database, or the path to a local database.
+   */
   public where(): string {
     const { dialect, url, root } = this.project;
     if (dialect === "sqlite") {return sqlitePath(url ?? "", root);}
@@ -432,6 +494,7 @@ export class Session {
    * Forgets a connection a call found dead, and closes it, since one opened in its place with a
    * command's fresh output may be live. Only the connection that call ran on: a call that fails
    * late never ends one opened since.
+   * @param {Promise<Io>} io The connection promise used by the failed operation.
    */
   #drop(io: Promise<Io>): void {
     if (this.#io !== io) {return;}
@@ -443,6 +506,8 @@ export class Session {
    * A URL to try instead, when the server refused the login and `direct_url`'s command now prints
    * something else, as when a short-lived password has expired; else undefined, so that nothing
    * is tried twice on the same password.
+   * @param {unknown} e The error from connecting with the current URL.
+   * @returns {string | undefined} The refreshed URL if the configuration produced a different one.
    */
   #freshUrl(e: unknown): string | undefined {
     if (!refusedLogin(e)) {return undefined;}
