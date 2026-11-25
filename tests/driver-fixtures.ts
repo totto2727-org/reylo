@@ -2,8 +2,11 @@
 import assert from "node:assert/strict";
 import { execute, executeSync } from "#reylo-source/execute.ts";
 import type { ClientFor, Dialect, ParamsInput, QueryModule, SyncClientFor } from "#reylo-source/execute.ts";
+import type { EngineType } from "#reylo-source/engine-type.ts";
 import { isRecord } from "#reylo-source/native-predicates.ts";
 import { promiseDriverStub } from "./helpers.ts";
+
+export const scalarFixture = (name: string): EngineType => ({ kind: "scalar", name });
 
 export const driverMarker = (): void => {
   // The presence of this method identifies the fixture's driver. The method does no work.
@@ -56,3 +59,7 @@ export const driverRows = (value: unknown): unknown[] => {
   assert.ok(Array.isArray(value), "Expected the synchronous query path to return its rows");
   return value;
 };
+
+interface PlanetScaleField { charset?: number; type: string }
+export type PlanetScaleCast = (column: PlanetScaleField, text: string | null) => unknown;
+export interface PlanetScaleOptions { cast: PlanetScaleCast }
