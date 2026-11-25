@@ -772,7 +772,7 @@ export function arrayLiteral(array: Readonly<unknown[]>, delim = ","): string {
     if (matchesNullish(v)) {out += "NULL";}
     else if (Array.isArray(v)) {out += arrayLiteral(v, delim);}
     else if (ArrayBuffer.isView(v)) {out += `\\${  asByteaHex(new Uint8Array(v.buffer, v.byteOffset, v.byteLength))}`;}
-    else {out += `"${(v instanceof Date ? dateText(v) : (hasObjectType(v) ? JSON.stringify(v) : String(v))).replaceAll(/[\\"]/g, String.raw`\$&`)}"`;}
+    else {out += `"${(v instanceof Date ? dateText(v) : (hasObjectType(v) ? JSON.stringify(v) : String(v))).replaceAll(/[\\"]/gu, String.raw`\$&`)}"`;}
   }
   return `${out  }}`;
 }

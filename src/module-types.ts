@@ -61,7 +61,7 @@ export const reyloImport = function reyloImport(...types: string[]): string {
  * nothing where there is none.
  */
 export const fieldComment = function fieldComment(comment: string | undefined, indent = ""): string {
-  const text = (comment ?? "").replaceAll(/\r\n?/g, "\n").replaceAll(/[ \t]+$/gmu, "").trim();
+  const text = (comment ?? "").replaceAll(/\r\n?/gu, "\n").replaceAll(/[ \t]+$/gmu, "").trim();
   if (!text) {return "";}
   if (!text.includes("\n")) {return `/** ${text.replaceAll("*/", String.raw`*\/`)} */`;}
   return docComment(text, undefined, "", indent).trim();

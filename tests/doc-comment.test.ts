@@ -45,7 +45,7 @@ test("the doc comment holds the prose, the statement in a sql block and the note
   assert.equal(docComment("", undefined), "");
   // A star before a slash, in the prose or the statement, would end the comment.
   const ends = docComment("a */ b", "select 1 /* c */");
-  assert.equal(ends.match(/\*\//g)!.length, 1);
+  assert.equal(ends.match(/\*\//gu)!.length, 1);
   assert.match(ends, /a \*\\\/ b/u);
   assert.match(ends, /select 1 \/\* c \*\\\//u);
   // The fence is longer than any run of backticks in the statement, and a fence the prose opens is closed.

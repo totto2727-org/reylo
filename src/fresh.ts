@@ -52,7 +52,7 @@ export const passed = function passed(query: object, now = clock.now()): void {
 
 const yes = (v: string) => v === "true" || v === "1";
 const describe = (r: Readonly<string[]>): string => `${r[2]}${yes(r[3]!) ? " not null" : ""}${yes(r[4]!) ? " with a default" : ""}`;
-const table = (name: string): string => name.replaceAll(/^"|"$/g, "").replaceAll('"."', ".");
+const table = (name: string): string => name.replaceAll(/^"|"$/gu, "").replaceAll('"."', ".");
 
 /** The catalog query's columns, as upstream engine/core/src/fresh.rs names them; the sixth on Postgres and SQLite. */
 const COLUMNS = ["fresh_table", "fresh_column", "fresh_type", "fresh_not_null", "fresh_default", "fresh_expr"] as const;

@@ -310,7 +310,7 @@ export const resolveProject = function resolveProject(engine: Engine | MissingEn
       // The `.env` files'.
       const texts = parts.map((part) =>
         "text" in part
-          ? part.text.replace(/\$\{([A-Za-z_][A-Za-z0-9_]*)\}/g, (_, name: string) => {
+          ? part.text.replace(/\$\{([A-Za-z_][A-Za-z0-9_]*)\}/gu, (_, name: string) => {
               const hit = lookup(name);
               if (!hit) {missing.push(name);}
               else {sources.push(hit.source);}

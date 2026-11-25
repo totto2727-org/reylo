@@ -329,7 +329,7 @@ const utf8 = new TextEncoder();
  * statement's first word. In UTF-8 bytes, as the analysis's diagnostics are.
  */
 export function placeRefusal(sql: string, message: string): { start: number; length: number } {
-  const escape = (s: string): string => s.replaceAll(/[.*+?^${}()|[\]\\]/g, String.raw`\$&`);
+  const escape = (s: string): string => s.replaceAll(/[.*+?^${}()|[\]\\]/gu, String.raw`\$&`);
   const fn = /(?:no such function|not authorized to use function): ([\w$]+)/i.exec(message)?.[1] ?? /arguments to function ([\w$]+)\(\)/i.exec(message)?.[1];
   const near = /near "([^"]+)"/.exec(message)?.[1];
   const found = fn ? new RegExp(`\\b${escape(fn)}\\s*\\(`, "i").exec(sql) : (near ? new RegExp(escape(near), "i").exec(sql) : null);

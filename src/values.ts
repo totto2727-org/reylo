@@ -519,7 +519,7 @@ export const hstoreText = function hstoreText(v: object, fail: (message: string)
     const name = Array.isArray(v) || v instanceof Date || ArrayBuffer.isView(v) ? undefined : (v.constructor as { name?: unknown } | undefined)?.name;
     return fail(`is an hstore, an object of its keys whose values are strings or null; got ${matchesString(name) && name ? `a ${name}` : describe(v)}.`);
   }
-  const quote = (s: string): string => `"${s.replaceAll(/[\\"]/g, String.raw`\$&`)}"`;
+  const quote = (s: string): string => `"${s.replaceAll(/[\\"]/gu, String.raw`\$&`)}"`;
   const pairs: string[] = [];
   Iterator.from(Object.entries(v)).forEach(([key, value]) => {
     if (matchesUndefined(value)) {return;}
