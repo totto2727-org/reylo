@@ -4,23 +4,21 @@
 // Analyzed against; while the database answers, an entry for another schema is analyzed again,
 // And while it does not, or no URL names it, the entries are used as they are, so a build that
 // Cannot reach the database runs on what `reylo generate` or an earlier type check wrote.
-// oxlint-disable-next-line rules/no-node-imports -- This server-side entry point uses this built-in to inspect or write files through the host filesystem.
-import { readFileSync } from "node:fs";
 import { anyEngine, engine as installedEngine, reason, MissingEngine, Unreachable } from './engine.ts';
 import type { Engine, Lexed } from './engine.ts';
-import { hclPath, packageDir, resolveProject } from './project.ts';
+import { packageDir, resolveProject } from './project.ts';
 import type { ResolvedProject } from './project.ts';
 import { NotMysql, refusedLogin } from "./connection.ts";
-import { isRecord, matchesNull, matchesNullish, matchesString, matchesUndefined, nonemptyText } from "./native-predicates.ts";
+import { matchesNull, matchesNullish, matchesUndefined, nonemptyText } from "./native-predicates.ts";
 import { CACHE_ENTRY_VERSION, cacheEntryFile, readCacheEntry, readOfflineEntry, writeCacheEntry } from "./analysis-cache.ts";
 import type { Entry } from "./analysis-cache.ts";
-import { FINGERPRINT } from "./schema-fingerprint.ts";
 import { closeAnalysisConnection, getOpenConnection, openAnalysisConnection, settleInBackground, withLoginRetry } from "./analysis-connection.ts";
 import type { AnalysisConnection } from "./analysis-connection.ts";
 
-import { cacheServer, connectionDiagnostic, databaseLocation, digestPrefix, sha256 } from "./analysis-identity.ts";
-import { failedAnalysis, liveSchema, offlineSchema, successfulAnalysis } from "./analysis-results.ts";
-import type { Outcome, SchemaSnapshot } from "./analysis-results.ts";
+import { cacheServer, connectionDiagnostic, databaseLocation, digestPrefix } from "./analysis-identity.ts";
+import { cacheTime, errorMessage, failedAnalysis, offlineSchema, successfulAnalysis } from "./analysis-results.ts";
+import type { Outcome } from "./analysis-results.ts";
+import { SchemaTracker } from "./analysis-schema.ts";
 
 export type { Entry } from "./analysis-cache.ts";
 export type { Outcome } from "./analysis-results.ts";
@@ -42,17 +40,11 @@ interface AnalysisTarget {
 }
 
 const SERVER_DIGEST_LENGTH = 16;
-const SCHEMA_DIGEST_LENGTH = 16;
 const STATEMENT_DIGEST_LENGTH = 32;
 const DATABASE_FAILURE = 5;
 const MISSING_DATABASE_URL = 4;
 const INVALID_PROJECT = 11;
 
-// How long a schema fingerprint is trusted, as long as a statement answer: a migration shows up
-// In a running dev server or editor within seconds. Once the database is found unreachable, the
-// Session stays offline for a minute instead of paying the connect timeout per file.
-const SCHEMA_TTL = 5000;
-const OFFLINE_TTL = 60_000;
 // A build step's session closes its connection a moment after its last file, so that a build
 // Process ends when its work does: the plugins whose bundler says when a build ends close it then
 // (`releaseConnections`), and a loader (webpack, Rspack, Turbopack) has no such signal. The type
@@ -61,16 +53,8 @@ const BUILD_IDLE = 250;
 const NO_ACTIVE_ANALYSIS = 0;
 const ONE_ANALYSIS = 1;
 
-// oxlint-disable-next-line rules/no-js-date -- Query entries persist wall-clock milliseconds so copied caches can compare timestamps across processes.
-const cacheTime = (): number => Date.now();
-
 // oxlint-disable-next-line node/no-process-env -- The public Session factories default to the current host environment when the caller supplies none.
 const hostEnvironment = (): NodeJS.ProcessEnv => process.env;
-
-const errorMessage = (cause: unknown): string => {
-  const message = isRecord(cause) ? cause.message : undefined;
-  return matchesString(message) ? message : reason(cause);
-};
 
 const sessions = new Map<string, Session>();
 
@@ -104,8 +88,15 @@ export class Session {
   #url: string | undefined;
   #busy = NO_ACTIVE_ANALYSIS;
   #timer: ReturnType<typeof setTimeout> | undefined;
-  #schema: SchemaSnapshot | undefined;
-  #hclHash: string | undefined;
+  #catalog = new SchemaTracker({
+    // oxlint-disable-next-line typescript/promise-function-async -- Catalog failure must retain the original connection ticket for an identity check.
+    connect: () => this.#connection(),
+    drop: (pending) => {this.#drop(pending);},
+    project: () => this.project,
+    refused: (error) => this.notMysql(error),
+    release: async () => this.#release(),
+    root: () => this.root,
+  });
 
   private constructor(engine: Engine | MissingEngine, project: ResolvedProject, origin: SessionOrigin) {
     this.root = project.root;
@@ -131,7 +122,7 @@ export class Session {
     const { project, engine } = await openProject(this.#origin.dir, this.#origin.env);
     if (!matchesUndefined(nonemptyText(project.error))) {return;}
     this.#adopt(engine, project);
-    this.#schema = undefined;
+    this.#catalog.snapshot = undefined;
   }
 
   /**
@@ -257,7 +248,7 @@ export class Session {
    */
   async #onDrivers(sql: string, outcome: Extract<Outcome, { ok: true }>): Promise<Outcome> {
     const { analysis } = outcome;
-    if (analysis.diagnostics.length || matchesNullish(this.#schema?.value)) {return outcome;}
+    if (analysis.diagnostics.length || matchesNullish(this.#catalog.snapshot?.value)) {return outcome;}
     const io = await getOpenConnection(this.#connection());
     for (const driver of io?.drivers ?? []) {
       const refusal = await driver.refuses(analysis.rewritten.sql, analysis.rewritten.order.length);
@@ -325,13 +316,13 @@ export class Session {
     // A dead connection is reopened on the next call. A server error is reported to the caller.
     if (error instanceof Unreachable) {
       this.#drop(pending);
-      this.#schema = offlineSchema(cacheTime(), reason(error));
+      this.#catalog.snapshot = offlineSchema(cacheTime(), reason(error));
       return failedAnalysis(this.cannotConnect(reason(error)), DATABASE_FAILURE);
     }
     if (error instanceof NotMysql) {
       this.#drop(pending);
       const message = this.notMysql(error);
-      this.#schema = offlineSchema(cacheTime(), message, true);
+      this.#catalog.snapshot = offlineSchema(cacheTime(), message, true);
       return failedAnalysis(message, DATABASE_FAILURE);
     }
     return failedAnalysis(errorMessage(error), DATABASE_FAILURE);
@@ -345,62 +336,7 @@ export class Session {
    * @returns {Promise<{ value: string | null; error?: string; fatal?: boolean }>} The catalog fingerprint, or the reason it could not be obtained.
    */
   public async schema(): Promise<{ value: string | null; error?: string; fatal?: boolean }> {
-    const now = cacheTime();
-    const source = hclPath(this.project.url ?? "", this.root);
-    if (!matchesUndefined(source)) {
-      // Unlike a remote database, a local source is checked before every cache hit, without a TTL.
-      try {
-        // oxlint-disable-next-line node/no-sync -- Capture the local catalog bytes before yielding so every cache check starts with this revision.
-        const hash = sha256(readFileSync(source, "utf8"));
-        if (hash !== this.#hclHash || matchesNull(this.#schema?.value)) {
-          await this.#release();
-          this.#schema = undefined;
-          this.#hclHash = hash;
-        }
-      } catch (error) {
-        await this.#release();
-        this.#schema = offlineSchema(now, `Cannot read HCL schema ${source}: ${errorMessage(error)}`, true);
-        return this.#schema;
-      }
-    }
-    if (this.#schema && now - this.#schema.at < (matchesNull(this.#schema.value) ? OFFLINE_TTL : SCHEMA_TTL)) {return this.#schema;}
-    const pending = this.#connection();
-    let io: AnalysisConnection;
-    try {
-      io = await pending;
-    } catch (error) {
-      this.#drop(pending);
-      this.#schema = this.#failedSchemaConnection(now, error);
-      return this.#schema;
-    }
-    try {
-      // HCL is the complete schema source. Its content hash replaces a live catalog fingerprint.
-      const rows = matchesUndefined(source) ? await io.query(FINGERPRINT[this.project.dialect], []) : [];
-      const value = digestPrefix(JSON.stringify(matchesUndefined(source) ? rows : [this.#hclHash, rows]), SCHEMA_DIGEST_LENGTH);
-      // The engine's answers describe the old schema too.
-      const previousFingerprint = nonemptyText(this.#schema?.value);
-      if (!matchesUndefined(previousFingerprint) && previousFingerprint !== value) {await io.forget().catch(() => {});}
-      this.#schema = liveSchema(value, now);
-    } catch (error) {
-      if (!matchesUndefined(source)) {
-        this.#drop(pending);
-        this.#schema = offlineSchema(now, errorMessage(error), true);
-      } else if (error instanceof Unreachable) {
-        this.#drop(pending);
-        this.#schema = offlineSchema(now, reason(error));
-      } else {
-        this.#schema = liveSchema(`unverified ${process.pid} ${now}`, now);
-      }
-    }
-    return this.#schema;
-  }
-
-  #failedSchemaConnection(at: number, error: unknown): SchemaSnapshot {
-    if (error instanceof Unreachable) {
-      return offlineSchema(at, reason(error));
-    }
-    const message = error instanceof NotMysql ? this.notMysql(error) : errorMessage(error);
-    return offlineSchema(at, message, true);
+    return this.#catalog.read();
   }
 
   /**
@@ -408,8 +344,8 @@ export class Session {
    * @returns {Promise<boolean>} Whether the fingerprint changed.
    */
   public async recheck(): Promise<boolean> {
-    const before = this.#schema?.value;
-    if (this.#schema) {this.#schema = { ...this.#schema, at: -Infinity };}
+    const before = this.#catalog.snapshot?.value;
+    if (this.#catalog.snapshot) {this.#catalog.snapshot = { ...this.#catalog.snapshot, at: -Infinity };}
     const after = await this.schema();
     return after.value !== before;
   }

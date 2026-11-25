@@ -1,3 +1,5 @@
+import { reason } from "./engine.ts";
+import { isRecord, matchesString } from "./native-predicates.ts";
 import type { Analysis } from "./engine.ts";
 
 export type Outcome =
@@ -29,4 +31,12 @@ export const liveSchema = function (value: string, at: number): SchemaSnapshot {
 export const offlineSchema = function (at: number, error: string, fatal = false): SchemaSnapshot {
   // oxlint-disable-next-line eslint/sort-keys, unicorn/no-null -- The schema result uses null for no catalog and keeps the existing diagnostic field order.
   return { value: null, at, error, ...(fatal ? { fatal: true } : {}) };
+};
+
+// oxlint-disable-next-line rules/no-js-date -- Query entries persist wall-clock milliseconds so copied caches can compare timestamps across processes.
+export const cacheTime = (): number => Date.now();
+
+export const errorMessage = (cause: unknown): string => {
+  const message = isRecord(cause) ? cause.message : undefined;
+  return matchesString(message) ? message : reason(cause);
 };
