@@ -10,6 +10,9 @@ export const driverFields = (value: unknown): DriverFields | undefined => {
 
 export const driverText = (value: unknown): string | undefined => matchesString(value) ? nonemptyText(value) : undefined;
 
+const SQLSTATE = /^[0-9A-Z]{5}$/u;
+export const sqlState = (value: unknown): string | undefined => matchesString(value) && SQLSTATE.test(value) ? value : undefined;
+
 export const messageGroup = (pattern: RegExp, message: string, key: string): string | undefined => pattern.exec(message)?.groups?.[key];
 
 // oxlint-disable-next-line rules/require-tagged-error -- The exported synchronous query methods use a native Error with its original driver cause.
