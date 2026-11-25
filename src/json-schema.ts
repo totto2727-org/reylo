@@ -1,5 +1,9 @@
 import { basicFailure, equal, pointer, regex } from "./json-schema-constraints.ts";
-import { hasObjectType, isRecord, matchesNull, matchesNumber, matchesUndefined } from "./native-predicates.ts";
+import { fillDefaults } from "./json-schema-defaults.ts";
+
+import { hasObjectType, isRecord, matchesNumber, matchesUndefined } from "./native-predicates.ts";
+
+export { cloneJson } from "./json-schema-defaults.ts";
 
 // A JSON Schema 2020-12 validator for the run time, which has no dependencies: it checks a value
 // Against the schema a statement writes in a `json('…')` member of a column list or, where it is
@@ -23,83 +27,11 @@ const fail = (out: Failure[], path: string, message: string): false => {
   return false;
 };
 
-/**
- * A fresh copy of a JSON value, such as a schema's `default`, so that filling one in never shares
- * it between calls. A JSON round trip rather than `structuredClone`, which the run time cannot name
- * where a project's tsconfig loads no Node or DOM types (the labs set `"types": []`), and which
- * gives the same copy for a JSON value.
- */
-export const cloneJson = function cloneJson<T>(value: T): T {
-  return matchesUndefined(value) ? value : JSON.parse(JSON.stringify(value));
-};
-
-/**
- * The value with the schema's defaults filled in, as ajv's `useDefaults` fills them (a
- * JSON parameter's default is its schema's `default`): a key `properties`
- * names and the value lacks takes its `default`, and so does an item `prefixItems` names past the
- * array's end. A key that is null keeps its null. Defaults are filled wherever the schema applies
- * to the value but inside `anyOf`, `oneOf`, `not`, `if`, `contains` and `propertyNames`, whose
- * matches are unknown until the checks run. The value given is not changed: a copy comes back.
- */
-export const withDefaults = function withDefaults(schema: Schema, value: unknown): unknown {
-  if (!isRecord(schema)) {return value;}
-  const s = schema;
-  let out = value;
-  if (isRecord(value)) {
-    const o: Record<string, unknown> = { ...value };
-    const properties = (s.properties ?? {}) as Record<string, Schema>;
-    Object.entries(properties).forEach(([key, sub]) => {
-      if (! Object.hasOwn(o, key) && !matchesNull(sub) && hasObjectType(sub) && "default" in sub) {o[key] = cloneJson((sub).default);}
-    });
-    const patterns = Object.entries((s.patternProperties ?? {}) as Record<string, Schema>).map(([key, sub]) => [regex(key), sub] as const);
-    Iterator.from(Object.keys(o)).forEach((key) => {
-      let named = false;
-      if (Object.hasOwn(properties, key)) {
-        named = true;
-        o[key] = withDefaults(properties[key]!, o[key]);
-      }
-      for (const [re, sub] of patterns) {
-        if (re.test(key)) {
-          named = true;
-          o[key] = withDefaults(sub, o[key]);
-        }
-      }
-      if (!named && !matchesUndefined(s.additionalProperties)) {o[key] = withDefaults(s.additionalProperties as Schema, o[key]);}
-    });
-    if (s.dependentSchemas && hasObjectType(s.dependentSchemas)) {
-      Object.entries(s.dependentSchemas as Record<string, Schema>).forEach(([key, sub]) => {if (Object.hasOwn(o, key)) {Object.assign(o, withDefaults(sub, o) as object);}});
-    }
-    out = o;
-  } else if (Array.isArray(value)) {
-    const a = [...value];
-    const prefix = Array.isArray(s.prefixItems) ? (s.prefixItems as Schema[]) : [];
-    prefix.forEach((sub, index) => {
-      if (index >= a.length && !matchesNull(sub) && hasObjectType(sub) && "default" in sub && a.length === index) {a.push(cloneJson((sub).default));}
-    });
-    for (let i = 0; i < a.length; i++) {a[i] = withDefaults(i < prefix.length ? prefix[i]! : (s.items as Schema) ?? true, a[i]);}
-    out = a;
-  }
-  if (Array.isArray(s.allOf)) {Iterator.from(s.allOf as Schema[]).forEach((sub) => {out = withDefaults(sub, out);});}
-  // Only the branch the value takes: `if` decides it as the checks will.
-  if (!matchesUndefined(s.if)) {
-    const branch = matchesUndefined(validate(s.if as Schema, out)) ? s.then : s.else;
-    if (!matchesUndefined(branch)) {out = withDefaults(branch as Schema, out);}
-  }
-  return out;
-};
-
-/** The first failure of `value` against `schema`, or `undefined` when it passes. */
-export function validate(schema: Schema, value: unknown): Failure | undefined {
-  const failures: Failure[] = [];
-  check(schema, value, "", failures);
-  return failures[0];
-}
-
 /** What a passing check evaluated of an object's keys, for `unevaluatedProperties`. */
 type Evaluated = Set<string>;
 
 /** Checks `value`; on failure records why and returns `false`, on success the keys it evaluated. */
-function check(schema: Schema, value: unknown, path: string, out: Failure[]): Evaluated | false {
+function check(schema: unknown, value: unknown, path: string, out: Failure[]): Evaluated | false {
   const evaluated: Evaluated = new Set();
   if (schema === true) {return evaluated;}
   if (schema === false) {return fail(out, path, "no value is allowed here");}
@@ -224,3 +156,32 @@ function check(schema: Schema, value: unknown, path: string, out: Failure[]): Ev
   }
   return evaluated;
 }
+
+
+const firstFailure = (schema: unknown, value: unknown): Failure | undefined => {
+  const failures: Failure[] = [];
+  check(schema, value, "", failures);
+  return failures[0];
+};
+
+/**
+ * Checks the value and reports its first failure.
+ * @param {Schema} schema The emitted JSON Schema.
+ * @param {unknown} value The value supplied by the caller.
+ * @returns {Failure | undefined} The first failure or undefined when the value passes.
+ */
+export const validate = function validate(schema: Schema, value: unknown): Failure | undefined {
+  return firstFailure(schema, value);
+};
+
+/**
+ * Returns a copy with the selected schema defaults applied. Explicit nulls keep their value.
+ * Applies defaults from matching object members, positional array members, allOf and the chosen
+ * conditional branch. Other alternatives validate the value without supplying defaults.
+ * @param {Schema} schema The emitted JSON Schema.
+ * @param {unknown} value The supplied JSON value.
+ * @returns {unknown} The value with applicable defaults filled in.
+ */
+export const withDefaults = function withDefaults(schema: Schema, value: unknown): unknown {
+  return fillDefaults(schema, value, (condition, candidate) => matchesUndefined(firstFailure(condition, candidate)));
+};
