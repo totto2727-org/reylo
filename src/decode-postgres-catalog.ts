@@ -90,7 +90,7 @@ export const learnedOf = (key: object): Learned => {
 /** Rows as arrays of text, from a query that reads the catalog. */
 export type Load = (sql: string) => Promise<(string | null)[][]>;
 
-interface Catalog {
+export interface Catalog {
   key: object;
   load: Load;
 }
