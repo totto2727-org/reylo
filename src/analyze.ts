@@ -16,7 +16,7 @@ import { NotMysql, refusedLogin } from "./connection.ts";
 import { isEmptyString, isRecord, matchesNull, matchesNullish, matchesString, matchesUndefined } from "./native-predicates.ts";
 import { CACHE_ENTRY_VERSION, cacheEntryFile, readCacheEntry, readOfflineEntry, writeCacheEntry } from "./analysis-cache.ts";
 import { FINGERPRINT } from "./schema-fingerprint.ts";
-import { openAnalysisConnection } from "./analysis-connection.ts";
+import { closeAnalysisConnection, getOpenConnection, openAnalysisConnection, settleInBackground, withLoginRetry } from "./analysis-connection.ts";
 import type { AnalysisConnection } from "./analysis-connection.ts";
 
 export type { Entry } from "./analysis-cache.ts";
@@ -227,7 +227,11 @@ export class Session {
       return outcome.ok && this.project.dialect === "sqlite" ? await this.#onDrivers(sql, outcome) : outcome;
     } finally {
       this.#busy -= ONE_ANALYSIS;
-      if (this.#busy === NO_ACTIVE_ANALYSIS && this.#io && Number.isFinite(this.#idle)) {this.#timer = setTimeout(() => this.#release(), this.#idle).unref();}
+      if (this.#busy === NO_ACTIVE_ANALYSIS && this.#io && Number.isFinite(this.#idle)) {
+        this.#timer = setTimeout(() => {
+          settleInBackground(this.#release());
+        }, this.#idle).unref();
+      }
     }
   }
 
@@ -238,7 +242,8 @@ export class Session {
    * @returns {Promise<unknown[][]>} The result rows, with each row represented as an array of values.
    */
   public async query(sql: string, params: unknown[] = []): Promise<unknown[][]> {
-    return (await this.#connection()).query(sql, params);
+    const connection = await this.#connection();
+    return connection.query(sql, params);
   }
 
   /**
@@ -254,7 +259,7 @@ export class Session {
   async #onDrivers(sql: string, outcome: Extract<Outcome, { ok: true }>): Promise<Outcome> {
     const { analysis } = outcome;
     if (analysis.diagnostics.length || matchesNullish(this.#schema?.value)) {return outcome;}
-    const io = await this.#connection().catch(() => undefined);
+    const io = await getOpenConnection(this.#connection());
     for (const driver of io?.drivers ?? []) {
       const refusal = await driver.refuses(analysis.rewritten.sql, analysis.rewritten.order.length);
       if (matchesUndefined(refusal)) {continue;}
@@ -379,7 +384,8 @@ export class Session {
   public async recheck(): Promise<boolean> {
     const before = this.#schema?.value;
     if (this.#schema) {this.#schema = { ...this.#schema, at: -Infinity };}
-    return (await this.schema()).value !== before;
+    const after = await this.schema();
+    return after.value !== before;
   }
 
   /**
@@ -449,60 +455,55 @@ export class Session {
 
   /** Closes the connection; the next analysis opens another. */
   async #release(): Promise<void> {
-    const io = this.#io;
+    const pending = this.#io;
     this.#io = undefined;
-    if (io) {await io.then((i) => i.close()).catch(() => {});}
+    if (!matchesUndefined(pending)) {
+      await closeAnalysisConnection(pending);
+    }
   }
 
+  // oxlint-disable-next-line typescript/promise-function-async -- Return the same Promise so failure and release can distinguish it from a newer connection.
   #connection(): Promise<AnalysisConnection> {
-    this.#io ??= (async (): Promise<AnalysisConnection> => {
-      let first: AnalysisConnection;
-      try {
-        first = await this.#open(this.#url!);
-      } catch (error) {
-        const fresh = this.#freshUrl(error);
-        if (matchesUndefined(fresh)) {throw error;}
-        first = await this.#open(fresh);
+    const pending = this.#io;
+    if (!matchesUndefined(pending)) {
+      return pending;
+    }
+    const opened = this.#connect();
+    this.#io = opened;
+    settleInBackground(this.#discardFailedOpen(opened));
+    return opened;
+  }
+
+  async #discardFailedOpen(pending: Promise<AnalysisConnection>): Promise<void> {
+    try {
+      await pending;
+    } catch {
+      if (this.#io === pending) {
+        this.#io = undefined;
       }
-      if (!this.project.refreshUrl) {return first;}
-      // A refused login can surface at any call, where a token expired while the session was open:
-      // The call is asked once more on a connection with the command's fresh output. The calls refused
-      // Together, as every call waiting when a token expires is, share one reopen, so that the
-      // Command runs once and one connection replaces the old; a call that fails on a connection
-      // Already replaced is asked again on the one that replaced it.
-      let current: Promise<AnalysisConnection> = Promise.resolve(first);
-      const again = async <T>(call: (on: AnalysisConnection) => Promise<T>): Promise<T> => {
-        const used = current;
-        const on = await used;
-        try {
-          return await call(on);
-        } catch (error) {
-          if (current === used) {
-            if (!refusedLogin(error)) {throw error;}
-            current = (async () => {
-              await on.close().catch(() => {});
-              const fresh = this.#freshUrl(error);
-              if (matchesUndefined(fresh)) {throw error;}
-              return this.#open(fresh);
-            })();
-            current.catch(() => {});
-          }
-          return call(await current);
-        }
-      };
-      return {
-        analyze: (sql) => again((on) => on.analyze(sql)),
-        query: (text, params) => again((on) => on.query(text, params)),
-        forget: () => again((on) => on.forget()),
-        close: () => current.then((on) => on.close(), () => {}),
-        ...(first.drivers && { drivers: first.drivers }),
-      };
-    })();
-    const io = this.#io;
-    io.catch(() => {
-      if (this.#io === io) {this.#io = undefined;}
-    });
-    return io;
+    }
+  }
+
+  async #connect(): Promise<AnalysisConnection> {
+    const first = await this.#openFirst();
+    return matchesUndefined(this.project.refreshUrl) ? first : withLoginRetry(first, async (cause) => this.#reopen(cause));
+  }
+
+  async #openFirst(): Promise<AnalysisConnection> {
+    try {
+      // oxlint-disable-next-line typescript/no-non-null-assertion -- Analysis supplies a project URL. Direct query calls without one retain the native open diagnostic.
+      return await this.#open(this.#url!);
+    } catch (error) {
+      return this.#reopen(error);
+    }
+  }
+
+  async #reopen(cause: unknown): Promise<AnalysisConnection> {
+    const fresh = this.#freshUrl(cause);
+    if (matchesUndefined(fresh)) {
+      throw cause;
+    }
+    return this.#open(fresh);
   }
 
   /**
@@ -514,7 +515,7 @@ export class Session {
   #drop(io: Promise<AnalysisConnection>): void {
     if (this.#io !== io) {return;}
     this.#io = undefined;
-    io.then((i) => i.close()).catch(() => {});
+    settleInBackground(closeAnalysisConnection(io));
   }
 
   /**
@@ -539,5 +540,5 @@ export class Session {
 
 /** Closes every build-step session's connection, for a build step whose build has ended: the process then ends without waiting out the idle time. */
 export async function releaseConnections(): Promise<void> {
-  await Promise.all([...sessions.values()].map((session) => session.release()));
+  await Promise.all([...sessions.values()].map(async (session) => session.release()));
 }
