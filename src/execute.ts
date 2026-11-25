@@ -217,7 +217,7 @@ const isDurableObjectSql = function isDurableObjectSql(client: ClientMembers | n
  * one), or on `session.tx` inside a libSQL transaction, whose `client` stays the base client;
  * any other client as it is.
  */
-function underneath(currentClient: ClientMembers): ClientMembers {
+const underneath = function underneath(currentClient: ClientMembers): ClientMembers {
   const session = !matchesNullish(currentClient) && hasObjectType(currentClient) && hasFunctionType(currentClient.select) ? currentClient.session : undefined;
   if (matchesNullish(session) || !hasObjectType(session)) {return currentClient;}
   const sessionMembers = inspectClient(session);
@@ -226,23 +226,23 @@ function underneath(currentClient: ClientMembers): ClientMembers {
   // Drizzle-orm/durable-sqlite keeps the Durable Object's storage, whose SQL storage is its sql.
   const sql = inspectClient(client.sql);
   return isDurableObjectSql(sql) ? sql : client;
-}
+};
 
 // Turso's promise API (@tursodatabase/database): a Database has connect() and
 // MaxWriteReplicationIndex() in every release from 0.4 (0.4 has no all(), so it looked synchronous,
 // And from 0.6 its all() took it for sqlite3's, whose callback it never calls); the Transaction
 // That transactionAsync() hands its callback (0.7 and later) has all() beside batch(), which
 // Sqlite3's database lacks. The compat Database has no connect().
-function isTurso(client: ClientMembers): boolean {
+const isTurso = function isTurso(client: ClientMembers): boolean {
   return hasFunctionType(client.prepare) && ((hasFunctionType(client.connect) && hasFunctionType(client.maxWriteReplicationIndex)) || (hasFunctionType(client.all) && hasFunctionType(client.batch)));
-}
+};
 
 // A SQLite client with prepare() whose statements answer at once. D1 (batch()), sqlite3 and
 // Sqlite (all() on the database), libSQL (execute()), Bun.sql (unsafe()) and Turso's promise API
 // Are asynchronous. Turso's compat Database has batch() as D1 does, and answers at once; its
 // MaxWriteReplicationIndex(), which every Database of Turso's has, tells it from D1's. A DuckDB
 // Connection has prepare() too, answering through a promise, and runAndReadAll() beside it.
-function isSyncSqlite(client: ClientMembers | null | undefined): boolean {
+const isSyncSqlite = function isSyncSqlite(client: ClientMembers | null | undefined): boolean {
   return (
     !matchesNullish(client) &&
     hasFunctionType(client.prepare) &&
@@ -253,7 +253,7 @@ function isSyncSqlite(client: ClientMembers | null | undefined): boolean {
     !hasFunctionType(client.unsafe) &&
     !isTurso(client)
   );
-}
+};
 
 // Slonik's pool, connections, transactions and savepoints, which have query() as pg's do but take
 // Only the queries its sql tag builds (src/decode.ts, `slonik`).
@@ -271,12 +271,13 @@ const asByteaHex = function asByteaHex(v: unknown) {
 // The parameters are an object, refused before anything reaches the database otherwise: an
 // Array, which `run` took in the order of `params` from 2026-10-03, was dropped on 2026-10-20
 // (wiki/design.md §9), so the call says which key each value binds.
-function checkParams(query: QueryModule, input: unknown): asserts input is Record<string, unknown> {
+// oxlint-disable-next-line rules/no-type-predicate -- The synchronous parameter validator narrows its callers without loading the optional Effect runtime.
+const checkParams: (query: QueryModule, input: unknown) => asserts input is Record<string, unknown> = function checkParams(query, input) {
   if (!matchesNull(input) && hasObjectType(input) && !Array.isArray(input)) {return;}
   const keys = query.params.map((name) => `${/^(?:[A-Za-z_$][\w$]*|\d+)$/u.test(name) ? name : JSON.stringify(name)}: ...`);
   const takes = keys.length ? `This statement takes { ${keys.join(", ")} }.` : "This statement takes none: leave them out.";
   throw new ParameterError(`The parameters must be an object keyed by parameter name, or by number for positional placeholders ({ 1: ..., 2: ... }); got ${Array.isArray(input) ? "an array" : String(input)}. ${takes}`);
-}
+};
 
 /** `text` as Reylo sends it: with the comment naming the query's file, where the module asks for one (src/sqlcommenter.ts). */
 export function sentText(query: QueryModule, text: string): string {
@@ -284,13 +285,13 @@ export function sentText(query: QueryModule, text: string): string {
 }
 
 /** The checks a parameter needs (src/checks.ts): every build step passes them where its statement has such a parameter. */
-function checksFor(query: QueryModule, name: string): Checks {
+const checksFor = function checksFor(query: QueryModule, name: string): Checks {
   if (query.checks) {return query.checks;}
   throw new ParameterError(`Parameter "${name}" is a typed JSON, structured or cast parameter, which the run time checks with Reylo's checks; a query defined by hand passes them: defineQuery({ …, checks }) with checks from "@totto2727/reylo".`);
-}
+};
 
 /** Where an array, or an array inside it (a multidimensional one), holds null or undefined: `[2]`, `[1][0]`. */
-function nullElement(array: Readonly<unknown[]>, path = ""): string | undefined {
+const nullElement = function nullElement(array: Readonly<unknown[]>, path = ""): string | undefined {
   for (let i = 0; i < array.length; i++) {
     const e = array[i];
     if (matchesNullish(e)) {return `${path}[${i}]`;}
@@ -300,24 +301,24 @@ function nullElement(array: Readonly<unknown[]>, path = ""): string | undefined 
     }
   }
   return undefined;
-}
+};
 
 /** Whether a parameter the statement takes no null for is declared with a type that takes no null: for a JSON one, whether the schema its type carries refuses JSON's null too. */
-function refusesNull(query: QueryModule, type: EngineType | undefined): boolean {
+const refusesNull = function refusesNull(query: QueryModule, type: EngineType | undefined): boolean {
   if (matchesUndefined(type) || type.kind === "unknown") {return false;}
   if (type.kind !== "json") {return true;}
   return !matchesUndefined(type.schema) && !matchesUndefined(query.checks) && !matchesUndefined(query.checks.validate(type.schema, null));
-}
+};
 
 /** A parameter the statement takes no null for, given null or left out. */
-function refuseNull(name: string, v: unknown): never {
+const refuseNull = function refuseNull(name: string, v: unknown): never {
   throw new ParameterError(`Parameter "${name}" ${matchesUndefined(v) ? "is missing" : "is null"}, and the statement takes no null for it: pass a value.`);
-}
+};
 
-function value(params: Record<string, unknown>, name: string) {
+const value = function value(params: Record<string, unknown>, name: string) {
   const v = params[name];
   return matchesUndefined(v) ? null : v;
-}
+};
 
 // A binary parameter is typed Uint8Array, and every driver binds one as it is (pg-promise too,
 // Since it gets { text, values }) but two (lab/driver-matrix, S1c). mariadb writes any value
@@ -325,11 +326,11 @@ function value(params: Record<string, unknown>, name: string) {
 // As the text {"0":1,"1":2,"2":255}: it gets a Buffer over the same memory, where a Buffer
 // Exists (not in every Worker). Neon's neon() before 0.10 sends a Buffer as JSON as well, so it
 // Gets Postgres's hex form, `\x0102ff`, which 0.10 and later send for a Buffer themselves.
-function asBuffer(v: unknown) {
+const asBuffer = function asBuffer(v: unknown) {
   // Named structurally, so that a project without Node's types can type-check the module.
   const NodeBuffer = (globalThis as { Buffer?: { isBuffer(v: unknown): boolean; from(buffer: ArrayBufferLike, offset: number, length: number): Uint8Array } }).Buffer;
   return v instanceof Uint8Array && !matchesUndefined(NodeBuffer) && !NodeBuffer.isBuffer(v) ? NodeBuffer.from(v.buffer, v.byteOffset, v.byteLength) : v;
-}
+};
 
 const isJson = (kind: EngineType["kind"] | undefined) => kind === "json" || kind === "object" || kind === "list" || kind === "rows";
 
@@ -339,9 +340,9 @@ const isJson = (kind: EngineType["kind"] | undefined) => kind === "json" || kind
 // Left to itself did something else (wiki/driver-decoding.md, 2026-10-12): pg wrote an array as
 // An array literal and a string as raw JSON text, mariadb expanded an array into a list, the
 // SQLite drivers refused an object, and mysql2 bound 5 as 5.0.
-function isJsonValue(query: QueryModule, name: string, v: unknown): boolean {
+const isJsonValue = function isJsonValue(query: QueryModule, name: string, v: unknown): boolean {
   return !matchesNullish(v) && isJson(query.inputs?.[name]?.type.kind);
-}
+};
 
 /**
  * JSON's null, which a JSON parameter's null stands for where the statement takes no SQL NULL for
@@ -371,7 +372,7 @@ const jsonText = (v: unknown): string => JSON.stringify(jsonValue(v));
 
 const isTime = (type: EngineType | undefined): boolean => type?.kind === "scalar" && type.name.split("|").every((part) => part === "timestamp" || part === "timestamptz" || part === "date");
 
-function checkTime(type: EngineType | undefined, name: string, v: unknown): void {
+const checkTime = function checkTime(type: EngineType | undefined, name: string, v: unknown): void {
   if (matchesUndefined(type) || matchesNullish(v)) {return;}
   if (type.kind === "array") {
     if (Array.isArray(v)) {Iterator.from(v).forEach((e) => {checkTime(Array.isArray(e) ? type : type.of, name, e);});}
@@ -388,14 +389,14 @@ function checkTime(type: EngineType | undefined, name: string, v: unknown): void
   } else if (v instanceof Date && type.name.split("|").every((part) => part === "timestamp" || part === "date")) {
     throw new ParameterError(`Parameter "${name}" is a ${type.name === "date" ? "date" : "timestamp"} without a time zone, so it takes the wall-clock text ("2026-10-12 19:06:48.282", "2026-10-12"), not a Date: drivers write a Date's time in different zones (the app's, the server's or UTC).`);
   }
-}
+};
 
 // A binary parameter takes a Uint8Array (a Buffer is one), as `.run()` returns binary data and
 // As a structured parameter's binary member does (src/rows.ts). Anything else would reach the
 // Driver as it is, and a string means something different on each database: Postgres reads it
 // As bytea's hex or escape text, MySQL stores the bytes of its UTF-8, and SQLite stores it as
 // TEXT, which comes back a string. So base64 text was stored as its own letters.
-function checkBinary(type: EngineType | undefined, name: string, v: unknown): void {
+const checkBinary = function checkBinary(type: EngineType | undefined, name: string, v: unknown): void {
   if (matchesUndefined(type) || matchesNullish(v)) {return;}
   if (type.kind === "array") {
     if (Array.isArray(v)) {Iterator.from(v).forEach((e) => {checkBinary(Array.isArray(e) ? type : type.of, name, e);});}
@@ -403,20 +404,20 @@ function checkBinary(type: EngineType | undefined, name: string, v: unknown): vo
   }
   if (type.kind !== "scalar" || (type.name !== "bytea" && type.name !== "blob") || v instanceof Uint8Array) {return;}
   throw new ParameterError(`Parameter "${name}" is binary data, so it takes a Uint8Array (a Buffer is one), as \`.run()\` returns one; got ${describe(v)}. ${v instanceof ArrayBuffer ? "Wrap an ArrayBuffer in one: new Uint8Array(buffer)." : "Decode base64 or hex text into one first."}`);
-}
+};
 
 /** Whether `type` is one of pgvector's dense vectors, which `.run()` returns as an array of numbers. */
 const isVector = (type: EngineType): type is EngineType & { kind: "scalar" } => type.kind === "scalar" && (type.name === "vector" || type.name === "halfvec");
 
 /** A vector's floats as the text a VECTOR's `to_vector` and pgvector's input read; JSON's, which would write NaN and ±Infinity as null, so those are refused. */
-function vectorText(v: Readonly<unknown[]>, name: string, what: string): string {
+const vectorText = function vectorText(v: Readonly<unknown[]>, name: string, what: string): string {
   v.forEach((e, index) => {
     if (!matchesNumber(e) || !Number.isFinite(e)) {
       throw new ParameterError(`Parameter "${name}" is ${what}, an array of finite numbers, and the element at [${index}] is ${matchesString(e) ? JSON.stringify(e) : (matchesNumber(e) ? e : typeof e)}.`);
     }
   });
   return JSON.stringify(v);
-}
+};
 
 // What `run` returns goes back in as the database reads it (the round-trip rule, src/render.ts):
 // On Postgres a date or time with an extended or BC year in Postgres's own form, which refuses
@@ -429,7 +430,7 @@ function vectorText(v: Readonly<unknown[]>, name: string, what: string): string 
 // Execute()) or expanded it into a list of values (mysql2's query(), mariadb). On Postgres a
 // Pgvector vector the same way, as the text its input reads, and an array of vectors as an array
 // Of those texts.
-function encode(type: EngineType | undefined, v: unknown, dialect: Dialect, name: string): unknown {
+const encode = function encode(type: EngineType | undefined, v: unknown, dialect: Dialect, name: string): unknown {
   if (matchesUndefined(type) || matchesNullish(v)) {return v;}
   if (dialect === "duckdb") {return encodeDuckdb(type, v, name);}
   if (dialect === "sqlite") {return matchesBoolean(v) ? (v ? 1 : 0) : v;}
@@ -445,7 +446,7 @@ function encode(type: EngineType | undefined, v: unknown, dialect: Dialect, name
   if (!matchesString(v)) {return v;}
   if (isTime(type)) {return postgresYear(v);}
   return type.kind === "scalar" && type.name === "interval" ? postgresInterval(v) : v;
-}
+};
 
 // Sqlite3 6.0.1 binds a BigInt as NULL, with no error (`select cast(? as text)` with
 // 9007199254740993n gave null), and a Durable Object's exec() refuses one, where every other
@@ -453,28 +454,28 @@ function encode(type: EngineType | undefined, v: unknown, dialect: Dialect, name
 // One goes as its digits to a parameter of a BIGINT column (the engine's int8), whose INTEGER
 // Affinity reads the text as that integer in an insert and a comparison alike, and is refused
 // Anywhere else, where the text would stay text.
-function numberOrDigits(v: unknown, type: EngineType | undefined, driver: "sqlite3" | "durable-object"): unknown {
+const numberOrDigits = function numberOrDigits(v: unknown, type: EngineType | undefined, driver: "sqlite3" | "durable-object"): unknown {
   if (!matchesBigInt(v)) {return v;}
   if (v >= BigInt(Number.MIN_SAFE_INTEGER) && v <= BigInt(Number.MAX_SAFE_INTEGER)) {return Number(v);}
   if (type?.kind === "scalar" && type.name === "int8") {return String(v);}
   const digits = "pass it as a string of digits, which SQLite stores as that integer in an INTEGER column";
   if (driver === "durable-object") {throw new ParameterError(`A Durable Object's SQL storage binds no BigInt, and ${v} is past 2^53 - 1, where a number stops being exact: ${digits}.`);}
   throw new ParameterError(`sqlite3 binds a BigInt as NULL, and ${v} is past 2^53 - 1, where a number stops being exact: ${digits}, or run the statement on better-sqlite3, node:sqlite or libSQL, which bind a BigInt.`);
-}
+};
 
 // A Durable Object's exec() refuses a BigInt ("Cannot convert a BigInt value to a number").
-function durableObjectValues(query: QueryModule, names: Readonly<string[]>, values: unknown[]): unknown[] {
+const durableObjectValues = function durableObjectValues(query: QueryModule, names: Readonly<string[]>, values: unknown[]): unknown[] {
   return values.map((currentValue, index) => numberOrDigits(currentValue, query.inputs?.[names[index]!]?.type, "durable-object"));
-}
+};
 
 /** Pg's `dateToString`: the local date and time to the millisecond, then the offset; BC for a year before 1. */
-function dateText(d: Date): string {
+const dateText = function dateText(d: Date): string {
   const pad = (n: number, width = 2): string => String(n).padStart(width, "0");
   const year = d.getFullYear();
   const offset = -d.getTimezoneOffset();
   const abs = Math.abs(offset);
   return `${pad(year < 1 ? 1 - year : year, 4)}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}.${pad(d.getMilliseconds(), 3)}${offset < 0 ? "-" : "+"}${pad(Math.floor(abs / 60))}:${pad(abs % 60)}${year < 1 ? " BC" : ""}`;
-}
+};
 
 /**
  * A Postgres array literal, written as pg writes one (`arrayString` in pg/lib/utils.js): a nested
@@ -508,7 +509,7 @@ const slonikParam = function (v: unknown): unknown {
 };
 
 /** A bound value as the text Postgres's input function reads, as `.run()` sends it through pg. */
-function postgresText(query: QueryModule, name: string, v: unknown): string | null {
+const postgresText = function postgresText(query: QueryModule, name: string, v: unknown): string | null {
   if (matchesNullish(v)) {return null;}
   const t = query.inputs?.[name]?.type;
   if (Array.isArray(v) && t?.kind === "array") {return arrayLiteral(isJson(t.of.kind) ? v.map((e) => (matchesNullish(e) ? e : JSON.stringify(e))) : v, t.delimiter);}
@@ -519,7 +520,7 @@ function postgresText(query: QueryModule, name: string, v: unknown): string | nu
   if (v instanceof Date) {return dateText(v);}
   if (hasObjectType(v)) {return JSON.stringify(v);}
   return String(v);
-}
+};
 
 const indexOf = function indexOf(query: QueryModule, p: { name: string; start: number; end: number }): number {
   const index = query.params.indexOf(p.name);
@@ -557,7 +558,7 @@ export function compile(query: QueryModule): { text: string; order: Readonly<str
 // The rows are bound positionally in every dialect. A value left out binds NULL, as pg,
 // PGlite, better-sqlite3 and Bun.sql already do; postgres.js, mysql2, node:sqlite and libSQL
 // Would reject it instead.
-function statement(query: QueryModule, params: ParamsInput) {
+const statement = function statement(query: QueryModule, params: ParamsInput) {
   // The build step already compiled the statement; only the values need ordering.
   const compiled = compile(query);
   const bound: { text: string; values: unknown[]; names: Readonly<string[]> } = { text: compiled.text, values: compiled.order.map((name) => value(params, name)), names: compiled.order };
@@ -628,9 +629,9 @@ function statement(query: QueryModule, params: ParamsInput) {
   // The comment naming the file goes on last, after a structured parameter's lists are written.
   bound.text = sentText(query, bound.text);
   return bound;
-}
+};
 
-function executeSyncSqlite(client: ClientMembers, query: QueryModule, params: ParamsInput): unknown[] | Promise<unknown[]> {
+const executeSyncSqlite = function executeSyncSqlite(client: ClientMembers, query: QueryModule, params: ParamsInput): unknown[] | Promise<unknown[]> {
   checkParams(query, params);
   if (query.fresh && due(query)) {
     let rows: unknown[] | undefined;
@@ -646,7 +647,7 @@ function executeSyncSqlite(client: ClientMembers, query: QueryModule, params: Pa
   const { text, values, names } = statement(query, params);
   if (isDurableObjectSql(client)) {return runDurableObject(client, text, durableObjectValues(query, names, values), query.columns);}
   return runSyncSqlite(client, text, values, query.columns);
-}
+};
 
 /** The synchronous path alone, for `runSync`: any other client is refused before anything runs. */
 export const executeSync = function executeSync<D extends Dialect>(client: SyncClientFor<D>, query: QueryModule<D>, params: ParamsInput = {}): unknown[] {
@@ -680,7 +681,7 @@ const accepted: Record<Dialect, string> = {
   duckdb: "runAndReadAll(sql, values) as on @duckdb/node-api's DuckDBConnection",
 };
 
-function unsupported(c: unknown, dialect: Dialect): TypeError {
+const unsupported = function unsupported(c: unknown, dialect: Dialect): TypeError {
   let seen: string;
   if (matchesNull(c) || (!hasObjectType(c) && !hasFunctionType(c))) {seen = String(c);}
   else {
@@ -709,9 +710,9 @@ function unsupported(c: unknown, dialect: Dialect): TypeError {
           ? ` Prisma decodes the values of its queries itself${hasFunctionType(o.$transaction) ? ": pass a client of your database's driver, such as the pool its driver adapter was made with." : inTx}`
           : "";
   return new TypeError(`reylo cannot run a ${dialect} statement on ${seen}. It takes a client with ${accepted[dialect]}.${hint}`);
-}
+};
 
-async function executeAsync(client: ClientMembers | null | undefined, query: QueryModule, params: ParamsInput): Promise<unknown[]> {
+const executeAsync = async function executeAsync(client: ClientMembers | null | undefined, query: QueryModule, params: ParamsInput): Promise<unknown[]> {
   if (matchesNullish(client) || (!hasObjectType(client) && !hasFunctionType(client))) {throw unsupported(client, query.dialect);}
   // A DuckDB connection has prepare() as SQLite's drivers do, and runs no other database's statement.
   if (query.dialect !== "duckdb" && isDuckdb(client)) {throw unsupported(client, query.dialect);}
@@ -840,7 +841,7 @@ async function executeAsync(client: ClientMembers | null | undefined, query: Que
     }
   }
   throw unsupported(client, query.dialect);
-}
+};
 
 /**
  * Runs the statement and returns its rows (an empty array for a statement that returns none).
