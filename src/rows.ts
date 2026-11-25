@@ -8,15 +8,16 @@
 // Nobody chose is refused.
 import type { EngineType } from "./engine-type.ts";
 import { validate, withDefaults } from "./json-schema.ts";
-import { describe, hstoreText, ParameterError, postgresInterval, postgresYear, zoned } from "./values.ts";
-import { hasObjectType, isRecord, matchesBoolean, matchesNull, matchesNumber, matchesString, matchesUndefined } from "./native-predicates.ts";
+import { describe, ParameterError } from "./values.ts";
+import { isEmptyArray, isRecord, matchesNull, matchesString, matchesUndefined } from "./native-predicates.ts";
 
-import { bigInteger, decimal, integer, INTEGERS, MYSQL_INTEGERS, unsignedRange } from "./row-numeric.ts";
+import { bigInteger, integer, INTEGERS, MYSQL_INTEGERS, unsignedRange } from "./row-numeric.ts";
 import type { RejectParameter } from "./row-numeric.ts";
+import { Raw, scalar, SINGLE_TYPE_MODIFIER } from "./row-scalar.ts";
+import type { RowDialect, RowValueContext } from "./row-scalar.ts";
 
 export { describe, zoned } from "./values.ts";
 
-type Dialect = "postgres" | "mysql" | "sqlite" | "duckdb";
 export type RowsType = Extract<EngineType, { kind: "rows" }>;
 export type RowField = RowsType["fields"][number];
 
@@ -24,16 +25,6 @@ export type RowField = RowsType["fields"][number];
 export type StructuredList = Readonly<{ start: number; end: number; entries: Readonly<string[]> }>;
 /** A structured parameter in insert position and the lists the run time writes again for the keys a call carries. */
 export type Structured = Readonly<{ name: string; lists: Readonly<StructuredList[]> }>;
-
-const WIDE = new Set(["int8", "integer"]);
-
-/** Raw JSON text for a value the writer puts in as it is. */
-class Raw {
-  public readonly text: string;
-  public constructor(text: string) {
-    this.text = text;
-  }
-}
 
 /** The checked rows as JSON text, a 64-bit integer as its digits. */
 const write = function write(v: unknown): string {
@@ -50,7 +41,7 @@ const write = function write(v: unknown): string {
 const firstRowNumber = 1;
 
 interface RowSchema {
-  dialect: Dialect;
+  dialect: RowDialect;
   fail: RejectParameter;
   fields: RowsType["fields"];
   known: ReadonlyMap<string, RowField>;
@@ -62,142 +53,42 @@ interface CheckedRow {
 }
 
 interface ColumnCheck {
-  dialect: Dialect;
+  dialect: RowDialect;
   fail: RejectParameter;
   row: CheckedRow;
   where: string;
 }
 
-const SINGLE_TYPE_MODIFIER = /\(\s*(?<digits>\d+)\s*\)/u;
-const HEX_RADIX = 16;
+const checkJson = (value: unknown, { fail, written }: RowValueContext): unknown => {
+  // JSON.stringify rejects BigInt, and returns undefined for values such as functions.
+  try {
+    if (matchesUndefined(JSON.stringify(value))) {fail(`is ${written}, which holds a JSON value; got ${describe(value)}.`);}
+  } catch (error) {
+    // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- Keep the raw message property of exceptions thrown by a caller's toJSON method.
+    fail(`is ${written}, which holds a JSON value: ${(error as Error).message}.`);
+  }
+  return value;
+};
 
-function scalar(name: string, written: string, v: unknown, dialect: Dialect, fail: (message: string) => never): unknown {
-  // `a|b` is either, where the database decides by the value.
-  if (name.includes("|")) {
-    for (const part of name.split("|")) {
-      try {
-        return scalar(part, written, v, dialect, (message) => {
-          throw new TypeError(message);
-        });
-      } catch {}
-    }
-    return fail(`is ${written}; got ${describe(v)}.`);
-  }
-  const range = INTEGERS[name];
-  if (range) {
-    const checked = integer(v, { digits: name === "int8", range, truth: dialect !== "postgres", written }, fail);
-    if (!WIDE.has(name)) {return Number(checked);}
-    return dialect === "postgres" ? checked.toString() : new Raw(checked.toString());
-  }
-  switch (name) {
-    case "float4":
-    case "float8":
-    case "real": {
-      if (matchesNumber(v) && Number.isFinite(v)) {return v;}
-      return fail(`is ${written}, a finite number; got ${describe(v)}.`);
-    }
-    case "numeric": {
-      return decimal(written, v, fail);
-    }
-    case "bool": {
-      if (matchesBoolean(v)) {return v;}
-      return fail(`is ${written}, true or false; got ${describe(v)}.`);
-    }
-    case "text":
-    case "varchar":
-    case "bpchar":
-    case "char":
-    case "name":
-    case "citext": {
-      if (!matchesString(v)) {return fail(`is ${written}, a string; got ${describe(v)}.`);}
-      const limit = SINGLE_TYPE_MODIFIER.exec(written)?.groups?.digits;
-      // A length counts characters (code points), as Postgres and MySQL count them.
-      if (!matchesUndefined(limit) && [...v].length > Number(limit)) {fail(`is ${written}, at most ${limit} characters; got ${[...v].length}, which the database would refuse or cut.`);}
-      return v;
-    }
-    case "vector":
-    case "halfvec": {
-      // Pgvector's vector, as `.run()` returns it, written as the text its input reads.
-      if (Array.isArray(v) && v.length > 0 && v.every((e) => matchesNumber(e) && Number.isFinite(e))) {return JSON.stringify(v);}
-      if (matchesString(v)) {return v;}
-      return fail(`is ${written}, an array of finite numbers with one at least; got ${describe(v)}.`);
-    }
-    case "hstore": {
-      // An hstore, as `.run()` returns it, written as the text its input reads.
-      if (!matchesNull(v) && hasObjectType(v)) {return hstoreText(v, (message) => fail(message.replace(/^is an hstore/u, `is ${written}`)));}
-      if (matchesString(v)) {return v;}
-      return fail(`is ${written}, an object of its keys whose values are strings or null; got ${describe(v)}.`);
-    }
-    case "uuid": {
-      if (matchesString(v) && /^\{?[0-9a-f]{8}-?[0-9a-f]{4}-?[0-9a-f]{4}-?[0-9a-f]{4}-?[0-9a-f]{12}\}?$/i.test(v)) {return v;}
-      return fail(`is ${written}, a UUID in hexadecimal; got ${describe(v)}.`);
-    }
-    case "timestamptz": {
-      // A string that names its zone, as `.run()` returns one; no Date.
-      if (v instanceof Date) {return fail(`is ${written}, which takes the instant as a string that names its zone, not a Date: pass date.toISOString() ("2026-10-12T19:06:48.282Z").`);}
-      if (matchesString(v) && zoned.test(v.trim())) {return dialect === "postgres" ? postgresYear(v) : v;}
-      return fail(`is ${written}, an instant: a string that names its zone ("2026-10-12T19:06:48.282Z", "2026-10-12 19:06:48+09"); got ${describe(v)}, which the server would read in the session's time zone.`);
-    }
-    case "timestamp":
-    case "date": {
-      if (matchesString(v)) {return dialect === "postgres" ? postgresYear(v) : v;}
-      return fail(`is ${written}, a wall-clock reading with no zone, which takes its text ("2026-10-12 19:06:48.282", "2026-10-12"), not a Date: drivers write a Date's time in different zones.${v instanceof Date ? "" : ` Got ${describe(v)}.`}`);
-    }
-    case "bytea":
-    case "blob": {
-      // Binary data travels as hexadecimal text: Postgres's own `\x` form, and bare digits that
-      // MySQL's and SQLite's readers decode with unhex().
-      if (!(v instanceof Uint8Array)) {return fail(`is ${written}, binary data, a Uint8Array; got ${describe(v)}.`);}
-      const limit = SINGLE_TYPE_MODIFIER.exec(written)?.groups?.digits;
-      if (!matchesUndefined(limit) && v.length > Number(limit)) {fail(`is ${written}, at most ${limit} bytes; got ${v.length}, which the database would refuse or cut.`);}
-      let hex = dialect === "postgres" ? String.raw`\x` : "";
-      Iterator.from(v).forEach((byte) => {hex += (byte < HEX_RADIX ? "0" : "") + byte.toString(HEX_RADIX);});
-      return hex;
-    }
-    case "interval": {
-      // `-P1D`, as `.run()` returns a negative interval, in the form Postgres reads.
-      if (matchesString(v)) {return postgresInterval(v);}
-      if (matchesNumber(v)) {return v;}
-      return fail(`is ${written}; got ${describe(v)}.`);
-    }
-    default: {
-      // A type the run time has no rule for (time, inet, …) takes the text the database reads, and
-      // A number or a truth value as JSON writes them.
-      if (matchesString(v) || matchesNumber(v) || matchesBoolean(v)) {return v;}
-      return fail(`is ${written}; got ${describe(v)}.`);
-    }
-  }
-}
+const checkEnum = (type: Extract<EngineType, { kind: "enum" }>, value: unknown, { fail }: RowValueContext): unknown => {
+  if (matchesString(value) && (isEmptyArray(type.labels) || type.labels.includes(value))) {return value;}
+  return fail(`is the enum ${type.name}, one of ${type.labels.map((label) => JSON.stringify(label)).join(", ")}; got ${describe(value)}.`);
+};
 
-/** One value checked against its type, as the JSON the database reads; `fail` says why not. */
-function check(type: EngineType, written: string, v: unknown, dialect: Dialect, fail: (message: string) => never): unknown {
-  switch (type.kind) {
-    case "json": {
-      // JSON.stringify throws on a BigInt and skips a function; a JSON member holds JSON.
-      try {
-        if (matchesUndefined(JSON.stringify(v))) {fail(`is ${written}, which holds a JSON value; got ${describe(v)}.`);}
-      } catch (error) {
-        fail(`is ${written}, which holds a JSON value: ${(error as Error).message}.`);
-      }
-      return v;
-    }
-    case "enum": {
-      if (matchesString(v) && (type.labels.length === 0 || type.labels.includes(v))) {return v;}
-      return fail(`is the enum ${type.name}, one of ${type.labels.map((label) => JSON.stringify(label)).join(", ")}; got ${describe(v)}.`);
-    }
-    case "array": {
-      if (!Array.isArray(v)) {return fail(`is ${written}, an array; got ${describe(v)}.`);}
-      const element = written.replace(/\s*\[\s*\]\s*$/u, "");
-      return v.map((e, index) => (matchesNull(e) ? null : check(type.of, element, e, dialect, (message) => fail(`element ${index + 1} ${message}`))));
-    }
-    case "scalar": {
-      return scalar(type.name, written, v, dialect, fail);
-    }
-    default: {
-      return v;
-    }
+const check = (type: EngineType, value: unknown, context: RowValueContext): unknown => {
+  if (type.kind === "json") {return checkJson(value, context);}
+  if (type.kind === "enum") {return checkEnum(type, value, context);}
+  if (type.kind === "array") {
+    if (!Array.isArray(value)) {return context.fail(`is ${context.written}, an array; got ${describe(value)}.`);}
+    const element = context.written.replace(/\s*\[\s*\]\s*$/u, "");
+    return value.map((member, index) => matchesNull(member) ? member : check(type.of, member, {
+      dialect: context.dialect,
+      fail: (message) => context.fail(`element ${index + firstRowNumber} ${message}`),
+      written: element,
+    }));
   }
-}
+  return type.kind === "scalar" ? scalar(type.name, value, context) : value;
+};
 
 const checkColumnValue = (field: RowField, value: unknown, context: ColumnCheck): void => {
   const { dialect, fail, row, where } = context;
@@ -212,7 +103,7 @@ const checkColumnValue = (field: RowField, value: unknown, context: ColumnCheck)
     row.values[field.name] = null;
     return;
   }
-  const checked = check(field.type, field.written, value, dialect, (message) => fail(`${subject} ${message}`));
+  const checked = check(field.type, value, { dialect, fail: (message) => fail(`${subject} ${message}`), written: field.written });
   if (matchesUndefined(field.schema)) {
     row.values[field.name] = checked;
     return;
@@ -259,11 +150,11 @@ const verifyInsertColumns = (expected: InsertColumns, actual: InsertColumns, sch
  * @param {string} name - The structured parameter's name.
  * @param {RowsType} type - Its declared column list.
  * @param {unknown} value - The supplied row or rows.
- * @param {Dialect} dialect - The database that consumes the rows.
+ * @param {RowDialect} dialect - The database that consumes the rows.
  * @param {boolean} inserted - Whether every row must supply the same insert columns.
  * @returns {{ value: unknown; present: ReadonlySet<string> }} The bound value and supplied column names.
  */
-export const prepareRows = function prepareRows(name: string, type: RowsType, value: unknown, dialect: Dialect, inserted: boolean): { value: unknown; present: ReadonlySet<string> } {
+export const prepareRows = function prepareRows(name: string, type: RowsType, value: unknown, dialect: RowDialect, inserted: boolean): { value: unknown; present: ReadonlySet<string> } {
   const fail = (message: string): never => {
     throw new ParameterError(`Parameter "${name}": ${message}`);
   };
@@ -348,7 +239,7 @@ const wallClock = (base: string, written: string, value: unknown, fail: RejectPa
  * value is bound as it is. `type` is the engine's type for the parameter. On SQLite every integer
  * is 64 bits, whatever the cast calls it.
  */
-export const checkCast = function checkCast(name: string, written: string, type: EngineType, v: unknown, dialect: Dialect): void {
+export const checkCast = function checkCast(name: string, written: string, type: EngineType, v: unknown, dialect: RowDialect): void {
   if (matchesNull(v) || matchesUndefined(v)) {return;}
   const fail = (message: string): never => {
     throw new ParameterError(`Parameter "${name}" ${message}`);
@@ -361,14 +252,14 @@ export const checkCast = function checkCast(name: string, written: string, type:
     return;
   }
   if (base === "uuid") {
-    scalar("uuid", written, v, dialect, fail);
+    scalar("uuid", v, { dialect, fail, written });
     return;
   }
   if (dialect === "mysql" && (base === "date" || base === "time" || base === "datetime" || base === "timestamp")) {
     wallClock(base, written, v, fail);
     return;
   }
-  check(type, written, v, dialect, fail);
+  check(type, v, { dialect, fail, written });
 };
 
 /** The statement with each list of a structured parameter written again for the keys present (MySQL): an entry stays when its key is required or present. */

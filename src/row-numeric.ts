@@ -49,7 +49,7 @@ export const MYSQL_INTEGERS: Record<string, IntegerRange> = {
   tinyint: signedRange(TINY_INTEGER_BITS),
 };
 
-export const unsignedRange = ([, maximum]: IntegerRange): IntegerRange => [BIG_ZERO, maximum * BIG_TWO + BIG_ONE];
+export const unsignedRange = (range: IntegerRange): IntegerRange => [BIG_ZERO, range[ONE] * BIG_TWO + BIG_ONE];
 
 interface IntegerConstraint {
   digits: boolean;
@@ -73,7 +73,9 @@ const integerValue = (value: unknown, { digits, truth, written }: IntegerConstra
 
 export const integer = (value: unknown, constraint: IntegerConstraint, fail: RejectParameter): bigint => {
   const checked = integerValue(value, constraint, fail);
-  const { range: [minimum, maximum], written } = constraint;
+  const { range, written } = constraint;
+  const minimum = range[ZERO];
+  const maximum = range[ONE];
   if (checked < minimum || checked > maximum) {fail(`is ${written}, from ${minimum} to ${maximum}; got ${checked}.`);}
   return checked;
 };
