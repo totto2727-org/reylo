@@ -56,7 +56,7 @@ export const querySource = async function (root: string, name: string, sql: stri
   return file;
 };
 
-const buildSqliteQueryModule = async function (root: string, name: string, sql: string): Promise<URL> {
+export const buildSqliteQueryModule = async function (root: string, name: string, sql: string): Promise<URL> {
   const file = await querySource(root, name, sql);
   const { code } = await sqlModule(file, sql);
   const out = path.join(root, `${name}.mjs`);

@@ -23,7 +23,7 @@ export const INDEX = pathToFileURL(path.join(ROOT, "src", "index.ts")).href;
 
 export type SqliteQueryFixture<Rows extends Cardinality> = Pick<
   Query<Record<string, unknown>, Record<string, unknown>, Rows, "sqlite">,
-  "run" | "runSync" | "sql" | "inputSchema" | "outputSchema" | "~standard"
+  "run" | "runSync" | "raw" | "sql" | "inputSchema" | "outputSchema" | "~standard"
 >;
 
 export const importSqliteQueryFixture = async <Rows extends Cardinality>(
@@ -35,7 +35,7 @@ export const importSqliteQueryFixture = async <Rows extends Cardinality>(
   ok(isRecord(query) && query.dialect === "sqlite", "Expected a generated SQLite query");
   if (!matchesUndefined(cardinality)) {equal(query.cardinality, cardinality);}
   ok(hasFunctionType(query.run) && hasFunctionType(query.runSync));
-  ok(Object.hasOwn(query, "sql") && Object.hasOwn(query, "inputSchema") && Object.hasOwn(query, "outputSchema"));
+  ok(matchesString(query.raw) && Object.hasOwn(query, "sql") && Object.hasOwn(query, "inputSchema") && Object.hasOwn(query, "outputSchema"));
   const standard = query["~standard"];
   ok(isRecord(standard) && isRecord(standard.jsonSchema) && hasFunctionType(standard.jsonSchema.input));
   // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- The fixture is emitted without a paired declaration and calls the checked-in SQLite query factory.
@@ -97,10 +97,10 @@ interface ChildResult {
 /**
  * @param {string} command - The executable to run.
  * @param {string[]} args - Arguments passed directly to the executable.
- * @param {{ cwd: string; env?: NodeJS.ProcessEnv }} options - The fixture's working directory and optional environment.
+ * @param {{ cwd: string; env?: NodeJS.ProcessEnv; timeout?: number }} options - The fixture's working directory and optional environment.
  * @returns {Promise<ChildResult>} The exit status and UTF-8 output from the child.
  */
-export const runChild = async (command: string, args: string[], options: { cwd: string; env?: NodeJS.ProcessEnv }): Promise<ChildResult> => {
+export const runChild = async (command: string, args: string[], options: { cwd: string; env?: NodeJS.ProcessEnv; timeout?: number }): Promise<ChildResult> => {
   const { promise, reject, resolve } = Promise.withResolvers<ChildResult>();
   // oxlint-disable-next-line promise/prefer-await-to-callbacks -- Node's callback gives the native exit error and both output streams together.
   execFile(command, args, { ...options, encoding: "utf8" }, (error, stdout, stderr) => {
