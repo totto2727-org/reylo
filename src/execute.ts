@@ -567,9 +567,15 @@ const numberOrDigits = function numberOrDigits(parameterValue: unknown, type: En
   throw new ParameterError(`sqlite3 binds a BigInt as NULL, and ${parameterValue} is past 2^53 - 1, where a number stops being exact: ${digits}, or run the statement on better-sqlite3, node:sqlite or libSQL, which bind a BigInt.`);
 };
 
+const parameterName = (names: Readonly<string[]>, index: number): string => {
+  const name = names[index];
+  // A missing index still uses JavaScript's "undefined" property key during lookup.
+  return matchesUndefined(name) ? "undefined" : name;
+};
+
 // A Durable Object's exec() refuses a BigInt ("Cannot convert a BigInt value to a number").
 const durableObjectValues = function durableObjectValues(query: QueryModule, names: Readonly<string[]>, values: unknown[]): unknown[] {
-  return values.map((currentValue, index) => numberOrDigits(currentValue, query.inputs?.[names[index]!]?.type, "durable-object"));
+  return values.map((currentValue, index) => numberOrDigits(currentValue, query.inputs?.[parameterName(names, index)]?.type, "durable-object"));
 };
 
 const CLOCK_FIELD_WIDTH = 2;
@@ -638,6 +644,9 @@ const slonikParam = function (parameterValue: unknown): unknown {
   return hasObjectType(parameterValue) ? JSON.stringify(parameterValue) : parameterValue;
 };
 
+const postgresTypedArray = (values: unknown[], type: Extract<EngineType, { kind: "array" }>): string =>
+  arrayLiteral(isJson(type.of.kind) ? values.map((element) => (matchesNullish(element) ? element : JSON.stringify(element))) : values, type.delimiter);
+
 /**
  * A bound value as the text Postgres's input function reads, as `.run()` sends it through pg.
  *
@@ -649,7 +658,7 @@ const slonikParam = function (parameterValue: unknown): unknown {
 const postgresText = function postgresText(query: QueryModule, name: string, parameterValue: unknown): string | null {
   if (matchesNullish(parameterValue)) {return null;}
   const inputType = query.inputs?.[name]?.type;
-  if (Array.isArray(parameterValue) && inputType?.kind === "array") {return arrayLiteral(isJson(inputType.of.kind) ? parameterValue.map((element) => (matchesNullish(element) ? element : JSON.stringify(element))) : parameterValue, inputType.delimiter);}
+  if (Array.isArray(parameterValue) && inputType?.kind === "array") {return postgresTypedArray(parameterValue, inputType);}
   if (isJsonValue(query, name, parameterValue)) {return jsonText(parameterValue);}
   if (Array.isArray(parameterValue)) {return arrayLiteral(parameterValue);}
   if (parameterValue instanceof Uint8Array) {return byteaHex(parameterValue);}
@@ -700,10 +709,16 @@ export function compile(query: QueryModule): { text: string; order: Readonly<str
 // The rows are bound positionally in every dialect. A value left out binds NULL, as pg,
 // PGlite, better-sqlite3 and Bun.sql already do; postgres.js, mysql2, node:sqlite and libSQL
 // Would reject it instead.
-const statement = function statement(query: QueryModule, params: ParamsInput) {
+interface BoundStatement {
+  names: Readonly<string[]>;
+  text: string;
+  values: unknown[];
+}
+
+const statement = function statement(query: QueryModule, params: ParamsInput): BoundStatement {
   // The build step already compiled the statement; only the values need ordering.
   const compiled = compile(query);
-  const bound: { text: string; values: unknown[]; names: Readonly<string[]> } = { text: compiled.text, values: compiled.order.map((name) => value(params, name)), names: compiled.order };
+  const bound: BoundStatement = { text: compiled.text, values: compiled.order.map((name) => value(params, name)), names: compiled.order };
   bound.names.forEach((name, index) => {
     const input = query.inputs?.[name];
     const type = input?.type;
@@ -767,7 +782,7 @@ const statement = function statement(query: QueryModule, params: ParamsInput) {
   });
   // Every MySQL and SQLite driver binds JSON text as text, which the database reads as JSON (a
   // Structured parameter's is written already).
-  if (query.dialect !== "postgres") {bound.values = bound.values.map((currentValue, index) => (isJsonValue(query, bound.names[index]!, currentValue) && query.inputs?.[bound.names[index]!]?.type.kind !== "rows" ? jsonText(currentValue) : currentValue));}
+  if (query.dialect !== "postgres") {bound.values = bound.values.map((currentValue, index) => (isJsonValue(query, parameterName(bound.names, index), currentValue) && query.inputs?.[parameterName(bound.names, index)]?.type.kind !== "rows" ? jsonText(currentValue) : currentValue));}
   // The comment naming the file goes on last, after a structured parameter's lists are written.
   bound.text = sentText(query, bound.text);
   return bound;
@@ -840,7 +855,7 @@ export const rawStatement = function rawStatement(query: QueryModule, params: un
   checkParams(query, params);
   const { text, values, names } = statement(query, params);
   if (query.dialect !== "postgres") {return { text, values };}
-  return { text, values: values.map((currentValue, index) => postgresText(query, names[index]!, currentValue)) };
+  return { text, values: values.map((currentValue, index) => postgresText(query, parameterName(names, index), currentValue)) };
 };
 
 const accepted: Record<Dialect, string> = {
@@ -907,6 +922,178 @@ const unsupported = (candidate: unknown, dialect: Dialect): TypeError => {
   return new TypeError(`reylo cannot run a ${dialect} statement on ${seen}. It takes a client with ${accepted[dialect]}.${hint}`);
 };
 
+const inputTypeAt = (query: QueryModule, names: Readonly<string[]>, index: number): EngineType | undefined =>
+  query.inputs?.[parameterName(names, index)]?.type;
+
+  // Postgres.js reads a string for a date or time parameter through `new Date(x)` and binds
+  // Its toISOString(), so a timestamp's wall-clock time moved by the app's offset, and
+  // `infinity` or a zone name failed with "Invalid time value". Declared `unknown` (705), it
+  // Is sent as the text, which the server reads as the parameter's type, as it would an
+  // Undeclared one. Bun.sql (commitDistributed()) sends the text and has no typed().
+  // A JSON parameter goes to postgres.js as its JSON text declared `unknown` too: its own
+  // Serializer would write a value as JSON, but a client Drizzle wraps has that serializer
+  // Replaced by one that passes the value through (drizzle-orm/postgres-js), and a
+  // Transaction shows neither. Bun.sql serializes the value itself.
+const UNKNOWN_POSTGRES_OID = 705;
+
+const executePostgresUnsafe = async (client: ClientMembers, query: QueryModule, bound: BoundStatement): Promise<unknown[]> => {
+  const bun = hasFunctionType(client.commitDistributed);
+  const asText = hasFunctionType(client.typed) && !bun;
+  const postgres = inspectClient<{ typed: (value: unknown, oid: number) => unknown }>(client);
+  const mapped = bound.values.map((parameter, index) => {
+    if (isJsonValue(query, parameterName(bound.names, index), parameter)) {
+      return asText ? postgres.typed(jsonText(parameter), UNKNOWN_POSTGRES_OID) : { toJSON: () => jsonValue(parameter) };
+    }
+    if (asText && matchesString(parameter) && isTime(inputTypeAt(query, bound.names, index))) {
+      return postgres.typed(parameter, UNKNOWN_POSTGRES_OID);
+    }
+    return parameter;
+  });
+  return bun
+    ? bunRows(await inspectClient<BunProtocol>(client).unsafe(bound.text, mapped), query.columns)
+    : postgresJs(client, bound.text, mapped, query.columns);
+};
+
+  // A JSON parameter goes to pg's family, PGlite and Neon as its JSON text, and to postgres.js
+  // As its JSON text declared `unknown` (below). Bun.sql serializes a value for a JSON
+  // Parameter itself, so JSON text would be stored as a JSON string, and it types a boolean,
+  // A number or an array of either by its JavaScript type ("cannot cast type boolean to
+  // Jsonb"): it gets an object whose toJSON() returns the value, which it binds as JSON and
+  // Serializes to exactly its JSON text. So does an unsafe() client without typed().
+const postgresJsonBindings = (query: QueryModule, { names, values }: BoundStatement): unknown[] =>
+  values.map((parameter, index) => (isJsonValue(query, parameterName(names, index), parameter) ? jsonText(parameter) : parameter));
+
+const executePostgres = async (client: ClientMembers, query: QueryModule, input: BoundStatement): Promise<unknown[]> => {
+  // An array for a SQL array parameter goes as its literal text, which the server reads as
+  // The parameter's type, written as pg writes it: Bun.sql binds no JavaScript array
+  // (`any($1)` failed with "insufficient data left in message"), postgres.js types an
+  // Array by its first element ("cannot cast type boolean to boolean[]" for `$1::bool[]`),
+  // And the copy of pg inside Neon's Pool and Client threw on a Uint8Array element and
+  // Left the connection out of step. Each element of a `jsonb[]` is a JSON value.
+  const bound: BoundStatement = { ...input, values: input.values.map((parameter, index) => {
+    const type = inputTypeAt(query, input.names, index);
+    return Array.isArray(parameter) && type?.kind === "array" ? postgresTypedArray(parameter, type) : parameter;
+  }) };
+  // Slonik takes only queries built by its SQL tag.
+  if (isSlonik(client)) {return slonik(client, bound.text, postgresJsonBindings(query, bound).map((parameter) => slonikParam(parameter)), query.columns);}
+  // Neon's template helper also has unsafe(), which builds a fragment without running it.
+  if (hasFunctionType(client.query)) {return queryPostgres(client, bound.text, postgresJsonBindings(query, bound), query.columns);}
+  if (hasFunctionType(client.unsafe)) {return executePostgresUnsafe(client, query, bound);}
+  if (hasFunctionType(client)) {
+    return neonCallable(client, bound.text, postgresJsonBindings(query, bound).map((parameter) => asByteaHex(parameter)), query.columns);
+  }
+  throw unsupported(client, query.dialect);
+};
+
+const executeMysql = async (client: ClientMembers, query: QueryModule, { text, values }: BoundStatement): Promise<unknown[]> => {
+  if (hasFunctionType(client.unsafe)) {return bunRows(await inspectClient<BunProtocol>(client).unsafe(text, values), query.columns);}
+  // Mariadb, checked before execute() because it has one too (returning rows, not a pair).
+  // Its callback API (mariadb/callback) answers through the callback and returns a command
+  // Object; its promise API returns a promise and ignores the callback.
+  if (hasFunctionType(client.batch) && hasFunctionType(client.query)) {return mariadb(client, text, values.map((parameter) => asBuffer(parameter)), query.columns);}
+  // Mysql2's callback API: the promise() wrapper runs on the same connection.
+  const mysqlClient = hasFunctionType(client.promise)
+    ? inspectClient<{ promise: () => ClientMembers }>(client).promise()
+    : client;
+  if (hasFunctionType(mysqlClient.execute)) {
+    // Mysql2 has query() beside execute(); PlanetScale's Connection, Client and transaction do not.
+    return hasFunctionType(mysqlClient.query) ? mysql2(mysqlClient, text, values, query.columns) : planetscale(mysqlClient, text, values, query.columns);
+  }
+  throw unsupported(client, query.dialect);
+};
+
+const executeDuckdb = async (client: ClientMembers, query: QueryModule, { text, values, names }: BoundStatement): Promise<unknown[]> => {
+  // @duckdb/node-api's DuckDBConnection: each value given its kind by the result's own types (decode-duckdb.ts).
+  if (isDuckdb(client)) {return runDuckdb(inspectClient<DuckdbClient>(client), text, values, names.map((_name, index) => inputTypeAt(query, names, index)), query.columns);}
+  throw unsupported(client, query.dialect);
+};
+
+const sqlite3Bindings = (query: QueryModule, { names, values }: BoundStatement): unknown[] =>
+  // The sqlite wrapper uses sqlite3, which otherwise binds a BigInt as NULL.
+  values.map((parameter, index) => numberOrDigits(parameter, inputTypeAt(query, names, index), "sqlite3"));
+
+const sqlite3Rows = async (client: ClientMembers, text: string, values: unknown[]): Promise<unknown[]> => {
+  type Callback = (error: Error | null, rows: unknown[]) => void;
+  const sqlite = inspectClient<{ all: (text: string, values: unknown[], done: Callback) => void }>(client);
+  const { promise, resolve, reject } = Promise.withResolvers<unknown[]>();
+  try {
+    // oxlint-disable-next-line promise/prefer-await-to-callbacks -- The native sqlite3 method supplies its result through this callback.
+    sqlite.all(text, values, (error, rows) => {
+      if (error) {reject(error);}
+      else {resolve(rows);}
+    });
+  } catch (error) {
+    reject(error);
+  }
+  return promise;
+};
+
+const preparedSqlite = async (client: ClientMembers, { text, values }: BoundStatement, columns: Columns | undefined): Promise<unknown[]> => {
+  const prepared = inspectClient<{ prepare: (text: string) => ClientMembers }>(client).prepare(text);
+  if (hasFunctionType(prepared.first)) {
+    const d1 = inspectClient<{ bind: (...values: unknown[]) => { all: () => PromiseLike<{ results: unknown[] }> } }>(prepared);
+    const bound = d1.bind(...values);
+    const result = await bound.all();
+    return normalize(result.results, columns, { d1: true });
+  }
+  const preparedStatement = inspectClient<{ all: (...values: unknown[]) => DriverRows }>(prepared);
+  return normalize(await preparedStatement.all(...values), columns);
+};
+
+const executeSqliteStatements = async (
+  client: ClientMembers,
+  bound: BoundStatement,
+  { columns, query }: { columns: Columns | undefined; query: QueryModule },
+): Promise<unknown[]> => {
+  if (hasFunctionType(client.getDatabaseInstance)) {
+    const sqlite = inspectClient<{ all: (text: string, values: unknown[]) => DriverRows }>(client);
+    return normalize(await sqlite.all(bound.text, sqlite3Bindings(query, bound)), columns);
+  }
+  if (hasFunctionType(client.all) && hasFunctionType(client.exec)) {
+    return normalize(await sqlite3Rows(client, bound.text, sqlite3Bindings(query, bound)), columns);
+  }
+  if (hasFunctionType(client.prepare)) {return preparedSqlite(client, bound, columns);}
+  throw unsupported(client, query.dialect);
+};
+
+const executeSqlite = async (client: ClientMembers, query: QueryModule, bound: BoundStatement): Promise<unknown[]> => {
+  const { columns } = query;
+  if (hasFunctionType(client.unsafe)) {
+    return normalize(await inspectClient<BunProtocol>(client).unsafe(bound.text, bound.values), columns);
+  }
+  if (hasFunctionType(client.execute)) {
+    const libsql = inspectClient<{ execute: (query: { sql: string; args: unknown[] }) => PromiseLike<{ rows: unknown[] }> }>(client);
+    // oxlint-disable-next-line eslint/sort-keys -- Preserve the native libSQL statement's key order.
+    const result = await libsql.execute({ sql: bound.text, args: bound.values });
+    return normalize(result.rows, columns);
+  }
+  if (isTurso(client)) {return runTurso(client, bound.text, bound.values, columns);}
+  return executeSqliteStatements(client, bound, { columns, query });
+};
+
+const executeDialect = async (client: ClientMembers, query: QueryModule, bound: BoundStatement): Promise<unknown[]> => {
+  switch (query.dialect) {
+    case "postgres": {return executePostgres(client, query, bound);}
+    case "mysql": {return executeMysql(client, query, bound);}
+    case "duckdb": {return executeDuckdb(client, query, bound);}
+    case "sqlite": {return executeSqlite(client, query, bound);}
+    default: {throw unsupported(client, query.dialect);}
+  }
+};
+
+const readAsyncCatalog = async (
+  query: QueryModule,
+  fresh: Fresh,
+  run: (probe: QueryModule) => Promise<unknown[]>,
+): Promise<unknown[] | undefined> => {
+  try {
+    return await run({ dialect: query.dialect, order: [], params: [], sql: fresh.query, text: fresh.query });
+  } catch {
+    // The caller's role can lack catalog access. It can still run the actual query.
+    return undefined;
+  }
+};
+
 const executeAsync = async function executeAsync(client: ClientMembers | null | undefined, query: QueryModule, params: ParamsInput): Promise<unknown[]> {
   if (matchesNullish(client) || (!hasObjectType(client) && !hasFunctionType(client))) {throw unsupported(client, query.dialect);}
   // A DuckDB connection has prepare() as SQLite's drivers do, and runs no other database's statement.
@@ -915,129 +1102,10 @@ const executeAsync = async function executeAsync(client: ClientMembers | null | 
   // The catalog facts the statement relied on, read again through the same client.
   if (query.fresh && due(query)) {
     const { fresh } = query;
-    const readCatalog = async (): Promise<unknown[] | undefined> => {
-      try {
-        return await executeAsync(client, { dialect: query.dialect, order: [], params: [], sql: fresh.query, text: fresh.query }, {});
-      } catch {
-        // The caller's role can lack catalog access. It can still run the actual query.
-        return undefined;
-      }
-    };
-    verifyFreshness(query, fresh, await readCatalog());
+    const rows = await readAsyncCatalog(query, fresh, async (probe) => executeAsync(client, probe, {}));
+    verifyFreshness(query, fresh, rows);
   }
-  const { text, values, names } = statement(query, params);
-  const type = (parameterIndex: number) => query.inputs?.[names[parameterIndex]!]?.type;
-  const isJsonParam = (parameterValue: unknown, parameterIndex: number): boolean => isJsonValue(query, names[parameterIndex]!, parameterValue);
-  switch (query.dialect) {
-    case "postgres": {
-      // An array for a SQL array parameter goes as its literal text, which the server reads as
-      // The parameter's type, written as pg writes it: Bun.sql binds no JavaScript array
-      // (`any($1)` failed with "insufficient data left in message"), postgres.js types an
-      // Array by its first element ("cannot cast type boolean to boolean[]" for `$1::bool[]`),
-      // And the copy of pg inside Neon's Pool and Client threw on a Uint8Array element and
-      // Left the connection out of step. Each element of a `jsonb[]` is a JSON value.
-      const bound = values.map((currentValue, index) => {
-        const inputType = type(index);
-        return Array.isArray(currentValue) && inputType?.kind === "array" ? arrayLiteral(isJson(inputType.of.kind) ? currentValue.map((element) => (matchesNullish(element) ? element : JSON.stringify(element))) : currentValue, inputType.delimiter) : currentValue;
-      });
-      // A JSON parameter goes to pg's family, PGlite and Neon as its JSON text, and to postgres.js
-      // As its JSON text declared `unknown` (below). Bun.sql serializes a value for a JSON
-      // Parameter itself, so JSON text would be stored as a JSON string, and it types a boolean,
-      // A number or an array of either by its JavaScript type ("cannot cast type boolean to
-      // Jsonb"): it gets an object whose toJSON() returns the value, which it binds as JSON and
-      // Serializes to exactly its JSON text. So does an unsafe() client without typed().
-      const json = () => bound.map((parameterValue, index) => (isJsonParam(parameterValue, index) ? jsonText(parameterValue) : parameterValue));
-      // Slonik before every other query(): its query() takes only its sql tag's queries.
-      if (isSlonik(client)) {return slonik(client, text, json().map(slonikParam), query.columns);}
-      // Query() before unsafe(): Neon's neon() has both, and its unsafe() builds a fragment
-      // For a template instead of running anything. Reylo decodes every value itself (decode.ts).
-      if (hasFunctionType(client.query)) {return queryPostgres(client, text, json(), query.columns);}
-      if (hasFunctionType(client.unsafe)) {
-        // Postgres.js reads a string for a date or time parameter through `new Date(x)` and binds
-        // Its toISOString(), so a timestamp's wall-clock time moved by the app's offset, and
-        // `infinity` or a zone name failed with "Invalid time value". Declared `unknown` (705), it
-        // Is sent as the text, which the server reads as the parameter's type, as it would an
-        // Undeclared one. Bun.sql (commitDistributed()) sends the text and has no typed().
-        // A JSON parameter goes to postgres.js as its JSON text declared `unknown` too: its own
-        // Serializer would write a value as JSON, but a client Drizzle wraps has that serializer
-        // Replaced by one that passes the value through (drizzle-orm/postgres-js), and a
-        // Transaction shows neither. Bun.sql serializes the value itself.
-        const bun = hasFunctionType(client.commitDistributed);
-        const asText = hasFunctionType(client.typed) && !bun;
-        const unknownPostgresOid = 705;
-        const postgres = inspectClient<{ typed: (value: unknown, oid: number) => unknown }>(client);
-        const mapped = bound.map((parameterValue, index) => (isJsonParam(parameterValue, index) ? (asText ? postgres.typed(jsonText(parameterValue), unknownPostgresOid) : { toJSON: () => jsonValue(parameterValue) }) : (asText && matchesString(parameterValue) && isTime(type(index)) ? postgres.typed(parameterValue, unknownPostgresOid) : parameterValue)));
-        return bun ? bunRows(await inspectClient<BunProtocol>(client).unsafe(text, mapped), query.columns) : postgresJs(client, text, mapped, query.columns);
-      }
-      if (hasFunctionType(client)) {return neonCallable(client, text, json().map(asByteaHex), query.columns);}
-      break;
-    }
-    case "mysql": {
-      if (hasFunctionType(client.unsafe)) {return bunRows(await inspectClient<BunProtocol>(client).unsafe(text, values), query.columns);}
-      // Mariadb, checked before execute() because it has one too (returning rows, not a pair).
-      // Its callback API (mariadb/callback) answers through the callback and returns a command
-      // Object; its promise API returns a promise and ignores the callback.
-      if (hasFunctionType(client.batch) && hasFunctionType(client.query)) {return mariadb(client, text, values.map(asBuffer), query.columns);}
-      // Mysql2's callback API: the promise() wrapper runs on the same connection.
-      const mysqlClient = hasFunctionType(client.promise)
-        ? inspectClient<{ promise: () => ClientMembers }>(client).promise()
-        : client;
-      if (hasFunctionType(mysqlClient.execute)) {
-        // Mysql2 has query() beside execute(); PlanetScale's Connection, Client and transaction do not.
-        return hasFunctionType(mysqlClient.query) ? mysql2(mysqlClient, text, values, query.columns) : planetscale(mysqlClient, text, values, query.columns);
-      }
-      break;
-    }
-    case "duckdb": {
-      // @duckdb/node-api's DuckDBConnection: each value given its kind by the result's own types (decode-duckdb.ts).
-      if (isDuckdb(client)) {return runDuckdb(inspectClient<DuckdbClient>(client), text, values, names.map((currentName, index) => type(index)), query.columns);}
-      break;
-    }
-    case "sqlite": {
-      // The driver's rows, each value given its kind (decode-sqlite.ts).
-      const {columns} = query;
-      if (hasFunctionType(client.unsafe)) {return normalize(await inspectClient<BunProtocol>(client).unsafe(text, values), columns);}
-      if (hasFunctionType(client.execute)) {
-        const libsql = inspectClient<{ execute: (query: { sql: string; args: unknown[] }) => PromiseLike<{ rows: unknown[] }> }>(client);
-        const result = await libsql.execute({ sql: text, args: values });
-        return normalize(result.rows, columns);
-      }
-      if (isTurso(client)) {return runTurso(client, text, values, columns);}
-      // The sqlite package wraps sqlite3, and sqlite3 binds a BigInt as NULL.
-      if (hasFunctionType(client.getDatabaseInstance)) {
-        const sqlite = inspectClient<{ all: (text: string, values: unknown[]) => DriverRows }>(client);
-        return normalize(await sqlite.all(text, values.map((currentValue, index) => numberOrDigits(currentValue, type(index), "sqlite3"))), columns);
-      }
-      if (hasFunctionType(client.all) && hasFunctionType(client.exec)) {
-        const bound = values.map((currentValue, index) => numberOrDigits(currentValue, type(index), "sqlite3"));
-        type Callback = (error: Error | null, rows: unknown[]) => void;
-        const sqlite = inspectClient<{ all: (text: string, values: unknown[], done: Callback) => void }>(client);
-        return normalize(
-          await new Promise<unknown[]>((resolve, reject) => {
-            sqlite.all(text, bound, (error, rows) => {
-              const failed = Boolean(error);
-              if (!failed) {resolve(rows);}
-              else {reject(error);}
-            });
-          }),
-          columns,
-        );
-      }
-      if (hasFunctionType(client.prepare)) {
-        const prepared = inspectClient<{ prepare: (text: string) => ClientMembers }>(client).prepare(text);
-        if (hasFunctionType(prepared.first)) {
-          const d1 = inspectClient<{ bind: (...values: unknown[]) => { all: () => PromiseLike<{ results: unknown[] }> } }>(prepared);
-          const bound = d1.bind(...values);
-          const result = await bound.all();
-          return normalize(result.results, columns, { d1: true });
-        }
-        const statement = inspectClient<{ all: (...values: unknown[]) => DriverRows }>(prepared);
-        return normalize(await statement.all(...values), columns);
-      }
-      break;
-    }
-  }
-  throw unsupported(client, query.dialect);
+  return executeDialect(client, query, statement(query, params));
 };
 
 /**
