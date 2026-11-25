@@ -9,26 +9,46 @@ import { readFileSync } from "node:fs";
 // oxlint-disable-next-line rules/no-node-imports -- This server-side entry point uses this built-in to compute the existing digest using the host's hash implementation.
 import { createHash } from "node:crypto";
 import { anyEngine, engine, reason, MissingEngine, Unreachable } from './engine.ts';
-import type { Analysis, Engine, Lexed } from './engine.ts';
+import type { Engine, Lexed } from './engine.ts';
 import { duckdbPath, hclPath, packageDir, resolveProject, sqlitePath } from './project.ts';
 import type { ResolvedProject } from './project.ts';
 import { NotMysql, refusedLogin } from "./connection.ts";
 import { isEmptyString, isRecord, matchesNull, matchesNullish, matchesString, matchesUndefined } from "./native-predicates.ts";
 import { CACHE_ENTRY_VERSION, cacheEntryFile, readCacheEntry, readOfflineEntry, writeCacheEntry } from "./analysis-cache.ts";
+import type { Entry } from "./analysis-cache.ts";
 import { FINGERPRINT } from "./schema-fingerprint.ts";
 import { closeAnalysisConnection, getOpenConnection, openAnalysisConnection, settleInBackground, withLoginRetry } from "./analysis-connection.ts";
 import type { AnalysisConnection } from "./analysis-connection.ts";
 
-export type { Entry } from "./analysis-cache.ts";
+import { failedAnalysis, liveSchema, offlineSchema, successfulAnalysis } from "./analysis-results.ts";
+import type { Outcome, SchemaSnapshot } from "./analysis-results.ts";
 
-export type Outcome =
-  | { ok: true; analysis: Analysis; source: "cache" | "database"; entry: string }
-  | { ok: false; message: string; code: number };
+export type { Entry } from "./analysis-cache.ts";
+export type { Outcome } from "./analysis-results.ts";
+
+interface AnalysisOptions {
+  force?: boolean;
+  store?: boolean;
+}
+
+interface SessionOrigin {
+  dir: string;
+  env: Record<string, string | undefined>;
+  idle: number;
+}
+
+interface AnalysisTarget {
+  file: string;
+  fingerprint: string;
+}
 
 const DIGEST_START = 0;
 const SERVER_DIGEST_LENGTH = 16;
 const SCHEMA_DIGEST_LENGTH = 16;
 const STATEMENT_DIGEST_LENGTH = 32;
+const DATABASE_FAILURE = 5;
+const MISSING_DATABASE_URL = 4;
+const INVALID_PROJECT = 11;
 
 const sha256 = (text: string): string => createHash("sha256").update(text).digest("hex");
 
@@ -95,23 +115,20 @@ export class Session {
   /** The engine of the project's database, or why there is none, which an analysis reports. */
   #engine!: Engine | MissingEngine;
   #engineFingerprint!: string;
-  readonly #idle: number;
-  /** Where the project was resolved from, and with what environment, for `#reread`. */
-  readonly #dir: string;
-  readonly #env: Record<string, string | undefined>;
+  /** The original project lookup and its connection idle policy. */
+  // oxlint-disable-next-line rules/no-readonly -- This session always re-resolves the project with the settings it opened with.
+  readonly #origin: SessionOrigin;
   #io: Promise<AnalysisConnection> | undefined;
   /** The URL the connection opens: the project's, until a command in `direct_url` gives a fresh one. */
   #url: string | undefined;
   #busy = NO_ACTIVE_ANALYSIS;
   #timer: ReturnType<typeof setTimeout> | undefined;
-  #schema: { value: string | null; at: number; error?: string; fatal?: boolean } | undefined;
+  #schema: SchemaSnapshot | undefined;
   #hclHash: string | undefined;
 
-  private constructor(engine: Engine | MissingEngine, project: ResolvedProject, idle: number, dir: string, env: Record<string, string | undefined>) {
+  private constructor(engine: Engine | MissingEngine, project: ResolvedProject, origin: SessionOrigin) {
     this.root = project.root;
-    this.#idle = idle;
-    this.#dir = dir;
-    this.#env = env;
+    this.#origin = origin;
     this.#adopt(engine, project);
   }
 
@@ -130,7 +147,7 @@ export class Session {
    */
   async #reread(): Promise<void> {
     if (matchesUndefined(nonemptyText(this.project.error)) || matchesUndefined(this.project.refreshUrl)) {return;}
-    const { project, engine } = await openProject(this.#dir, this.#env);
+    const { project, engine } = await openProject(this.#origin.dir, this.#origin.env);
     if (!matchesUndefined(nonemptyText(project.error))) {return;}
     this.#adopt(engine, project);
     this.#schema = undefined;
@@ -148,9 +165,9 @@ export class Session {
     const { project, engine } = await openProject(dir, env);
     // A setting the build step reads (`sqlcommenter`) is part of the key, so a change to it in the
     // Project file reaches a running watch process.
-    const key = JSON.stringify([project.root, project.url ?? null, project.error ?? null, project.sqlcommenter, engine instanceof MissingEngine ? engine.message : null]);
+    const key = JSON.stringify([project.root, project.url, project.error, project.sqlcommenter, engine instanceof MissingEngine ? engine.message : undefined]);
     let session = sessions.get(key);
-    if (!session) {sessions.set(key, (session = new Session(engine, project, BUILD_IDLE, dir, env)));}
+    if (!session) {sessions.set(key, (session = new Session(engine, project, { dir, env, idle: BUILD_IDLE })));}
     return session;
   }
 
@@ -163,7 +180,7 @@ export class Session {
    */
   public static async open(from: string, env: Record<string, string | undefined> = hostEnvironment(), idle = Infinity): Promise<Session> {
     const { project, engine } = await openProject(from, env);
-    return new Session(engine, project, idle, from, env);
+    return new Session(engine, project, { dir: from, env, idle });
   }
 
   /**
@@ -184,7 +201,7 @@ export class Session {
    * statement, then by the server. Two databases keep an entry each, since a Postgres fingerprint
    * holds object ids, so a dev and a test database built by the same migrations still differ. A
    * session that cannot reach its database, or has no URL, reads another server's entry for the
-   * statement where it has none of its own (`#offlineEntry`).
+   * statement where it has none of its own (`#offlineAnalysis`).
    * @param {string} sql The SQL statement used to compute the cache key.
    * @returns {string} The absolute path of this server's cache entry.
    */
@@ -200,14 +217,11 @@ export class Session {
     return digestPrefix(JSON.stringify([CACHE_ENTRY_VERSION, this.#engineFingerprint, this.project.dialect, sql]), STATEMENT_DIGEST_LENGTH);
   }
 
-  /**
-   * Finds an entry to use if the server is unreachable or has no URL.
-   * @param {string} sql The SQL statement used to compute the cache key.
-   * @returns {ReturnType<typeof readOfflineEntry>} This server's entry if present, otherwise the newest entry from another server.
-   */
-  async #offlineEntry(sql: string): ReturnType<typeof readOfflineEntry> {
+  async #offlineAnalysis(sql: string): Promise<Extract<Outcome, { ok: true }> | undefined> {
     const statementKey = this.#statementKey(sql);
-    return readOfflineEntry(this.root, statementKey, this.#cacheFile(statementKey));
+    const own = this.#cacheFile(statementKey);
+    const hit = await readOfflineEntry(this.root, statementKey, own);
+    return hit ? successfulAnalysis(hit.entry.analysis, "cache", hit.file) : undefined;
   }
 
   /**
@@ -227,10 +241,10 @@ export class Session {
       return outcome.ok && this.project.dialect === "sqlite" ? await this.#onDrivers(sql, outcome) : outcome;
     } finally {
       this.#busy -= ONE_ANALYSIS;
-      if (this.#busy === NO_ACTIVE_ANALYSIS && this.#io && Number.isFinite(this.#idle)) {
+      if (this.#busy === NO_ACTIVE_ANALYSIS && this.#io && Number.isFinite(this.#origin.idle)) {
         this.#timer = setTimeout(() => {
           settleInBackground(this.#release());
-        }, this.#idle).unref();
+        }, this.#origin.idle).unref();
       }
     }
   }
@@ -271,52 +285,71 @@ export class Session {
     return outcome;
   }
 
-  async #analyze(sql: string, options: { force?: boolean; store?: boolean }): Promise<Outcome> {
+  async #analyze(sql: string, options: AnalysisOptions): Promise<Outcome> {
     const projectError = nonemptyText(this.project.error);
-    if (!matchesUndefined(projectError)) {return { ok: false, message: projectError, code: 11 };}
-    // With no URL, `.reylo/` answers as it does where the database cannot be reached (the dialect
-    // Is the installed engine's), and a statement it lacks needs a URL.
-    if (matchesUndefined(nonemptyText(this.project.url))) {
-      const hit = this.#engine instanceof MissingEngine || options.force === true ? undefined : await this.#offlineEntry(sql);
-      return hit ? { ok: true, analysis: hit.entry.analysis, source: "cache", entry: hit.file } : { ok: false, message: this.project.missingUrl, code: 4 };
+    if (!matchesUndefined(projectError)) {
+      return failedAnalysis(projectError, INVALID_PROJECT);
     }
-    // The URL names the database, whose engine package the project has to have installed.
+    if (matchesUndefined(nonemptyText(this.project.url))) {
+      const hit = this.#engine instanceof MissingEngine || options.force === true ? undefined : await this.#offlineAnalysis(sql);
+      return hit ?? failedAnalysis(this.project.missingUrl, MISSING_DATABASE_URL);
+    }
     const engine = this.#engine;
-    if (engine instanceof MissingEngine) {return { ok: false, message: engine.message, code: 11 };}
+    if (engine instanceof MissingEngine) {
+      return failedAnalysis(engine.message, INVALID_PROJECT);
+    }
     const file = this.entryFile(sql);
     const schema = await this.schema();
     if (schema.fatal === true) {
-      // oxlint-disable-next-line typescript/no-non-null-assertion -- Every fatal schema result has a diagnostic, while the public schema result retains its existing optional fields.
-      return { ok: false, message: schema.error!, code: 5 };
+      // oxlint-disable-next-line typescript/no-non-null-assertion -- Every fatal schema result has a diagnostic and the public schema result retains its optional fields.
+      return failedAnalysis(schema.error!, DATABASE_FAILURE);
     }
     if (matchesNull(schema.value)) {
-      const hit = options.force === true ? undefined : await this.#offlineEntry(sql);
-      if (hit) {return { ok: true, analysis: hit.entry.analysis, source: "cache", entry: hit.file };}
-      return { ok: false, message: `${this.cannotConnect(schema.error)}; .reylo has no analysis of this statement, so run reylo generate where the database can be reached.`, code: 5 };
+      const hit = options.force === true ? undefined : await this.#offlineAnalysis(sql);
+      return hit ?? failedAnalysis(`${this.cannotConnect(schema.error)}; .reylo has no analysis of this statement, so run reylo generate where the database can be reached.`, DATABASE_FAILURE);
     }
+    return this.#analyzeLive(sql, { file, fingerprint: schema.value }, options);
+  }
+
+  async #analyzeLive(sql: string, { file, fingerprint }: AnalysisTarget, options: AnalysisOptions): Promise<Outcome> {
     const entry = options.force === true || options.store === false ? undefined : await readCacheEntry(file);
-    if (entry && entry.schema === schema.value) {return { ok: true, analysis: entry.analysis, source: "cache", entry: file };}
-    let analysis: Analysis;
-    const io = this.#connection();
-    try {
-      analysis = await (await io).analyze(sql);
-    } catch (error) {
-      // A dead connection is reopened by the next call; a server error is reported.
-      if (error instanceof Unreachable) {
-        this.#drop(io);
-        this.#schema = { value: null, at: cacheTime(), error: reason(error) };
-        return { ok: false, message: this.cannotConnect(reason(error)), code: 5 };
-      }
-      if (error instanceof NotMysql) {
-        this.#drop(io);
-        const message = this.notMysql(error);
-        this.#schema = { value: null, at: cacheTime(), error: message, fatal: true };
-        return { ok: false, message, code: 5 };
-      }
-      return { ok: false, message: errorMessage(error), code: 5 };
+    if (entry?.schema === fingerprint) {
+      return successfulAnalysis(entry.analysis, "cache", file);
     }
-    if (options.store !== false) {await writeCacheEntry(this.root, file, { version: CACHE_ENTRY_VERSION, dialect: this.project.dialect, schema: schema.value, analysis, at: cacheTime() });}
-    return { ok: true, analysis, source: "database", entry: file };
+    const outcome = await this.#queryAnalysis(sql, file);
+    if (outcome.ok && options.store !== false) {
+      // oxlint-disable-next-line eslint/sort-keys -- Preserve the byte order of the serialized version 1 cache entry.
+      const updated: Entry = { version: CACHE_ENTRY_VERSION, dialect: this.project.dialect, schema: fingerprint, analysis: outcome.analysis, at: cacheTime() };
+      await writeCacheEntry(this.root, file, updated);
+    }
+    return outcome;
+  }
+
+  async #queryAnalysis(sql: string, file: string): Promise<Outcome> {
+    const pending = this.#connection();
+    try {
+      const connection = await pending;
+      const analysis = await connection.analyze(sql);
+      return successfulAnalysis(analysis, "database", file);
+    } catch (error) {
+      return this.#analyzeFailure(pending, error);
+    }
+  }
+
+  #analyzeFailure(pending: Promise<AnalysisConnection>, error: unknown): Outcome {
+    // A dead connection is reopened on the next call. A server error is reported to the caller.
+    if (error instanceof Unreachable) {
+      this.#drop(pending);
+      this.#schema = offlineSchema(cacheTime(), reason(error));
+      return failedAnalysis(this.cannotConnect(reason(error)), DATABASE_FAILURE);
+    }
+    if (error instanceof NotMysql) {
+      this.#drop(pending);
+      const message = this.notMysql(error);
+      this.#schema = offlineSchema(cacheTime(), message, true);
+      return failedAnalysis(message, DATABASE_FAILURE);
+    }
+    return failedAnalysis(errorMessage(error), DATABASE_FAILURE);
   }
 
   /**
@@ -341,7 +374,7 @@ export class Session {
         }
       } catch (error) {
         await this.#release();
-        this.#schema = { value: null, at: now, error: `Cannot read HCL schema ${source}: ${errorMessage(error)}`, fatal: true };
+        this.#schema = offlineSchema(now, `Cannot read HCL schema ${source}: ${errorMessage(error)}`, true);
         return this.#schema;
       }
     }
@@ -352,7 +385,7 @@ export class Session {
       io = await pending;
     } catch (error) {
       this.#drop(pending);
-      this.#schema = error instanceof Unreachable ? { value: null, at: now, error: reason(error) } : { value: null, at: now, error: error instanceof NotMysql ? this.notMysql(error) : errorMessage(error), fatal: true };
+      this.#schema = this.#failedSchemaConnection(now, error);
       return this.#schema;
     }
     try {
@@ -362,19 +395,27 @@ export class Session {
       // The engine's answers describe the old schema too.
       const previousFingerprint = nonemptyText(this.#schema?.value);
       if (!matchesUndefined(previousFingerprint) && previousFingerprint !== value) {await io.forget().catch(() => {});}
-      this.#schema = { value, at: now };
+      this.#schema = liveSchema(value, now);
     } catch (error) {
       if (!matchesUndefined(source)) {
         this.#drop(pending);
-        this.#schema = { value: null, at: now, error: errorMessage(error), fatal: true };
+        this.#schema = offlineSchema(now, errorMessage(error), true);
       } else if (error instanceof Unreachable) {
         this.#drop(pending);
-        this.#schema = { value: null, at: now, error: reason(error) };
+        this.#schema = offlineSchema(now, reason(error));
       } else {
-        this.#schema = { value: `unverified ${process.pid} ${now}`, at: now };
+        this.#schema = liveSchema(`unverified ${process.pid} ${now}`, now);
       }
     }
     return this.#schema;
+  }
+
+  #failedSchemaConnection(at: number, error: unknown): SchemaSnapshot {
+    if (error instanceof Unreachable) {
+      return offlineSchema(at, reason(error));
+    }
+    const message = error instanceof NotMysql ? this.notMysql(error) : errorMessage(error);
+    return offlineSchema(at, message, true);
   }
 
   /**
