@@ -24,8 +24,10 @@ import { dirname, join } from "node:path";
 // oxlint-disable-next-line rules/no-node-imports -- Compare statements with Node's built-in SQLite engine and its synchronous driver.
 import { DatabaseSync } from "node:sqlite";
 // oxlint-disable-next-line rules/no-node-imports -- Convert native driver and worker module URLs for Node's loader.
-import { fileURLToPath, pathToFileURL } from "node:url";
+import { fileURLToPath } from "node:url";
 import { packageDir } from "./project.ts";
+import { nativeDrivers } from "./sqlite-native-drivers.ts";
+import type { SqliteDriverOpener } from "./sqlite-native-drivers.ts";
 import { matchesUndefined } from "./native-predicates.ts";
 
 export interface SqliteDriver {
@@ -37,106 +39,6 @@ export interface SqliteDriver {
   says(refusal: string): string;
   close(): Promise<void>;
 }
-
-type Require = NodeJS.Require;
-type Open = (require: Require, path: string) => Promise<SqliteDriver>;
-
-/** Better-sqlite3's API, which the `libsql` package and Turso's compat module copy. */
-interface SyncDatabase {
-  prepare(sql: string): { get: () => unknown };
-  close(): void;
-}
-
-const sync = function (name: string, db: SyncDatabase): SqliteDriver {
-  const row = db.prepare("select sqlite_version() as v").get() as { v: string };
-  return {
-    name,
-    says: (refusal) => `${name} runs SQLite ${row.v}, which refuses this statement: ${refusal}`,
-    async refuses(sql) {
-      try {
-        db.prepare(sql);
-        return undefined;
-      } catch (error) {
-        return (error as Error).message;
-      }
-    },
-    async close() {
-      db.close();
-    },
-  };
-};
-
-/** The drivers, in the order a message lists them. */
-const DRIVERS: [string, Open][] = [
-  [
-    "better-sqlite3",
-    async (require, path) => {
-      const Database = require("better-sqlite3") as new (path: string, options: object) => SyncDatabase;
-      return sync("better-sqlite3", new Database(path, { readonly: true, fileMustExist: true }));
-    },
-  ],
-  [
-    // `@libsql/client` opens a file through the `libsql` package, its own dependency.
-    "@libsql/client",
-    async (require, path) => {
-      const Database = createRequire(require.resolve("@libsql/client"))("libsql") as new (path: string, options: object) => SyncDatabase;
-      return sync("@libsql/client", new Database(path, { readonly: true }));
-    },
-  ],
-  [
-    "libsql",
-    async (require, path) => {
-      const Database = require("libsql") as new (path: string, options: object) => SyncDatabase;
-      return sync("libsql", new Database(path, { readonly: true }));
-    },
-  ],
-  [
-    "sqlite3",
-    async (require, path) => {
-      type Db = {
-        get(sql: string, cb: (error: Error | null, row: { v: string }) => void): void;
-        prepare(sql: string, cb: (error: Error | null) => void): { finalize: () => void };
-        close(cb: () => void): void;
-      };
-      const sqlite3 = require("sqlite3") as { Database: new (path: string, mode: number, cb: (error: Error | null) => void) => Db; OPEN_READONLY: number };
-      const db = await new Promise<Db>((resolve, reject) => {
-        const database: Db = new sqlite3.Database(path, sqlite3.OPEN_READONLY, (error) => {
-          if (error) {reject(error);}
-          else {resolve(database);}
-        });
-      });
-      const version = await new Promise<string>((resolve, reject) => {
-        db.get("select sqlite_version() as v", (error, row) => {
-          if (error) {reject(error);}
-          else {resolve(row.v);}
-        });
-      });
-      return {
-        name: "sqlite3",
-        says: (refusal) => `sqlite3 runs SQLite ${version}, which refuses this statement: ${refusal}`,
-        refuses: (sql) =>
-          new Promise((resolve) => {
-            const statement = db.prepare(sql, (error) => {
-              if (!error) {statement.finalize();}
-              // Node-sqlite3 writes the result code before SQLite's message.
-              resolve(error ? error.message.replace(/^SQLITE_\w+: /u, "") : undefined);
-            });
-          }),
-        close: () => new Promise<void>((resolve) => {
-          db.close(() => {resolve();});
-        }),
-      };
-    },
-  ],
-  [
-    "@tursodatabase/database",
-    async (require, path) => {
-      const { Database } = (await import(pathToFileURL(require.resolve("@tursodatabase/database/compat")).href)) as { Database: new (path: string, options: object) => SyncDatabase };
-      return sync("@tursodatabase/database", new Database(path, { readonly: true }));
-    },
-  ],
-  ["wrangler", openD1],
-];
 
 /** How long workerd may take to start before D1 is left out. */
 const D1_START = 30_000;
@@ -177,7 +79,7 @@ const wranglerConfig = function (dir: string): string {
  * schema of the database the type check reads. A project whose wrangler config binds no D1
  * database is not asked.
  */
-async function openD1(require: Require, path: string): Promise<SqliteDriver> {
+async function openD1(require: NodeJS.Require, path: string): Promise<SqliteDriver> {
   const entry = require.resolve("wrangler");
   const dir = dirname(require.resolve("./package.json"));
   const key = `${entry}\0${dir}`;
@@ -311,6 +213,9 @@ function wranglerVersion(entry: string): string {
   }
   return "";
 }
+
+// Keep the order in which diagnostics list the optional drivers.
+const DRIVERS: [string, SqliteDriverOpener][] = [...nativeDrivers, ["wrangler", openD1]];
 
 /** The SQLite drivers the project's package.json lists, by package name. */
 export function projectDrivers(root: string): string[] {
