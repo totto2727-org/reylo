@@ -216,6 +216,9 @@ const isDurableObjectSql = function isDurableObjectSql(client: ClientMembers | n
  * keeps on `session.client` (the pool for a database, the transaction's own connection inside
  * one), or on `session.tx` inside a libSQL transaction, whose `client` stays the base client;
  * any other client as it is.
+ *
+ * @param {ClientMembers} currentClient - The supplied native client or Drizzle wrapper.
+ * @returns {ClientMembers} The native receiver of the statement, preserving its transaction connection.
  */
 const underneath = function underneath(currentClient: ClientMembers): ClientMembers {
   const session = !matchesNullish(currentClient) && hasObjectType(currentClient) && hasFunctionType(currentClient.select) ? currentClient.session : undefined;
@@ -281,18 +284,36 @@ const checkParams: (query: QueryModule, input: unknown) => asserts input is Reco
   throw new ParameterError(`The parameters must be an object keyed by parameter name, or by number for positional placeholders ({ 1: ..., 2: ... }); got ${Array.isArray(input) ? "an array" : String(input)}. ${takes}`);
 };
 
-/** `text` as Reylo sends it: with the comment naming the query's file, where the module asks for one (src/sqlcommenter.ts). */
+/**
+ * `text` as Reylo sends it: with the comment naming the query's file, where the module asks for one (src/sqlcommenter.ts).
+ *
+ * @param {QueryModule} query - The query module that controls the SQL comment.
+ * @param {string} text - The statement after placeholder compilation.
+ * @returns {string} The statement with the source comment when requested and available.
+ */
 export function sentText(query: QueryModule, text: string): string {
   return query.sqlcommenter && query.source ? withSqlcommenter(text, query.source) : text;
 }
 
-/** The checks a parameter needs (src/checks.ts): every build step passes them where its statement has such a parameter. */
+/**
+ * The checks a parameter needs (src/checks.ts): every build step passes them where its statement has such a parameter.
+ *
+ * @param {QueryModule} query - The query module that supplies the runtime checks.
+ * @param {string} name - The name used in the diagnostic if the checks are missing.
+ * @returns {Checks} The module's runtime checks.
+ */
 const checksFor = function checksFor(query: QueryModule, name: string): Checks {
   if (query.checks) {return query.checks;}
   throw new ParameterError(`Parameter "${name}" is a typed JSON, structured or cast parameter, which the run time checks with Reylo's checks; a query defined by hand passes them: defineQuery({ …, checks }) with checks from "@totto2727/reylo".`);
 };
 
-/** Where an array, or an array inside it (a multidimensional one), holds null or undefined: `[2]`, `[1][0]`. */
+/**
+ * Where an array, or an array inside it (a multidimensional one), holds null or undefined: `[2]`, `[1][0]`.
+ *
+ * @param {Readonly<unknown[]>} array - The array to inspect, including its nested arrays.
+ * @param {string} path - The index path of the parent array.
+ * @returns {string | undefined} The first null or undefined element's index path, or undefined.
+ */
 const nullElement = function nullElement(array: Readonly<unknown[]>, path = ""): string | undefined {
   for (let arrayIndex = 0; arrayIndex < array.length; arrayIndex++) {
     const element = array[arrayIndex];
@@ -305,14 +326,25 @@ const nullElement = function nullElement(array: Readonly<unknown[]>, path = ""):
   return undefined;
 };
 
-/** Whether a parameter the statement takes no null for is declared with a type that takes no null: for a JSON one, whether the schema its type carries refuses JSON's null too. */
+/**
+ * Whether a parameter the statement takes no null for is declared with a type that takes no null: for a JSON one, whether the schema its type carries refuses JSON's null too.
+ *
+ * @param {QueryModule} query - The query module that provides JSON Schema validation.
+ * @param {EngineType | undefined} type - The engine type of the parameter, if available.
+ * @returns {boolean} True if the type cannot represent the supplied null.
+ */
 const refusesNull = function refusesNull(query: QueryModule, type: EngineType | undefined): boolean {
   if (matchesUndefined(type) || type.kind === "unknown") {return false;}
   if (type.kind !== "json") {return true;}
   return !matchesUndefined(type.schema) && !matchesUndefined(query.checks) && !matchesUndefined(query.checks.validate(type.schema, null));
 };
 
-/** A parameter the statement takes no null for, given null or left out. */
+/**
+ * A parameter the statement takes no null for, given null or left out.
+ *
+ * @param {string} name - The parameter name shown in the diagnostic.
+ * @param {unknown} parameterValue - The null or missing value that caused the error.
+ */
 const refuseNull = function refuseNull(name: string, parameterValue: unknown): never {
   throw new ParameterError(`Parameter "${name}" ${matchesUndefined(parameterValue) ? "is missing" : "is null"}, and the statement takes no null for it: pass a value.`);
 };
@@ -356,10 +388,20 @@ const isJsonValue = function isJsonValue(query: QueryModule, name: string, param
  */
 const JSON_NULL: unique symbol = Symbol("JSON null");
 
-/** A JSON parameter's value as JSON: `JSON_NULL` as null. */
+/**
+ * A JSON parameter's value as JSON: `JSON_NULL` as null.
+ *
+ * @param {unknown} candidate - The JavaScript value or internal marker for JSON null.
+ * @returns {unknown} The JavaScript value used for JSON serialization.
+ */
 const jsonValue = (candidate: unknown) => (candidate === JSON_NULL ? null : candidate);
 
-/** A JSON parameter's value as the JSON text a driver binds. */
+/**
+ * A JSON parameter's value as the JSON text a driver binds.
+ *
+ * @param {unknown} candidate - The parameter before serialization.
+ * @returns {string} The JSON text sent to a driver that accepts encoded JSON.
+ */
 const jsonText = (candidate: unknown): string => JSON.stringify(jsonValue(candidate));
 
 // A date or time value's type says whether it has a zone (src/render.ts),
@@ -408,10 +450,22 @@ const checkBinary = function checkBinary(type: EngineType | undefined, name: str
   throw new ParameterError(`Parameter "${name}" is binary data, so it takes a Uint8Array (a Buffer is one), as \`.run()\` returns one; got ${describe(parameterValue)}. ${parameterValue instanceof ArrayBuffer ? "Wrap an ArrayBuffer in one: new Uint8Array(buffer)." : "Decode base64 or hex text into one first."}`);
 };
 
-/** Whether `type` is one of pgvector's dense vectors, which `.run()` returns as an array of numbers. */
+/**
+ * Whether `type` is one of pgvector's dense vectors, which `.run()` returns as an array of numbers.
+ *
+ * @param {EngineType} type - The engine type to inspect.
+ * @returns {boolean} True for the scalar types vector and halfvec.
+ */
 const isVector = (type: EngineType): type is EngineType & { kind: "scalar" } => type.kind === "scalar" && (type.name === "vector" || type.name === "halfvec");
 
-/** A vector's floats as the text a VECTOR's `to_vector` and pgvector's input read; JSON's, which would write NaN and ±Infinity as null, so those are refused. */
+/**
+ * A vector's floats as the text a VECTOR's `to_vector` and pgvector's input read; JSON's, which would write NaN and ±Infinity as null, so those are refused.
+ *
+ * @param {Readonly<unknown[]>} vector - The input array, which must contain finite numbers.
+ * @param {string} name - The parameter name used in diagnostics.
+ * @param {string} what - The engine's description of the supported vector.
+ * @returns {string} The vector literal read by the database.
+ */
 const vectorText = function vectorText(vector: Readonly<unknown[]>, name: string, what: string): string {
   vector.forEach((element, index) => {
     if (!matchesNumber(element) || !Number.isFinite(element)) {
@@ -484,7 +538,12 @@ const FIRST_CALENDAR_MONTH = 1;
 const MINUTES_PER_HOUR = 60;
 const ZERO_ZONE_OFFSET = 0;
 
-/** Pg's `dateToString`: the local date and time to the millisecond, then the offset; BC for a year before 1. */
+/**
+ * Pg's `dateToString`: the local date and time to the millisecond, then the offset; BC for a year before 1.
+ *
+ * @param {Date} date - The Date to read in local time.
+ * @returns {string} Postgres date and time text with its local offset.
+ */
 const dateText = function dateText(date: Date): string {
   const pad = (field: number, width = CLOCK_FIELD_WIDTH): string => String(field).padStart(width, "0");
   const year = date.getFullYear();
@@ -504,6 +563,10 @@ const dateText = function dateText(date: Date): string {
  * element quoted, with `"` and `\` escaped: a Date as its local time and offset, an object as
  * its JSON, anything else as its string. The elements are separated by `delim`, the element type's
  * delimiter: the server reads `{"a","b"}` as one element of a `geometry[]`, whose delimiter is `:`.
+ *
+ * @param {Readonly<unknown[]>} array - The array of SQL values, including nested arrays.
+ * @param {string} delim - The separator that the element type uses.
+ * @returns {string} A Postgres array literal with the elements escaped.
  */
 export function arrayLiteral(array: Readonly<unknown[]>, delim = ","): string {
   let out = "{";
@@ -529,7 +592,14 @@ const slonikParam = function (parameterValue: unknown): unknown {
   return hasObjectType(parameterValue) ? JSON.stringify(parameterValue) : parameterValue;
 };
 
-/** A bound value as the text Postgres's input function reads, as `.run()` sends it through pg. */
+/**
+ * A bound value as the text Postgres's input function reads, as `.run()` sends it through pg.
+ *
+ * @param {QueryModule} query - The query module that describes the value's engine type.
+ * @param {string} name - The name used to look up the parameter.
+ * @param {unknown} parameterValue - The bound JavaScript value.
+ * @returns {string | null} The input text accepted by Postgres, or null for SQL NULL.
+ */
 const postgresText = function postgresText(query: QueryModule, name: string, parameterValue: unknown): string | null {
   if (matchesNullish(parameterValue)) {return null;}
   const inputType = query.inputs?.[name]?.type;
@@ -561,6 +631,9 @@ const indexOf = function indexOf(query: QueryModule, placeholder: { name: string
  * Postgres numbers each distinct parameter once; MySQL has only `?`, and better-sqlite3 reads
  * SQLite's `?NNN` as a named parameter, so both get one `?` per placeholder and a repeated name is
  * repeated in the binding order.
+ *
+ * @param {QueryModule} query - The module with either raw SQL or a compiled statement.
+ * @returns {{ text: string, order: Readonly<string[]> }} The statement and the parameter names in binding order.
  */
 export function compile(query: QueryModule): { text: string; order: Readonly<string[]> } {
   if (query.text && query.order) {return { text: query.text, order: query.order };}
@@ -673,7 +746,14 @@ const executeSyncSqlite = function executeSyncSqlite(client: ClientMembers, quer
   return runSyncSqlite(client, text, values, query.columns);
 };
 
-/** The synchronous path alone, for `runSync`: any other client is refused before anything runs. */
+/**
+ * The synchronous path alone, for `runSync`: any other client is refused before anything runs.
+ *
+ * @param {SyncClientFor<D>} client - The synchronous SQLite client or transaction.
+ * @param {QueryModule<D>} query - The module with the SQLite statement.
+ * @param {ParamsInput} params - The values keyed by parameter name or position.
+ * @returns {unknown[]} The decoded result rows, or an empty array if the statement returns none.
+ */
 export const executeSync = function executeSync<D extends Dialect>(client: SyncClientFor<D>, query: QueryModule<D>, params: ParamsInput = {}): unknown[] {
   const currentClient = underneath(inspectClient(client));
   const refuse = (why: string) => new TypeError(`runSync takes a synchronous SQLite client (better-sqlite3, node:sqlite, bun:sqlite, the Database of @tursodatabase/database/compat or a Durable Object's ctx.storage.sql); ${why}. run takes every client.`);
@@ -690,6 +770,10 @@ export const executeSync = function executeSync<D extends Dialect>(client: SyncC
  * returns (src/standard-query.ts), bound as `.run()` binds them, its checks included: on Postgres
  * each value's text, which a driver binds with no declared type, so the server reads it as the
  * parameter's type; on MySQL and SQLite each value as a driver binds it.
+ *
+ * @param {QueryModule} query - The module with the statement and its metadata.
+ * @param {unknown} params - The values keyed by parameter name or position.
+ * @returns {{ text: string, values: unknown[] }} The compiled statement and encoded values in binding order.
  */
 export const rawStatement = function rawStatement(query: QueryModule, params: unknown): { text: string; values: unknown[] } {
   checkParams(query, params);
@@ -873,6 +957,11 @@ const executeAsync = async function executeAsync(client: ClientMembers | null | 
  * Runs the statement and returns its rows (an empty array for a statement that returns none).
  * On a synchronous SQLite client the rows come back at once and an error is thrown; on every
  * other client they come back as a promise, which rejects with the driver's own error.
+ *
+ * @param {ClientFor<D>} client - The native driver client, connection or transaction.
+ * @param {QueryModule<D>} query - The module with the statement and its metadata.
+ * @param {ParamsInput} params - The values keyed by parameter name or position.
+ * @returns {unknown[] | Promise<unknown[]>} The decoded rows or a promise that resolves to them.
  */
 export const execute = function execute<D extends Dialect>(
   client: ClientFor<D>,
