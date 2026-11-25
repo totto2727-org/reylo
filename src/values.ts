@@ -30,6 +30,12 @@ import {
   matchesNumber, matchesString, matchesUndefined,
 } from "./native-predicates.ts";
 
+import { describe } from "./value-errors.ts";
+import { bigInteger, DecodeError, exactInteger, float32s, truth } from "./value-numbers.ts";
+
+export { describe, ParameterError } from "./value-errors.ts";
+export { bigInteger, DecodeError, exactInteger, float32s, refuseTruth, truth } from "./value-numbers.ts";
+
 export type Dialect = "postgres" | "mysql" | "sqlite" | "duckdb";
 
 /** A scalar value's representation. */
@@ -618,122 +624,11 @@ export const textDecoder = function textDecoder(kind: Kind, delim = ","): Decode
 // Forms a driver is measured to give (wiki/driver-decoding/spike/) and leaves a value already in
 // Reylo's form as it is.
 
-/** Why a value cannot be given its kind: Reylo's error, naming the column. */
-export class DecodeError extends TypeError {}
-
-/** Why a parameter's value cannot be bound: Reylo's error, naming the parameter. */
-export class ParameterError extends TypeError {}
-
 /**
  * A string for a `timestamptz` names its zone: without one the server reads it in the session's
  * TimeZone, which the driver or the server sets.
  */
 export const zoned = /(?:\d:\d\d(?::\d\d(?:\.\d+)?)?(?:\s*(?:z|[+-]\d\d?(?::?\d\d){0,2})|\s+[a-z][\w/+-]*)|^-?infinity|^epoch|^now)(?:\s+bc)?$/i;
-
-const DISPLAY_TEXT_LIMIT = 60;
-const ELLIPSIS = "...";
-
-/** A value as a message about a parameter names it: its kind, or a short form of itself. */
-export function describe(v: unknown): string {
-  if (matchesNull(v)) {return "null";}
-  if (v instanceof Date) {return "a Date";}
-  if (Array.isArray(v)) {return "an array";}
-  if (v instanceof Uint8Array) {return "binary data";}
-  if (matchesBigInt(v)) {return `${v}n`;}
-  if (matchesString(v)) {return JSON.stringify(v.length > DISPLAY_TEXT_LIMIT ? `${v.slice(TEXT_START, DISPLAY_TEXT_LIMIT - ELLIPSIS.length)}${ELLIPSIS}` : v);}
-  if (hasObjectType(v)) {return "an object";}
-  return String(v);
-}
-
-const MAX_SAFE = Number.MAX_SAFE_INTEGER;
-
-const outOfRange = function outOfRange(value: string, column: string, rounded = false): DecodeError {
-  return new DecodeError(
-    rounded
-      ? `Column "${column}" holds an integer past ±(2^53 - 1), which the driver already rounded to ${value}: a number cannot hold it exactly, so Reylo refuses it rather than return a rounded value. Cast it to text in the statement (cast(${column} as text)) to read it exactly.`
-      : `Column "${column}" holds ${value}, an integer past ±(2^53 - 1), which a number cannot hold exactly, so Reylo refuses it rather than return a rounded value. Cast it to text in the statement (cast(${column} as text)) to read it exactly.`,
-  );
-};
-
-/** An integer as a number, refused where a number cannot hold it exactly. */
-export const exactInteger = function exactInteger(v: number | bigint, column: string): number {
-  if (matchesBigInt(v)) {
-    // Exact: a BigInt past ±(2^53 - 1) converts to a number at least 2^53 in magnitude, since
-    // Rounding keeps the order and 2^53 is a number. Comparing BigInts instead took a five-column
-    // Row with a SQLite BIGINT, beside which better-sqlite3 reads every integer as a BigInt, from
-    // 3.3 to 5.2 ms per 10,000 rows.
-    const n = Number(v);
-    if (n > MAX_SAFE || n < -MAX_SAFE) {throw outOfRange(String(v), column);}
-    return n;
-  }
-  if (v > MAX_SAFE || v < -MAX_SAFE) {throw outOfRange(String(v), column, true);}
-  return v;
-};
-
-const INTEGER = /^[+-]?\d+$/u;
-
-/**
- * A 64-bit integer as a BigInt, from the driver's BigInt, its digits, or a number: a number past
- * ±(2^53 - 1) is one the driver already rounded, which no BigInt makes exact again, so it is
- * refused. Anything else (a SQLite REAL a column of INTEGER affinity kept) is left as it is.
- */
-export const bigInteger = function bigInteger(v: number | bigint | string, column: string): unknown {
-  if (matchesBigInt(v)) {return v;}
-  if (matchesString(v)) {return INTEGER.test(v) ? BigInt(v) : v;}
-  if (Number.isSafeInteger(v)) {return BigInt(v);}
-  if (Number.isInteger(v)) {throw new DecodeError(`Column "${column}" is a 64-bit integer, and the driver already rounded its value to ${v}, past ±(2^53 - 1): Reylo refuses it rather than return a BigInt of a rounded value.`);}
-  return v;
-};
-
-const FALSE_VALUE = 0;
-const TRUE_VALUE = 1;
-const FALSE_BIGINT = BigInt(FALSE_VALUE);
-const TRUE_BIGINT = BigInt(TRUE_VALUE);
-const BIT_BYTE_COUNT = 1;
-const FIRST_BIT_BYTE = 0;
-
-/**
- * A truth value as a boolean: true, false, 1, 0, `1n`, `0n`, `t`, `f`, `true`, `false`, `1`, `0`,
- * and a BIT(1)'s one byte. MySQL and SQLite have no boolean type and store one as an integer (a
- * TINYINT(1), a BIT(1), a column SQLite declares BOOLEAN), which neither database holds to 0 and 1:
- * any other value is refused, naming the column, rather than read as true.
- */
-export const truth = function truth(v: unknown, column: string): boolean {
-  switch (typeof v) {
-    case "boolean": {
-      return v;
-    }
-    case "number": {
-      if (v === FALSE_VALUE || v === TRUE_VALUE) {return v === TRUE_VALUE;}
-      break;
-    }
-    case "bigint": {
-      if (v === FALSE_BIGINT || v === TRUE_BIGINT) {return v === TRUE_BIGINT;}
-      break;
-    }
-    case "string": {
-      if (v === "t" || v === "true" || v === "1") {return true;}
-      if (v === "f" || v === "false" || v === "0") {return false;}
-      break;
-    }
-    case "object": {
-      if (v instanceof Uint8Array && v.length === BIT_BYTE_COUNT) {
-        const bit = v[FIRST_BIT_BYTE];
-        if (!matchesUndefined(bit) && bit <= TRUE_VALUE) {return v[FIRST_BIT_BYTE] === TRUE_VALUE;}
-      }
-      break;
-    }
-  }
-  const shown = v instanceof Uint8Array ? `the bytes 0x${Array.from(v, (byte) => byte.toString(HEX_RADIX).padStart(HEX_DIGITS_PER_BYTE, "0")).join("")}` : (matchesString(v) ? JSON.stringify(v) : String(v));
-  return refuseTruth(column, shown);
-};
-
-/** The error for a value of a boolean column that is not 0 or 1, `shown` as the message names it. */
-export function refuseTruth(column: string, shown: string): never {
-  throw new DecodeError(
-    `Column "${column}" is a boolean, stored as 0 or 1, and holds ${shown}, which is neither: the database does not hold the column to 0 and 1, so Reylo refuses the value rather than guess its truth. Store 0 or 1 in it, or read the stored number with ${column} + 0 in the statement.`,
-  );
-}
 
 /**
  * A Date a driver handed back must hold a time. Bun.sql 1.4 decodes a date, timestamp or timestamptz
@@ -761,19 +656,6 @@ const utcText = function (d: Date, kind: "date" | "timestamp", column: string): 
 };
 
 const isBytes = (v: unknown): v is Uint8Array => v instanceof Uint8Array;
-const EMPTY_REMAINDER = 0;
-const FLOAT32_BYTES = Float32Array.BYTES_PER_ELEMENT;
-
-/**
- * A MySQL VECTOR's floats from its bytes, 32-bit and little-endian, which mariadb and PlanetScale
- * hand over as they are (mysql2 decodes them itself).
- */
-export const float32s = function float32s(bytes: Uint8Array, column: string): number[] {
-  if (bytes.byteLength % FLOAT32_BYTES !== EMPTY_REMAINDER) {throw new DecodeError(`Column "${column}" is a VECTOR, whose value is 4 bytes per 32-bit float, and holds ${bytes.byteLength} bytes.`);}
-  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
-  return Array.from({ length: bytes.byteLength / FLOAT32_BYTES }, (_unused, index) => view.getFloat32(index * FLOAT32_BYTES, true));
-};
-
 /**
  * `v` as a value of `kind`, from the form a driver decoded it to; `column` names it in an error. A
  * number past ±(2^53 - 1) in an integer column is one the driver already rounded, and is refused.
@@ -840,7 +722,7 @@ export const coerce = function coerce(kind: Kind, v: unknown, column: string, de
       if (v instanceof ArrayBuffer) {return new Uint8Array(v);}
       // D1's BLOB is an array of numbers; mariadb's and Bun.sql's BIT(1) a truth value.
       if (Array.isArray(v)) {return Uint8Array.from(v as number[]);}
-      if (matchesBoolean(v)) {return Uint8Array.of(v ? TRUE_VALUE : FALSE_VALUE);}
+      if (matchesBoolean(v)) {return Uint8Array.of(Number(v));}
       if (matchesString(v)) {return bytea(v);}
       return v;
     }
