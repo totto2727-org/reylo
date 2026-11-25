@@ -103,7 +103,7 @@ const CHARACTER_WIDTH = 1;
 const HSTORE_SEPARATOR = "=>";
 const POSTGRES_NULL = "NULL";
 // oxlint-disable-next-line unicorn/no-null -- PostgreSQL NULL inside arrays and hstores has always decoded to JavaScript null.
-const SQL_NULL_VALUE = null;
+export const SQL_NULL_VALUE = null;
 
 const consumeCharacter = (cursor: TextCursor): string | undefined => {
   const character = cursor.text[cursor.offset];
