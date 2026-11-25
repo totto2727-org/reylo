@@ -128,10 +128,16 @@ const listen = function listen(server: ReturnType<typeof createServer>, port: nu
   // A port the caller names is that port or nothing; the default moves up past ports in use.
   const tries = matchesUndefined(port) ? Array.from({ length: 20 }, (_unused, index) => DEFAULT_PORT + index) : [port];
   return new Promise((done) => {
-    const attempt = (i: number): void => {
-      if (i >= tries.length) {return done(undefined);}
-      server.once("error", (e: NodeJS.ErrnoException) => (e.code === "EADDRINUSE" ? attempt(i + 1) : done(undefined)));
-      server.listen(tries[i], "127.0.0.1", () => {
+    const attempt = (portIndex: number): void => {
+      if (portIndex >= tries.length) {
+        done(undefined);
+        return;
+      }
+      server.once("error", (error: NodeJS.ErrnoException) => {
+        if (error.code === "EADDRINUSE") {attempt(portIndex + 1);}
+        else {done(undefined);}
+      });
+      server.listen(tries[portIndex], "127.0.0.1", () => {
         server.removeAllListeners("error");
         const address = server.address();
         done(hasObjectType(address) && address ? address.port : undefined);
@@ -148,7 +154,7 @@ export async function startPlay(options: { port?: number | undefined; cwd?: stri
   if (!page) {throw new Error("the playground's page is not in this install of reylo; reinstall reylo.");}
   const backend = await openBackend(cwd, options.env ?? process.env);
   const server = createServer((req, res) => {
-    handle(req, res, backend, page, () => server.address()).catch((error: unknown) => send(res, 500, { error: (error as Error).message }));
+    handle(req, res, backend, page, () => server.address()).catch((error: unknown) => {send(res, 500, { error: (error as Error).message });});
   });
   const port = await listen(server, options.port);
   if (matchesUndefined(port)) {
@@ -161,7 +167,7 @@ export async function startPlay(options: { port?: number | undefined; cwd?: stri
     ...(backend.notice ? { notice: backend.notice } : {}),
     async close() {
       server.closeAllConnections();
-      await new Promise<void>((done) => server.close(() => done()));
+      await new Promise<void>((done) => {server.close(() => {done();});});
       await backend.close();
     },
   };
@@ -295,7 +301,10 @@ async function handle(req: IncomingMessage, res: ServerResponse, backend: Backen
   // Reads the schema through the playground.
   const local = (host: string | undefined): boolean => !!host && [`127.0.0.1:${port}`, `localhost:${port}`, `[::1]:${port}`].includes(host);
   const {origin} = req.headers;
-  if (!local(req.headers.host) || (!matchesUndefined(origin) && !local(origin.replace(/^http:\/\//u, "")))) {return send(res, 403, { error: "the playground answers this machine's own pages and tools only" });}
+  if (!local(req.headers.host) || (!matchesUndefined(origin) && !local(origin.replace(/^http:\/\//u, "")))) {
+    send(res, 403, { error: "the playground answers this machine's own pages and tools only" });
+    return;
+  }
   const url = new URL(req.url ?? "/", `http://${req.headers.host}`);
 
   if (url.pathname === "/api/analyze") {
@@ -306,23 +315,32 @@ async function handle(req: IncomingMessage, res: ServerResponse, backend: Backen
       try {
         body = JSON.parse((await readBody(req)) || "{}");
       } catch {
-        return send(res, 400, { error: "the body is not JSON" });
+        send(res, 400, { error: "the body is not JSON" });
+        return;
       }
       sql = matchesString(body.sql) ? body.sql : (matchesString(body.q) ? body.q : sql);
       if (matchesNumber(body.width)) {width = body.width;}
-    } else if (req.method !== "GET") {return send(res, 405, { error: "GET or POST" });}
-    if (matchesNull(sql)) {return send(res, 400, { error: "name the query: ?q=<sql>, or a JSON body {\"sql\": \"<sql>\"}" });}
-    return send(res, 200, await backend.analyze(sql, Number.isFinite(width) && width > 0 ? width : Infinity));
+    } else if (req.method !== "GET") {
+      send(res, 405, { error: "GET or POST" });
+      return;
+    }
+    if (matchesNull(sql)) {
+      send(res, 400, { error: "name the query: ?q=<sql>, or a JSON body {\"sql\": \"<sql>\"}" });
+    } else {
+      send(res, 200, await backend.analyze(sql, Number.isFinite(width) && width > 0 ? width : Infinity));
+    }
+  } else if (url.pathname === "/api/schema") {
+    send(res, 200, { dialect: backend.dialect, database: backend.label, ...backend.catalog });
+  } else if (url.pathname === "/api/page") {
+    send(res, 200, { dialect: backend.dialect, label: backend.label, schema: backend.schema, catalog: backend.catalog });
+  } else {
+    // The page's files; any other path is the page, which reads its query from the address.
+    const file = url.pathname === "/" ? join(page, "index.html") : join(page, decodeURIComponent(url.pathname));
+    const inside = file.startsWith(page + sep) && existsSync(file) && statSync(file).isFile();
+    const path = inside ? file : join(page, "index.html");
+    res.writeHead(200, { "content-type": TYPES[extname(path)] ?? "application/octet-stream", "cache-control": "no-cache", "x-content-type-options": "nosniff" });
+    res.end(readFileSync(path));
   }
-  if (url.pathname === "/api/schema") {return send(res, 200, { dialect: backend.dialect, database: backend.label, ...backend.catalog });}
-  if (url.pathname === "/api/page") {return send(res, 200, { dialect: backend.dialect, label: backend.label, schema: backend.schema, catalog: backend.catalog });}
-
-  // The page's files; any other path is the page, which reads its query from the address.
-  const file = url.pathname === "/" ? join(page, "index.html") : join(page, decodeURIComponent(url.pathname));
-  const inside = file.startsWith(page + sep) && existsSync(file) && statSync(file).isFile();
-  const path = inside ? file : join(page, "index.html");
-  res.writeHead(200, { "content-type": TYPES[extname(path)] ?? "application/octet-stream", "cache-control": "no-cache", "x-content-type-options": "nosniff" });
-  res.end(readFileSync(path));
 }
 
 function readBody(req: IncomingMessage): Promise<string> {
@@ -333,7 +351,7 @@ function readBody(req: IncomingMessage): Promise<string> {
       text += chunk;
       if (text.length > 1_000_000) {req.destroy(new Error("the body is over a megabyte"));}
     });
-    req.on("end", () => done(text));
+    req.on("end", () => {done(text);});
     req.on("error", fail);
   });
 }

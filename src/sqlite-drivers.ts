@@ -100,9 +100,17 @@ const DRIVERS: [string, Open][] = [
       };
       const sqlite3 = require("sqlite3") as { Database: new (path: string, mode: number, cb: (error: Error | null) => void) => Db; OPEN_READONLY: number };
       const db = await new Promise<Db>((done, fail) => {
-        const d: Db = new sqlite3.Database(path, sqlite3.OPEN_READONLY, (error) => (error ? fail(error) : done(d)));
+        const database: Db = new sqlite3.Database(path, sqlite3.OPEN_READONLY, (error) => {
+          if (error) {fail(error);}
+          else {done(database);}
+        });
       });
-      const version = await new Promise<string>((done, fail) => db.get("select sqlite_version() as v", (error, row) => (error ? fail(error) : done(row.v))));
+      const version = await new Promise<string>((done, fail) => {
+        db.get("select sqlite_version() as v", (error, row) => {
+          if (error) {fail(error);}
+          else {done(row.v);}
+        });
+      });
       return {
         name: "sqlite3",
         says: (refusal) => `sqlite3 runs SQLite ${version}, which refuses this statement: ${refusal}`,
@@ -114,7 +122,9 @@ const DRIVERS: [string, Open][] = [
               done(error ? error.message.replace(/^SQLITE_\w+: /u, "") : undefined);
             });
           }),
-        close: () => new Promise<void>((done) => db.close(() => done())),
+        close: () => new Promise<void>((done) => {
+          db.close(() => {done();});
+        }),
       };
     },
   ],
@@ -174,7 +184,7 @@ async function openD1(require: Require, path: string): Promise<SqliteDriver> {
   const config = wranglerConfig(dir);
   let held = d1s.get(key);
   if (held?.config !== config) {
-    held?.started.then((d) => d.close(), () => {});
+    held?.started.then((driver) => driver.close(), () => {});
     const started = startD1(entry, dir, () => {
       if (d1s.get(key)?.started === started) {d1s.delete(key);}
     });
@@ -232,7 +242,9 @@ async function startD1(entry: string, dir: string, ended: () => void): Promise<D
   let next = 0;
   // The schema D1 was last given, so it is sent again only when it changes.
   let sent: string | undefined;
-  const gone = new Promise<never>((_, fail) => child.once("exit", () => fail(new Error("D1's process ended"))));
+  const gone = new Promise<never>((_done, fail) => {
+    child.once("exit", () => {fail(new Error("D1's process ended"));});
+  });
   gone.catch(() => {});
   // The channel keeps this process alive only while a statement waits on its answer, so a type
   // Check or a build ends when its own work does; the child ends with this process.
@@ -253,7 +265,9 @@ async function startD1(entry: string, dir: string, ended: () => void): Promise<D
     setTimeout(() => child.kill(), 2000).unref();
   };
   try {
-    const timeout = new Promise<never>((_, fail) => setTimeout(() => fail(new Error("workerd did not start")), D1_START).unref());
+    const timeout = new Promise<never>((_done, fail) => {
+      setTimeout(() => {fail(new Error("workerd did not start"));}, D1_START).unref();
+    });
     const ready = await Promise.race([gone, timeout, new Promise<Extract<Reply, { kind: "ready" }>>((done) => child.once("message", done))]);
     if (!ready.d1) {throw new Error("the wrangler config binds no D1 database");}
   } catch (error) {
@@ -267,21 +281,22 @@ async function startD1(entry: string, dir: string, ended: () => void): Promise<D
     close: stop,
     explain: (sql, params, ddl) =>
       new Promise((done) => {
-        if (!child.connected) {return done(undefined);}
-        const id = next++;
-        pending.set(id, (error) => {
-          // D1 wraps SQLite's message: "D1_ERROR: no such function: x at offset 7: SQLITE_ERROR".
-          const message = error?.replace(/^D1_ERROR: /u, "").replace(/ at offset \d+/u, "").replace(/: SQLITE_\w+$/u, "");
-          // A count of bindings D1 reads otherwise than the analysis is no refusal of the statement.
-          done(message && !message.startsWith('Wrong number of parameter bindings') ? message : undefined);
-        });
-        child.channel?.ref();
-        const text = JSON.stringify(ddl);
-        if (text !== sent) {
-          child.send({ kind: "schema", ddl });
-          sent = text;
-        }
-        child.send({ kind: "explain", id, sql, params });
+        if (child.connected) {
+          const id = next++;
+          pending.set(id, (error) => {
+            // D1 wraps SQLite's message: "D1_ERROR: no such function: x at offset 7: SQLITE_ERROR".
+            const message = error?.replace(/^D1_ERROR: /u, "").replace(/ at offset \d+/u, "").replace(/: SQLITE_\w+$/u, "");
+            // A count of bindings D1 reads otherwise than the analysis is no refusal of the statement.
+            done(message && !message.startsWith('Wrong number of parameter bindings') ? message : undefined);
+          });
+          child.channel?.ref();
+          const text = JSON.stringify(ddl);
+          if (text !== sent) {
+            child.send({ kind: "schema", ddl });
+            sent = text;
+          }
+          child.send({ kind: "explain", id, sql, params });
+        } else {done(undefined);}
       }),
   };
 }
