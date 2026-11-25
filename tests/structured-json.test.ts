@@ -6,7 +6,7 @@ import assert from "node:assert/strict";
 import type { DatabaseSync } from "node:sqlite";
 import { isRecord } from "#reylo-source/native-predicates.ts";
 import { plain, requireFixtureValue } from "./helpers.ts";
-import { analysis, built, withProject } from "./structured-fixture.ts";
+import { analysis, built, withProject } from "./sqlite-project-fixture.ts";
 
 // oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
 test("an imported query carries its input's and its output's JSON Schema, a structured parameter's keys included", async () => {

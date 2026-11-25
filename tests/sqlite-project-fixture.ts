@@ -18,13 +18,13 @@ import type { SqliteQueryFixture } from "./helpers.ts";
 
 const URL = "file:./app.db";
 
-export interface StructuredProject {
+export interface SqliteProjectFixture {
   database: DatabaseSync;
   root: string;
 }
 
-const project = async function (schemaSource = ""): Promise<StructuredProject> {
-  const root = await mkdtemp(path.join(tmpdir(), "reylo-structured-"));
+const project = async function (schemaSource = ""): Promise<SqliteProjectFixture> {
+  const root = await mkdtemp(path.join(tmpdir(), "reylo-sqlite-query-"));
   await writeFile(path.join(root, "package.json"), "{}");
   await writeFile(path.join(root, ".env"), `DATABASE_URL=${URL}\n`);
   const database = new DatabaseSync(path.join(root, "app.db"));
@@ -39,7 +39,7 @@ const project = async function (schemaSource = ""): Promise<StructuredProject> {
 
 export const withProject = async function (
   schema: string,
-  check: (fixture: StructuredProject) => Promise<void>,
+  check: (fixture: SqliteProjectFixture) => Promise<void>,
 ): Promise<void> {
   const fixture = await project(schema);
   try {

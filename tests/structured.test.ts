@@ -4,7 +4,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { sqlModule } from "#reylo-source/loader.ts";
 import { plain, requireFixtureValue, forEachFixtureInOrder, SQL_NULL } from "./helpers.ts";
-import { analysis, built, querySource, withProject } from "./structured-fixture.ts";
+import { analysis, built, querySource, withProject } from "./sqlite-project-fixture.ts";
 // oxlint-disable-next-line rules/no-node-imports -- The integration suite exercises the real synchronous host SQLite driver.
 import type { DatabaseSync } from "node:sqlite";
 
