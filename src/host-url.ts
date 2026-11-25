@@ -50,13 +50,32 @@ const MYSQL_GREETING_FILLER_BYTES = 1;
 const MYSQL_LOWER_CAPABILITY_BYTES = 2;
 const MYSQL_HANDSHAKE_HEADER_BYTES = 32;
 const MYSQL_SSL_CAPABILITY = 0x08_00;
+const BRIDGE_TOKEN_BYTES = 24;
+const LOOPBACK = "127.0.0.1";
+const EPHEMERAL_PORT = 0;
+const EMPTY_BUFFER_BYTES = 0;
+const URL_START = 0;
+const NOT_FOUND = -1;
+
+const MYSQL_INLINE_LENGTH_LIMIT = 0xFB;
+const MYSQL_LENGTH_TWO_BYTE_TAG = 0xFC;
+const MYSQL_LENGTH_THREE_BYTE_TAG = 0xFD;
+const MYSQL_LENGTH_EIGHT_BYTE_TAG = 0xFE;
+const MYSQL_LENGTH_TWO_BYTES = 2;
+const MYSQL_LENGTH_THREE_BYTES = 3;
+const MYSQL_LENGTH_EIGHT_BYTES = 8;
+const MYSQL_LENGTH_TWO_BYTE_LIMIT = 0x1_00_00;
+const MYSQL_LENGTH_THREE_BYTE_LIMIT = 0x1_00_00_00;
+const MYSQL_LENGTH_TAG_BYTES = 1;
+const MYSQL_AUTH_LENGTH_BYTES = 1;
+const MAX_BUFFER_INTEGER_BYTES = 6;
 
 type SocketDialect = "postgres" | "mysql";
 
 const splitQuery = function splitQuery(url: string): [string, string?] {
   const separator = "?";
   const queryStart = url.indexOf(separator);
-  return queryStart === -1 ? [url] : [url.slice(0, queryStart), url.slice(queryStart + separator.length)];
+  return queryStart === NOT_FOUND ? [url] : [url.slice(URL_START, queryStart), url.slice(queryStart + separator.length)];
 };
 
 const decodeQueryPart = (part: string): string => {
@@ -70,9 +89,9 @@ const decodeQueryPart = (part: string): string => {
 const splitPair = function splitPair(pair: string): [string, string] {
   const separator = "=";
   const assignment = pair.indexOf(separator);
-  return assignment === -1
+  return assignment === NOT_FOUND
     ? [decodeQueryPart(pair), ""]
-    : [decodeQueryPart(pair.slice(0, assignment)), decodeQueryPart(pair.slice(assignment + separator.length))];
+    : [decodeQueryPart(pair.slice(URL_START, assignment)), decodeQueryPart(pair.slice(assignment + separator.length))];
 };
 
 const join = function join(base: string, pairs: string[]): string {
@@ -81,7 +100,7 @@ const join = function join(base: string, pairs: string[]): string {
 
 const detectDialect = (url: string): SocketDialect | undefined => {
   const separator = url.indexOf(SCHEME_SEPARATOR);
-  const scheme = separator === -1 ? "" : url.slice(0, separator).toLowerCase();
+  const scheme = separator === NOT_FOUND ? "" : url.slice(URL_START, separator).toLowerCase();
   if (scheme === "postgres" || scheme === "postgresql") {return "postgres";}
   if (scheme === "mysql") {return "mysql";}
   return undefined;
@@ -91,7 +110,7 @@ const detectDialect = (url: string): SocketDialect | undefined => {
 const authorityRange = (base: string): { end: number; start: number } => {
   const authorityStart = base.indexOf(SCHEME_SEPARATOR) + SCHEME_SEPARATOR.length;
   const pathStart = base.indexOf("/", authorityStart);
-  const end = pathStart === -1 ? base.length : pathStart;
+  const end = pathStart === NOT_FOUND ? base.length : pathStart;
   const firstAt = base.indexOf("@", authorityStart);
   const start = firstAt >= authorityStart && firstAt < end ? firstAt + "@".length : authorityStart;
   return { end, start };
@@ -100,7 +119,7 @@ const authorityRange = (base: string): { end: number; start: number } => {
 /** `base` with its host and port replaced, its user, password and path kept. */
 const withHost = (base: string, host: string): string => {
   const { end, start } = authorityRange(base);
-  return `${base.slice(0, start)}${host}${base.slice(end)}`;
+  return `${base.slice(URL_START, start)}${host}${base.slice(end)}`;
 };
 
 const resolvePostgresFile = (pair: string): string => {
@@ -125,10 +144,10 @@ export const hostUrl = async function hostUrl(url: string, env: Record<string, s
   if (postgres && platform === "win32") {
     throw new Unreachable(new Error(`the URL names the Unix socket ${socket.path}, which Node cannot open on Windows: name the server's host and port, as host=localhost&port=5432`));
   }
-  const token = randomBytes(24).toString("hex");
+  const token = randomBytes(BRIDGE_TOKEN_BYTES).toString("hex");
   const bridge = await openBridge(socket.path, dialect, token);
   const rest = pairs.filter((pair) => !socket.params.includes(splitPair(pair)[0]));
-  return { url: join(withHost(base, `127.0.0.1:${bridge.port}`), rest), bridge: token, close: bridge.close, failure: bridge.failure };
+  return { url: join(withHost(base, `${LOOPBACK}:${bridge.port}`), rest), bridge: token, close: bridge.close, failure: bridge.failure };
 };
 
 /**
@@ -167,7 +186,7 @@ function mysqlSocket(pairs: string[]): { path: string; params: string[] } | unde
 async function openBridge(path: string, dialect: "postgres" | "mysql", token: string): Promise<{ port: number; close: () => void; failure: () => Error | undefined }> {
   const open = new Set<Socket>();
   let failure: Error | undefined;
-  const failed = (error: Error): undefined => void (failure = new Error(`cannot open the socket ${path}: ${error.message}`));
+  const failed = (error: Error): void => {failure = new Error(`cannot open the socket ${path}: ${error.message}`);};
   const track = (socket: Socket): void => {
     open.add(socket);
     socket.unref();
@@ -178,7 +197,7 @@ async function openBridge(path: string, dialect: "postgres" | "mysql", token: st
     client.on("error", () => client.destroy());
     const refused = setTimeout(() => client.destroy(), TOKEN_TIMEOUT);
     refused.unref();
-    client.on("close", () => clearTimeout(refused));
+    client.on("close", () => {clearTimeout(refused);});
     const pipe = (upstream: Socket, toServer: Buffer[]): void => {
       clearTimeout(refused);
       Iterator.from(toServer).forEach((chunk) => {upstream.write(chunk);});
@@ -189,7 +208,7 @@ async function openBridge(path: string, dialect: "postgres" | "mysql", token: st
   });
   await new Promise<void>((done, fail) => {
     server.once("error", fail);
-    server.listen(0, "127.0.0.1", done);
+    server.listen(EPHEMERAL_PORT, LOOPBACK, done);
   });
   server.unref();
   return {
@@ -223,13 +242,13 @@ function openUpstream(path: string, client: Socket, track: (socket: Socket) => v
 /** A Postgres connection admitted once its first bytes are the token: the socket is opened only then, and what followed the token goes to it first. */
 function gatePostgres(client: Socket, token: string, upstream: () => Socket, pipe: (upstream: Socket, toServer: Buffer[]) => void): void {
   const expected = Buffer.from(token);
-  let head = Buffer.alloc(0);
+  let head = Buffer.alloc(EMPTY_BUFFER_BYTES);
   const read = (chunk: Buffer): undefined => {
     head = Buffer.concat([head, chunk]);
     if (head.length < expected.length) {return;}
     client.off("data", read);
     client.pause();
-    if (!timingSafeEqual(head.subarray(0, expected.length), expected)) {return void client.destroy();}
+    if (!timingSafeEqual(head.subarray(FIRST_PACKET_BYTE, expected.length), expected)) {return void client.destroy();}
     pipe(upstream(), [head.subarray(expected.length)]);
     client.resume();
   };
@@ -243,7 +262,7 @@ function gatePostgres(client: Socket, token: string, upstream: () => Socket, pip
  * it, so that the token is not among the session's attributes the server shows its accounts.
  */
 function gateMysql(client: Socket, token: string, upstream: Socket, pipe: (upstream: Socket, toServer: Buffer[]) => void): void {
-  let fromServer = Buffer.alloc(0);
+  let fromServer = Buffer.alloc(EMPTY_BUFFER_BYTES);
   const greeting = (chunk: Buffer): void => {
     fromServer = Buffer.concat([fromServer, chunk]);
     const packet = whole(fromServer);
@@ -252,7 +271,7 @@ function gateMysql(client: Socket, token: string, upstream: Socket, pipe: (upstr
     upstream.pause();
     withoutTls(packet.payload);
     client.write(fromServer);
-    let fromClient = Buffer.alloc(0);
+    let fromClient = Buffer.alloc(EMPTY_BUFFER_BYTES);
     const login = (chunk: Buffer): undefined => {
       fromClient = Buffer.concat([fromClient, chunk]);
       const answer = whole(fromClient);
@@ -263,7 +282,7 @@ function gateMysql(client: Socket, token: string, upstream: Socket, pipe: (upstr
       if (taken?.value !== token) {return void client.destroy();}
       const header = Buffer.alloc(MYSQL_PACKET_HEADER_BYTES);
       header.writeUIntLE(taken.login.length, FIRST_PACKET_BYTE, MYSQL_LENGTH_BYTES);
-      header[MYSQL_PACKET_SEQUENCE_OFFSET] = fromClient[MYSQL_PACKET_SEQUENCE_OFFSET]!;
+      header[MYSQL_PACKET_SEQUENCE_OFFSET] = fromClient.readUInt8(MYSQL_PACKET_SEQUENCE_OFFSET);
       upstream.resume();
       pipe(upstream, [header, taken.login, fromClient.subarray(MYSQL_PACKET_HEADER_BYTES + answer.payload.length)]);
       client.resume();
@@ -293,14 +312,23 @@ function withoutTls(greeting: Buffer): void {
 }
 
 /** A length-encoded integer, as MySQL's protocol writes one. */
-const lenenc = function (n: number): Buffer {
-  if (n < 0xFB) {return Buffer.from([n]);}
-  const size = n < 0x1_00_00 ? 2 : (n < 0x1_00_00_00 ? 3 : 8);
-  const out = Buffer.alloc(1 + size);
-  out[0] = size === 2 ? 0xFC : (size === 3 ? 0xFD : 0xFE);
-  out.writeUIntLE(n, 1, Math.min(size, 6));
+const lenenc = (value: number): Buffer => {
+  if (value < MYSQL_INLINE_LENGTH_LIMIT) {return Buffer.from([value]);}
+  const size = value < MYSQL_LENGTH_TWO_BYTE_LIMIT
+    ? MYSQL_LENGTH_TWO_BYTES
+    : (value < MYSQL_LENGTH_THREE_BYTE_LIMIT ? MYSQL_LENGTH_THREE_BYTES : MYSQL_LENGTH_EIGHT_BYTES);
+  const out = Buffer.alloc(MYSQL_LENGTH_TAG_BYTES + size);
+  out[FIRST_PACKET_BYTE] = size === MYSQL_LENGTH_TWO_BYTES
+    ? MYSQL_LENGTH_TWO_BYTE_TAG
+    : (size === MYSQL_LENGTH_THREE_BYTES ? MYSQL_LENGTH_THREE_BYTE_TAG : MYSQL_LENGTH_EIGHT_BYTE_TAG);
+  out.writeUIntLE(value, MYSQL_LENGTH_TAG_BYTES, Math.min(size, MAX_BUFFER_INTEGER_BYTES));
   return out;
 };
+
+const lengthSizeForMarker = (marker: number): number =>
+  marker === MYSQL_LENGTH_TWO_BYTE_TAG
+    ? MYSQL_LENGTH_TWO_BYTES
+    : (marker === MYSQL_LENGTH_THREE_BYTE_TAG ? MYSQL_LENGTH_THREE_BYTES : MYSQL_LENGTH_EIGHT_BYTES);
 
 /**
  * A connection attribute of a login (HandshakeResponse41), and the login without it, its
@@ -314,29 +342,30 @@ export function takeAttribute(login: Buffer, name: string): { value: string; log
   // Capabilities, the largest packet, the character set and 23 bytes of filler.
   let at = MYSQL_HANDSHAKE_HEADER_BYTES;
   const int = (): number => {
-    const first = login[at++];
+    const first = login[at];
+    at += MYSQL_LENGTH_TAG_BYTES;
     if (matchesUndefined(first)) {throw new RangeError("short");}
-    if (first < 0xFB) {return first;}
-    const size = first === 0xFC ? 2 : (first === 0xFD ? 3 : 8);
-    const value = login.readUIntLE(at, Math.min(size, 6));
+    if (first < MYSQL_INLINE_LENGTH_LIMIT) {return first;}
+    const size = lengthSizeForMarker(first);
+    const value = login.readUIntLE(at, Math.min(size, MAX_BUFFER_INTEGER_BYTES));
     at += size;
     return value;
   };
-  const bytes = (n: number): Buffer => {
-    if (at + n > login.length) {throw new RangeError("short");}
-    const value = login.subarray(at, at + n);
-    at += n;
+  const bytes = (length: number): Buffer => {
+    if (at + length > login.length) {throw new RangeError("short");}
+    const value = login.subarray(at, at + length);
+    at += length;
     return value;
   };
   const cstring = (): void => {
     const end = login.indexOf(STRING_TERMINATOR, at);
-    if (end === -1) {throw new RangeError("unterminated");}
+    if (end === NOT_FOUND) {throw new RangeError("unterminated");}
     at = end + STRING_TERMINATOR_BYTES;
   };
   try {
     cstring(); // The user
     if (capabilities & LENENC_AUTH) {bytes(int());}
-    else if (capabilities & SECURE_CONNECTION) {bytes(bytes(1)[0]!);}
+    else if (capabilities & SECURE_CONNECTION) {bytes(bytes(MYSQL_AUTH_LENGTH_BYTES).readUInt8(FIRST_PACKET_BYTE));}
     else {cstring();}
     if (capabilities & CONNECT_WITH_DB) {cstring();}
     if (capabilities & PLUGIN_AUTH) {cstring();}
@@ -350,7 +379,7 @@ export function takeAttribute(login: Buffer, name: string): { value: string; log
       const value = bytes(int()).toString("utf8");
       if (key !== name) {continue;}
       const rest = Buffer.concat([login.subarray(start, pairAt), login.subarray(at, end)]);
-      return { value, login: Buffer.concat([login.subarray(0, lengthAt), lenenc(rest.length), rest, login.subarray(end)]) };
+      return { value, login: Buffer.concat([login.subarray(FIRST_PACKET_BYTE, lengthAt), lenenc(rest.length), rest, login.subarray(end)]) };
     }
   } catch {}
   return undefined;
