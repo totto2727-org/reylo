@@ -240,9 +240,9 @@ const mysqlError = function mysqlError(error: unknown) {
   if (matchesUndefined(errno)) {
     // `<message> (errno 1062) (sqlstate 23000) during query: …`, the message behind Vitess's
     // `target: …: desc = ` on PlanetScale itself.
-    const regexMatch = /^(?:[\s\S]*?desc = )?([\s\S]*?) \(errno (\d+)\) \(sqlstate ([0-9A-Z]{5})\)/.exec(e.message);
-    if (!regexMatch) {return undefined;}
-    [message, errno, sqlState] = [regexMatch[1]!, Number(regexMatch[2]), regexMatch[3]];
+    const fields = /^(?:[\s\S]*?desc = )?(?<message>[\s\S]*?) \(errno (?<errno>\d+)\) \(sqlstate (?<sqlState>[0-9A-Z]{5})\)/u.exec(e.message)?.groups;
+    if (matchesUndefined(fields)) {return undefined;}
+    [message, errno, sqlState] = [fields.message ?? "", Number(fields.errno), fields.sqlState];
   }
   // A system error's number is negative (mysql2 and mariadb give ECONNREFUSED as -61).
   if (!matchesNumber(errno) || !Number.isInteger(errno) || errno <= 0 || !matchesString(sqlState) || !SQLSTATE.test(sqlState)) {return undefined;}
@@ -250,34 +250,35 @@ const mysqlError = function mysqlError(error: unknown) {
   return { errno, sqlState, message };
 };
 
+const messageGroup = (pattern: RegExp, message: string, key: string): string | undefined =>
+  pattern.exec(message)?.groups?.[key];
+
 /** What a MySQL message names, for the errors that name a key, a constraint or a column. */
 const mysqlNames = function mysqlNames(errno: number, message: string) {
   const names: { key?: string | undefined; constraint?: string | undefined; table?: string | undefined; column?: string | undefined } = {};
-  let m: RegExpExecArray | null;
   switch (errno) {
     case 1062: // ER_DUP_ENTRY
     case 1586: { // ER_DUP_ENTRY_WITH_KEY_NAME
-      if ((m = /^Duplicate entry '[\s\S]*' for key '([\s\S]*)'$/.exec(message))) {names.key = m[1];}
+      names.key = messageGroup(/^Duplicate entry '[\s\S]*' for key '(?<key>[\s\S]*)'$/u, message, "key");
       break;
     }
     case 1451: // ER_ROW_IS_REFERENCED_2
     case 1452: { // ER_NO_REFERENCED_ROW_2
-      if ((m = /a foreign key constraint fails \(`(?:[^`]|``)*`\.`((?:[^`]|``)*)`, CONSTRAINT `((?:[^`]|``)*)`/.exec(message))) {
-        names.table = m[1]!.replaceAll("``", "`");
-        names.constraint = m[2]!.replaceAll("``", "`");
-      }
+      const fields = /a foreign key constraint fails \(`(?:[^`]|``)*`\.`(?<table>(?:[^`]|``)*)`, CONSTRAINT `(?<constraint>(?:[^`]|``)*)`/u.exec(message)?.groups;
+      names.table = fields?.table?.replaceAll("``", "`");
+      names.constraint = fields?.constraint?.replaceAll("``", "`");
       break;
     }
     case 3819: { // ER_CHECK_CONSTRAINT_VIOLATED
-      if ((m = /^Check constraint '([\s\S]*)' is violated\.$/.exec(message))) {names.constraint = m[1];}
+      names.constraint = messageGroup(/^Check constraint '(?<constraint>[\s\S]*)' is violated\.$/u, message, "constraint");
       break;
     }
     case 1048: { // ER_BAD_NULL_ERROR
-      if ((m = /^Column '([\s\S]*)' cannot be null$/.exec(message))) {names.column = m[1];}
+      names.column = messageGroup(/^Column '(?<column>[\s\S]*)' cannot be null$/u, message, "column");
       break;
     }
     case 1364: { // ER_NO_DEFAULT_FOR_FIELD
-      if ((m = /^Field '([\s\S]*)' doesn't have a default value$/.exec(message))) {names.column = m[1];}
+      names.column = messageGroup(/^Field '(?<column>[\s\S]*)' doesn't have a default value$/u, message, "column");
       break;
     }
     case 1264: // ER_WARN_DATA_OUT_OF_RANGE
@@ -285,7 +286,7 @@ const mysqlNames = function mysqlNames(errno: number, message: string) {
     case 1292: // ER_TRUNCATED_WRONG_VALUE
     case 1366: // ER_TRUNCATED_WRONG_VALUE_FOR_FIELD
     case 1406: { // ER_DATA_TOO_LONG
-      if ((m = / for column '([\s\S]*)' at row \d+$/.exec(message))) {names.column = m[1];}
+      names.column = messageGroup(/ for column '(?<column>[\s\S]*)' at row \d+$/u, message, "column");
       break;
     }
   }
