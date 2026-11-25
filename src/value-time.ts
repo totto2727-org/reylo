@@ -30,7 +30,7 @@ const pad = (value: number, width = CLOCK_DIGITS): string => String(value).padSt
  * @param {number} year - A proleptic ISO year.
  * @returns {string} The year with its required width and sign.
  */
-const isoYear = (year: number): string => (year >= ISO_YEAR_ZERO && year <= LAST_FOUR_DIGIT_YEAR ? pad(year, YEAR_DIGITS) : `${year < ISO_YEAR_ZERO ? "-" : "+"}${pad(Math.abs(year), EXTENDED_YEAR_DIGITS)}`);
+export const isoYear = (year: number): string => (year >= ISO_YEAR_ZERO && year <= LAST_FOUR_DIGIT_YEAR ? pad(year, YEAR_DIGITS) : `${year < ISO_YEAR_ZERO ? "-" : "+"}${pad(Math.abs(year), EXTENDED_YEAR_DIGITS)}`);
 
 /**
  * A date's or timestamp's text with its year as `isoYear` writes it: Postgres writes a year past

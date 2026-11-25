@@ -13,10 +13,13 @@
 // A value of its own classes with its type said, so the run time builds those with node-api's own
 // Constructors, loaded from the app beside the connection: each element a type node-api takes
 // From JavaScript (an integer a HUGEINT, a decimal or a date its text), which DuckDB casts in turn.
-import { DecodeError, duration, ParameterError } from "./values.ts";
+import { dateFromDays, decimal, duckdbInterval, interval, MICROSECONDS, MILLISECONDS, NANOSECONDS, SECONDS, timestamp } from "./decode-duckdb-time.ts";
+import { DecodeError, ParameterError } from "./values.ts";
 import type { EngineType } from "./engine-type.ts";
 import type { Columns } from "./values.ts";
 import { hasFunctionType, hasObjectType, matchesBigInt, matchesNull, matchesNullish, matchesNumber, matchesString, matchesUndefined } from "./native-predicates.ts";
+
+export { duckdbInterval } from "./decode-duckdb-time.ts";
 
 // oxlint-disable-next-line typescript/no-explicit-any -- Keep the published structural driver contracts compatible with each driver's own parameter and callback types.
 export type DriverValue = any;
@@ -304,146 +307,10 @@ export const encodeDuckdb = function encodeDuckdb(type: EngineType | undefined, 
 
 const TIMES = new Set(["date", "timestamp", "timestamp_s", "timestamp_ms", "timestamp_ns", "timestamptz", "timestamptz_ns"]);
 
-/**
- * An ISO 8601 duration (`P1Y2M3DT4H5M6.789S`, `-P1D`, `P1M-1D`) as DuckDB's interval text,
- * each part with its sign; any other text as it is, which DuckDB reads as its own (`1 day`).
- */
-export function duckdbInterval(text: string): string {
-  const n = String.raw`([+-]?\d+(?:[.,]\d+)?)`;
-  const regexMatch = new RegExp(`^\\s*([+-])?P(?:${n}Y)?(?:${n}M)?(?:${n}W)?(?:${n}D)?(?:T(?:${n}H)?(?:${n}M)?(?:${n}S)?)?\\s*$`, "i").exec(text);
-  if (matchesNull(regexMatch) || !/\d/u.test(text)) {return text;}
-  const negate = regexMatch[1] === "-";
-  const units = ["years", "months", "weeks", "days", "hours", "minutes", "seconds"];
-  const parts: string[] = [];
-  units.forEach((unit, index) => {
-    const value = regexMatch[index + 2];
-    if (matchesUndefined(value)) {return;}
-    const number = value.replace(",", ".");
-    parts.push(`${negate ? (number.startsWith("-") ? number.slice(1) : `-${number.replace(/^\+/u, "")}`) : number} ${unit}`);
-  });
-  return parts.length ? parts.join(" ") : "0 seconds";
-}
-
 // --- Decoding --------------------------------------------------------------------------------
 
-const CALENDAR_PART_DIGITS = 2;
-const FIRST_ISO_YEAR = 0;
-const LAST_FOUR_DIGIT_YEAR = 9999;
-const STANDARD_YEAR_DIGITS = 4;
-const SIGNED_YEAR_DIGITS = 6;
-const GREGORIAN_EPOCH_SHIFT = 719_468;
-const DAYS_PER_ERA = 146_097;
-const YEARS_PER_ERA = 400;
-const YEARS_PER_CENTURY = 100;
-const LEAP_YEAR_INTERVAL = 4;
-const DAYS_PER_COMMON_YEAR = 365;
-const DAYS_PER_LEAP_INTERVAL_WITHOUT_LEAP_DAY = DAYS_PER_COMMON_YEAR * LEAP_YEAR_INTERVAL;
-const DAYS_PER_NON_LEAP_CENTURY = 36_524;
-const DAYS_PER_FIVE_MONTHS_FROM_MARCH = 153;
-const MONTHS_IN_CALENDAR_BLOCK = 5;
-const MARCH_DAY_CORRECTION = 2;
-const MONTHS_PER_YEAR = 12;
-const MARCH_MONTH = 3;
-const JANUARY_MARCH_INDEX = 10;
-const FIRST_DAY_OF_MONTH = 1;
-const FINAL_DAY_IN_ERA = DAYS_PER_ERA - FIRST_DAY_OF_MONTH;
-const SECONDS_PER_MINUTE = 60;
-const SECONDS_PER_HOUR = 3600;
-const SECONDS_PER_DAY = 86400n;
-const CLOCK_ZERO = 0n;
-const ONE_DAY = 1n;
-const WHOLE_SECOND_DIGITS = 0;
-const MILLISECOND_DIGITS = 3;
-const MICROSECOND_DIGITS = 6;
-const NANOSECOND_DIGITS = 9;
-const MILLISECONDS_PER_SECOND = 1000n;
-const MICROSECONDS_PER_SECOND = 1000000n;
-const NANOSECONDS_PER_SECOND = 1000000000n;
-const WHOLE_SECONDS_PER_SECOND = 1n;
-const NO_DECIMAL_PLACES = 0;
-const MIN_INTEGER_DIGITS = 1;
 const JSON_ERROR_PREVIEW = 60;
 const MEMBER_NOT_FOUND = -1;
-
-const pad = (part: number | bigint, width = CALENDAR_PART_DIGITS): string => String(part).padStart(width, "0");
-
-/** An ISO 8601 year: four digits from 0000 to 9999, and a sign and six digits outside them. */
-const isoYear = (year: number): string =>
-  year >= FIRST_ISO_YEAR && year <= LAST_FOUR_DIGIT_YEAR
-    ? pad(year, STANDARD_YEAR_DIGITS)
-    : `${year < FIRST_ISO_YEAR ? "-" : "+"}${pad(Math.abs(year), SIGNED_YEAR_DIGITS)}`;
-
-/** The date `days` after 1970-01-01 in the proleptic Gregorian calendar, year 0 being 1 BC. */
-const civil = function (days: number): string {
-  const shiftedDays = days + GREGORIAN_EPOCH_SHIFT;
-  const era = Math.floor(shiftedDays / DAYS_PER_ERA);
-  const dayOfEra = shiftedDays - era * DAYS_PER_ERA;
-  const yearOfEra = Math.floor((
-    dayOfEra - Math.floor(dayOfEra / DAYS_PER_LEAP_INTERVAL_WITHOUT_LEAP_DAY)
-      + Math.floor(dayOfEra / DAYS_PER_NON_LEAP_CENTURY)
-      - Math.floor(dayOfEra / FINAL_DAY_IN_ERA)
-  ) / DAYS_PER_COMMON_YEAR);
-  const dayOfYear = dayOfEra - (
-    DAYS_PER_COMMON_YEAR * yearOfEra + Math.floor(yearOfEra / LEAP_YEAR_INTERVAL)
-      - Math.floor(yearOfEra / YEARS_PER_CENTURY)
-  );
-  const marchMonthIndex = Math.floor((MONTHS_IN_CALENDAR_BLOCK * dayOfYear + MARCH_DAY_CORRECTION) / DAYS_PER_FIVE_MONTHS_FROM_MARCH);
-  const day = dayOfYear - Math.floor((DAYS_PER_FIVE_MONTHS_FROM_MARCH * marchMonthIndex + MARCH_DAY_CORRECTION) / MONTHS_IN_CALENDAR_BLOCK) + FIRST_DAY_OF_MONTH;
-  const month = marchMonthIndex + (marchMonthIndex < JANUARY_MARCH_INDEX ? MARCH_MONTH : MARCH_MONTH - MONTHS_PER_YEAR);
-  const year = era * YEARS_PER_ERA + yearOfEra + Number(month < MARCH_MONTH);
-  return `${isoYear(year)}-${pad(month)}-${pad(day)}`;
-};
-
-/** A count of `unit`ths of a second since 1970 as `YYYY-MM-DDTHH:MM:SS[.fraction]`, the fraction's trailing zeros dropped. */
-const wallClock = function (count: bigint, perSecond: bigint, digits: number): string {
-  const perDay = SECONDS_PER_DAY * perSecond;
-  let days = count / perDay;
-  let rest = count % perDay;
-  if (rest < CLOCK_ZERO) {
-    rest += perDay;
-    days -= ONE_DAY;
-  }
-  const seconds = Number(rest / perSecond);
-  const fraction = (rest % perSecond).toString().padStart(digits, "0").replace(/0+$/u, "");
-  const hours = pad(Math.floor(seconds / SECONDS_PER_HOUR));
-  const minutes = pad(Math.floor(seconds / SECONDS_PER_MINUTE) % SECONDS_PER_MINUTE);
-  const wholeSeconds = pad(seconds % SECONDS_PER_MINUTE);
-  return `${civil(Number(days))}T${hours}:${minutes}:${wholeSeconds}${fraction && `.${fraction}`}`;
-};
-
-// DuckDB's infinite date and timestamps.
-const DATE_INFINITY = 2_147_483_647;
-const TS_INFINITY = BigInt("9223372036854775807");
-
-const timestamp = function (count: bigint, perSecond: bigint, digits: number, zone: string): string {
-  if (count === TS_INFINITY) {return "infinity";}
-  if (count === -TS_INFINITY) {return "-infinity";}
-  return wallClock(count, perSecond, digits) + zone;
-};
-
-/** An interval's months, days and microseconds as an ISO 8601 duration, as `.run()` returns a Postgres one (src/values.ts). */
-const interval = function (months: number, days: number, micros: bigint): string {
-  const years = Math.trunc(months / MONTHS_PER_YEAR);
-  const remainingMonths = months - years * MONTHS_PER_YEAR;
-  const sign = micros < CLOCK_ZERO ? "-" : "";
-  const abs = micros < CLOCK_ZERO ? -micros : micros;
-  const seconds = abs / MICROSECONDS_PER_SECOND;
-  const fraction = (abs % MICROSECONDS_PER_SECOND).toString().padStart(MICROSECOND_DIGITS, "0");
-  const minutesPerHour = BigInt(SECONDS_PER_HOUR / SECONDS_PER_MINUTE);
-  const secondsPerMinute = BigInt(SECONDS_PER_MINUTE);
-  const hours = seconds / BigInt(SECONDS_PER_HOUR);
-  const minutes = pad((seconds / secondsPerMinute) % minutesPerHour);
-  const wholeSeconds = pad(seconds % secondsPerMinute);
-  return duration(`${years} years ${remainingMonths} mons ${days} days ${sign}${hours}:${minutes}:${wholeSeconds}.${fraction}`);
-};
-
-/** A DECIMAL's unscaled value as its exact text. */
-const decimal = function (value: bigint, scale: number): string {
-  if (scale === NO_DECIMAL_PLACES) {return value.toString();}
-  const negative = value < CLOCK_ZERO;
-  const digits = (negative ? -value : value).toString().padStart(scale + MIN_INTEGER_DIGITS, "0");
-  return `${negative ? "-" : ""}${digits.slice(NO_DECIMAL_PLACES, -scale)}.${digits.slice(-scale)}`;
-};
 
 interface NativeDuckValue {
   bytes: unknown;
@@ -493,16 +360,14 @@ function decode(v: unknown, t: DuckType, column: string): unknown {
       return matchesBigInt(native.value) && matchesNumber(native.scale) ? decimal(native.value, native.scale) : String(v);
     }
     case DUCKDB_TYPE.DATE: {
-      if (native.days === DATE_INFINITY) {return "infinity";}
-      if (native.days === -DATE_INFINITY) {return "-infinity";}
-      return matchesNumber(native.days) ? civil(native.days) : String(v);
+      return dateFromDays(native, v);
     }
-    case DUCKDB_TYPE.TIMESTAMP: { return timestamp(native.micros, MICROSECONDS_PER_SECOND, MICROSECOND_DIGITS, ""); }
-    case DUCKDB_TYPE.TIMESTAMP_S: { return timestamp(native.seconds, WHOLE_SECONDS_PER_SECOND, WHOLE_SECOND_DIGITS, ""); }
-    case DUCKDB_TYPE.TIMESTAMP_MS: { return timestamp(native.millis, MILLISECONDS_PER_SECOND, MILLISECOND_DIGITS, ""); }
-    case DUCKDB_TYPE.TIMESTAMP_NS: { return timestamp(native.nanos, NANOSECONDS_PER_SECOND, NANOSECOND_DIGITS, ""); }
-    case DUCKDB_TYPE.TIMESTAMP_TZ: { return timestamp(native.micros, MICROSECONDS_PER_SECOND, MICROSECOND_DIGITS, "Z"); }
-    case DUCKDB_TYPE.TIMESTAMP_TZ_NS: { return timestamp(native.nanos, NANOSECONDS_PER_SECOND, NANOSECOND_DIGITS, "Z"); }
+    case DUCKDB_TYPE.TIMESTAMP: { return timestamp(native.micros, MICROSECONDS, ""); }
+    case DUCKDB_TYPE.TIMESTAMP_S: { return timestamp(native.seconds, SECONDS, ""); }
+    case DUCKDB_TYPE.TIMESTAMP_MS: { return timestamp(native.millis, MILLISECONDS, ""); }
+    case DUCKDB_TYPE.TIMESTAMP_NS: { return timestamp(native.nanos, NANOSECONDS, ""); }
+    case DUCKDB_TYPE.TIMESTAMP_TZ: { return timestamp(native.micros, MICROSECONDS, "Z"); }
+    case DUCKDB_TYPE.TIMESTAMP_TZ_NS: { return timestamp(native.nanos, NANOSECONDS, "Z"); }
     case DUCKDB_TYPE.INTERVAL: { return interval(native.months, native.days, native.micros); }
     case DUCKDB_TYPE.LIST: case DUCKDB_TYPE.ARRAY: {
       return native.items.map((currentItem) => decode(currentItem, t.valueType!, column));
