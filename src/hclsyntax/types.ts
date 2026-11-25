@@ -39,42 +39,78 @@ export interface TemplateWrap extends Node { kind: 'templateWrap'; wrapped: Expr
 export interface TemplateJoin extends Node { kind: 'templateJoin'; tuple: ForExpression }
 export type Expression = Literal | Dynamic | Traversal | RelativeTraversal | Call | Tuple | ObjectExpression | ObjectKey | Unary | Binary | Conditional | ForExpression | Splat | Anonymous | Index | Parentheses | Template | TemplateWrap | TemplateJoin;
 
-export const rangeBetween = function rangeBetween(first: Range, last: Range): Range { return { filename: first.filename, start: { ...first.start }, end: { ...last.end } } };
-export const emptyRangeAt = function emptyRangeAt(range: Range, at: 'start' | 'end' = 'end'): Range { return { filename: range.filename, start: { ...range[at] }, end: { ...range[at] } } };
+export const rangeBetween = function rangeBetween(first: Range, last: Range): Range {
+  // oxlint-disable-next-line eslint/sort-keys -- Preserve the public source range field order.
+  return { filename: first.filename, start: { ...first.start }, end: { ...last.end } };
+};
+export const emptyRangeAt = function emptyRangeAt(range: Range, at: "start" | "end" = "end"): Range {
+  // oxlint-disable-next-line eslint/sort-keys -- Preserve the public source range field order.
+  return { filename: range.filename, start: { ...range[at] }, end: { ...range[at] } };
+};
 export const rangeString = function rangeString(range: Range): string {
   if (range.start.line === range.end.line) {return `${range.filename}:${range.start.line},${range.start.column}-${range.end.column}`;}
   return `${range.filename}:${range.start.line},${range.start.column}-${range.end.line},${range.end.column}`;
 };
-/** Match upstream IsStringLiteral, including a literal dynamic error placeholder. */
+const FIRST_PART = 0;
+const SINGLE_PART = 1;
+
+/**
+ * Recognizes the upstream string-literal AST, including a dynamic error placeholder.
+ * @param {Expression} expression - The expression to inspect.
+ * @returns {boolean} Whether it has a single literal or eligible dynamic part.
+ */
+// oxlint-disable-next-line rules/no-type-predicate -- Preserve the public nonempty tuple narrowing without transporting HCL nodes through Effect.
 export const isStringLiteral = function isStringLiteral(expression: Expression): expression is Template & { parts: [Literal | Dynamic] } {
-  return expression.kind === 'template' && expression.parts.length === 1 && (expression.parts[0]!.kind === 'literal' || expression.parts[0]!.kind === 'dynamic' && !expression.parts[0].diagnostics);
+  if (expression.kind !== "template" || expression.parts.length !== SINGLE_PART) {return false;}
+  // oxlint-disable-next-line typescript/no-non-null-assertion -- Parser-produced single-part templates carry a dense part array.
+  const part = expression.parts[FIRST_PART]!;
+  return part.kind === "literal" || (part.kind === "dynamic" && !part.diagnostics);
 };
 export const staticString = function staticString(expression: Expression): string | undefined {
   if (expression.kind === 'literal' && matchesString(expression.value)) {return expression.value;}
-  if (isStringLiteral(expression) && expression.parts[0].kind === 'literal' && matchesString(expression.parts[0].value)) {return expression.parts[0].value;}
+  if (isStringLiteral(expression) && expression.parts[FIRST_PART].kind === 'literal' && matchesString(expression.parts[FIRST_PART].value)) {return expression.parts[FIRST_PART].value;}
   return undefined;
 };
 export const staticTraversal = function staticTraversal(expression: Expression): Readonly<(string | number)[]> | undefined {
-  return expression.kind === 'traversal' && !expression.steps.some(step => step.dynamic || !matchesString(step.value) && !matchesNumber(step.value)) ? expression.parts : undefined;
+  return expression.kind === 'traversal' && !expression.steps.some(step => (step.dynamic ?? false) || (!matchesString(step.value) && !matchesNumber(step.value))) ? expression.parts : undefined;
 };
 
-/** Data-only equivalent of the upstream expression StartRange methods. */
-export const expressionStartRange = function expressionStartRange(expression: Expression): Range {
-  switch (expression.kind) {
-    case 'parentheses': { return expressionStartRange(expression.expression); }
-    case 'call': { return rangeBetween(expression.nameRange, expression.openParenRange); }
-    case 'conditional': { return expressionStartRange(expression.condition); }
-    case 'binary': { return expressionStartRange(expression.left); }
-    case 'unary': { return expression.symbolRange; }
-    case 'index': case 'tuple': case 'object': case 'for': { return expression.openRange; }
-    case 'objectKey': { return expressionStartRange(expression.wrapped); }
-    case 'splat': { return expression.markerRange; }
-    case 'template': { return expressionStartRange(expression.parts[0]!); }
-    case 'templateJoin': { return expressionStartRange(expression.tuple); }
-    default: { return expression.range; }
+const expressionStartChild = (expression: Expression): { node: Expression } | undefined => {
+  if (expression.kind === "parentheses") {return { node: expression.expression };}
+  if (expression.kind === "conditional" || expression.kind === "binary") {
+    return { node: expression.kind === "conditional" ? expression.condition : expression.left };
   }
+  if (expression.kind === "objectKey" || expression.kind === "templateJoin") {
+    return { node: expression.kind === "objectKey" ? expression.wrapped : expression.tuple };
+  }
+  if (expression.kind === "template") {
+    // oxlint-disable-next-line typescript/no-non-null-assertion -- A parsed template always emits at least a literal or interpolation part.
+    return { node: expression.parts[FIRST_PART]! };
+  }
+  return undefined;
+};
+
+/**
+ * Finds the start range that upstream HCL assigns to an expression.
+ * @param {Expression} expression - The data-only expression AST.
+ * @returns {Range} The range of its first syntactic element.
+ */
+export const expressionStartRange = function expressionStartRange(expression: Expression): Range {
+  const child = expressionStartChild(expression);
+  if (child) {return expressionStartRange(child.node);}
+  if (expression.kind === "call") {return rangeBetween(expression.nameRange, expression.openParenRange);}
+  if (expression.kind === "unary" || expression.kind === "splat") {
+    return expression.kind === "unary" ? expression.symbolRange : expression.markerRange;
+  }
+  if (expression.kind === "index" || expression.kind === "tuple" || expression.kind === "object" || expression.kind === "for") {
+    return expression.openRange;
+  }
+  return expression.range;
 };
 export const staticObjectKey = function staticObjectKey(expression: ObjectKey): string | undefined {
-  if (!expression.forceNonLiteral && expression.wrapped.kind === 'traversal' && expression.wrapped.steps.length === 1) {return expression.wrapped.parts[0] as string;}
+  if (!expression.forceNonLiteral && expression.wrapped.kind === "traversal" && expression.wrapped.steps.length === SINGLE_PART) {
+    // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- A parsed traversal's first part is its root identifier, with numeric parts only in later indexes.
+    return expression.wrapped.parts[FIRST_PART] as string;
+  }
   return staticString(expression.wrapped);
 };
