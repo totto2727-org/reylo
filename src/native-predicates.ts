@@ -32,5 +32,8 @@ export const isRecord = (value: unknown): value is Record<string, unknown> =>
 // oxlint-disable-next-line rules/force-string-empty -- Compare primitive text here so native decoders can run without loading Effect.
 export const isEmptyString = (value: string): boolean => value === "";
 
+export const nonemptyText = (value: string | null | undefined): string | undefined =>
+  matchesNullish(value) || isEmptyString(value) ? undefined : value;
+
 const EMPTY_ARRAY_LENGTH = 0;
 export const isEmptyArray = (value: Readonly<unknown[]>): boolean => value.length === EMPTY_ARRAY_LENGTH;

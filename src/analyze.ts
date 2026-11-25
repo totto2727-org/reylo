@@ -6,20 +6,19 @@
 // Cannot reach the database runs on what `reylo generate` or an earlier type check wrote.
 // oxlint-disable-next-line rules/no-node-imports -- This server-side entry point uses this built-in to inspect or write files through the host filesystem.
 import { readFileSync } from "node:fs";
-// oxlint-disable-next-line rules/no-node-imports -- This server-side entry point uses this built-in to compute the existing digest using the host's hash implementation.
-import { createHash } from "node:crypto";
-import { anyEngine, engine, reason, MissingEngine, Unreachable } from './engine.ts';
+import { anyEngine, engine as installedEngine, reason, MissingEngine, Unreachable } from './engine.ts';
 import type { Engine, Lexed } from './engine.ts';
-import { duckdbPath, hclPath, packageDir, resolveProject, sqlitePath } from './project.ts';
+import { hclPath, packageDir, resolveProject } from './project.ts';
 import type { ResolvedProject } from './project.ts';
 import { NotMysql, refusedLogin } from "./connection.ts";
-import { isEmptyString, isRecord, matchesNull, matchesNullish, matchesString, matchesUndefined } from "./native-predicates.ts";
+import { isRecord, matchesNull, matchesNullish, matchesString, matchesUndefined, nonemptyText } from "./native-predicates.ts";
 import { CACHE_ENTRY_VERSION, cacheEntryFile, readCacheEntry, readOfflineEntry, writeCacheEntry } from "./analysis-cache.ts";
 import type { Entry } from "./analysis-cache.ts";
 import { FINGERPRINT } from "./schema-fingerprint.ts";
 import { closeAnalysisConnection, getOpenConnection, openAnalysisConnection, settleInBackground, withLoginRetry } from "./analysis-connection.ts";
 import type { AnalysisConnection } from "./analysis-connection.ts";
 
+import { cacheServer, connectionDiagnostic, databaseLocation, digestPrefix, sha256 } from "./analysis-identity.ts";
 import { failedAnalysis, liveSchema, offlineSchema, successfulAnalysis } from "./analysis-results.ts";
 import type { Outcome, SchemaSnapshot } from "./analysis-results.ts";
 
@@ -42,17 +41,12 @@ interface AnalysisTarget {
   fingerprint: string;
 }
 
-const DIGEST_START = 0;
 const SERVER_DIGEST_LENGTH = 16;
 const SCHEMA_DIGEST_LENGTH = 16;
 const STATEMENT_DIGEST_LENGTH = 32;
 const DATABASE_FAILURE = 5;
 const MISSING_DATABASE_URL = 4;
 const INVALID_PROJECT = 11;
-
-const sha256 = (text: string): string => createHash("sha256").update(text).digest("hex");
-
-const digestPrefix = (text: string, length: number): string => sha256(text).slice(DIGEST_START, length);
 
 // How long a schema fingerprint is trusted, as long as a statement answer: a migration shows up
 // In a running dev server or editor within seconds. Once the database is found unreachable, the
@@ -73,23 +67,9 @@ const cacheTime = (): number => Date.now();
 // oxlint-disable-next-line node/no-process-env -- The public Session factories default to the current host environment when the caller supplies none.
 const hostEnvironment = (): NodeJS.ProcessEnv => process.env;
 
-const nonemptyText = (value: string | null | undefined): string | undefined =>
-  matchesNullish(value) || isEmptyString(value) ? undefined : value;
-
 const errorMessage = (cause: unknown): string => {
   const message = isRecord(cause) ? cause.message : undefined;
   return matchesString(message) ? message : reason(cause);
-};
-
-const remoteDatabaseLocation = (url: string | undefined): string => {
-  try {
-    const currentUrl = new URL(url ?? "");
-    const host = nonemptyText(currentUrl.hostname) ?? nonemptyText(currentUrl.searchParams.get("host")) ?? "localhost";
-    const port = isEmptyString(currentUrl.port) ? "" : `:${currentUrl.port}`;
-    return `${host}${port}${currentUrl.pathname}`;
-  } catch {
-    return "the database";
-  }
 };
 
 const sessions = new Map<string, Session>();
@@ -103,14 +83,15 @@ const sessions = new Map<string, Session>();
  */
 const openProject = async function (dir: string, env: Record<string, string | undefined>): Promise<{ project: ResolvedProject; engine: Engine | MissingEngine }> {
   const project = resolveProject(await anyEngine(), dir, env);
-  const own = await engine(project.dialect).catch((error: unknown) => (error instanceof MissingEngine ? error : new MissingEngine(errorMessage(error))));
-  return { project, engine: own };
+  const own = await installedEngine(project.dialect).catch((error: unknown) => (error instanceof MissingEngine ? error : new MissingEngine(errorMessage(error))));
+  return { engine: own, project };
 };
 
 export class Session {
   /** The project as resolved when the session opened, or again once a failed `direct_url` command succeeds (`#reread`). */
   public project!: ResolvedProject;
   /** The project's directory, which holds `.reylo/`. */
+  // oxlint-disable-next-line rules/no-readonly -- Keep the public Session root read-only for existing callers.
   public readonly root: string;
   /** The engine of the project's database, or why there is none, which an analysis reports. */
   #engine!: Engine | MissingEngine;
@@ -166,8 +147,12 @@ export class Session {
     // A setting the build step reads (`sqlcommenter`) is part of the key, so a change to it in the
     // Project file reaches a running watch process.
     const key = JSON.stringify([project.root, project.url, project.error, project.sqlcommenter, engine instanceof MissingEngine ? engine.message : undefined]);
-    let session = sessions.get(key);
-    if (!session) {sessions.set(key, (session = new Session(engine, project, { dir, env, idle: BUILD_IDLE })));}
+    const existing = sessions.get(key);
+    if (existing) {
+      return existing;
+    }
+    const session = new Session(engine, project, { dir, env, idle: BUILD_IDLE });
+    sessions.set(key, session);
     return session;
   }
 
@@ -210,7 +195,7 @@ export class Session {
   }
 
   #cacheFile(statementKey: string): string {
-    return cacheEntryFile(this.root, statementKey, digestPrefix(this.#server(), SERVER_DIGEST_LENGTH));
+    return cacheEntryFile(this.root, statementKey, digestPrefix(cacheServer(this.project), SERVER_DIGEST_LENGTH));
   }
 
   #statementKey(sql: string): string {
@@ -435,12 +420,7 @@ export class Session {
    * @returns {string} A connection diagnostic with the address redacted of credentials.
    */
   public cannotConnect(why?: string): string {
-    const { dialect, url, root, urlSource } = this.project;
-    const detail = nonemptyText(why);
-    const suffix = matchesUndefined(detail) ? "" : `: ${detail}`;
-    if (dialect === "sqlite") {return `Cannot open the database ${sqlitePath(url ?? "", root)} (${urlSource})${suffix}`;}
-    if (dialect === "duckdb") {return `Cannot open the database ${duckdbPath(url ?? "", root)} (${urlSource})${suffix}`;}
-    return `Cannot connect to the database at ${this.where()} (${urlSource})${suffix}`;
+    return connectionDiagnostic(this.project, () => this.where(), why);
   }
 
   /**
@@ -453,34 +433,11 @@ export class Session {
   }
 
   /**
-   * Computes the server identifier used in cache filenames.
-   * @returns {string} The database identifier, or an empty string when the session has no URL.
-   */
-  #server(): string {
-    const { dialect, root } = this.project;
-    const url = nonemptyText(this.project.url);
-    if (matchesUndefined(url)) {return "";}
-    const source = hclPath(url, root);
-    if (!matchesUndefined(source)) {return `hcl:${source}`;}
-    if (dialect === "sqlite") {return sqlitePath(url, root);}
-    if (dialect === "duckdb") {return duckdbPath(url, root);}
-    try {
-      const currentUrl = new URL(url);
-      return `${currentUrl.protocol}//${currentUrl.username}@${currentUrl.host}${currentUrl.pathname}`;
-    } catch {
-      return url;
-    }
-  }
-
-  /**
    * Formats the database location for a diagnostic.
    * @returns {string} The host, port and database, or the path to a local database.
    */
   public where(): string {
-    const { dialect, url, root } = this.project;
-    if (dialect === "sqlite") {return sqlitePath(url ?? "", root);}
-    if (dialect === "duckdb") {return duckdbPath(url ?? "", root);}
-    return remoteDatabaseLocation(url);
+    return databaseLocation(this.project);
   }
 
   public async close(): Promise<void> {
@@ -580,6 +537,6 @@ export class Session {
 }
 
 /** Closes every build-step session's connection, for a build step whose build has ended: the process then ends without waiting out the idle time. */
-export async function releaseConnections(): Promise<void> {
+export const releaseConnections = async function (): Promise<void> {
   await Promise.all([...sessions.values()].map(async (session) => session.release()));
-}
+};
