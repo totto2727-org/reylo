@@ -9,6 +9,7 @@
 import { lexConfig, lexExpression, lexTemplate } from './scanner.ts';
 import { Peeker } from './peeker.ts';
 import { TemplateParser } from './parser-template.ts';
+import { nameSuggestion } from './parser-suggestion.ts';
 import { dynamic, error, literal } from './parser-values.ts';
 import { flushHeredocTemplateParts, meldConsecutiveStringLiterals } from './parser-template-tokens.ts';
 import type { TemplateParts, TemplateToken } from './parser-template-tokens.ts';
@@ -73,21 +74,6 @@ const relativeTraversal = function relativeTraversal(expression: Expression, ste
   }
   return { kind: 'relativeTraversal', source: expression, steps: [step], range: between(expression.range, step.range) };
 };
-const nameSuggestion = function nameSuggestion(given: string, suggestions: string[]): string {
-  const chars = [...given];
-  for (const suggestion of suggestions) {
-    const candidate = [...suggestion];
-    let row = candidate.map((_, index) => index + 1); row.unshift(0);
-    for (let i = 0; i < chars.length; i++) {
-      const next = [i + 1];
-      for (let j = 0; j < candidate.length; j++) {next.push(Math.min(next[j]! + 1, row[j + 1]! + 1, row[j]! + (chars[i] === candidate[j] ? 0 : 1)));}
-      row = next;
-    }
-    if (row[candidate.length]! < 3) {return suggestion;}
-  }
-  return '';
-};
-
 /** Stateful translation of the upstream recursive-descent parser. */
 export class Parser extends Peeker {
   public recovery = false;
