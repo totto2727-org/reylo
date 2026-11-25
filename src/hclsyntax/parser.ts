@@ -43,6 +43,33 @@ interface ObjectEntry {
   value: Expression;
 }
 
+interface ForContext {
+  closeType: "TokenCBrace" | "TokenCBrack";
+  makeObject: boolean;
+  open: Token;
+}
+
+interface ForVariables {
+  keyVar: string;
+  valueVar: string;
+}
+
+interface ForHead extends ForVariables {
+  collection: Expression;
+}
+
+interface ForValue {
+  key: Expression | null;
+  value: Expression;
+}
+
+interface ForClause {
+  condition: Expression | null;
+  ellipsis: Token | undefined;
+}
+
+const INVALID_FOR = "Invalid 'for' expression";
+
 interface ParsedExpression {
   expression: Expression;
   failed: boolean;
@@ -794,51 +821,130 @@ export class Parser extends Peeker {
     }
   }
 
+  private recoverFor({ closeType, open }: ForContext): Expression {
+    return dynamic(between(open.range, this.recover(closeType).range));
+  }
+
+  private reportForSyntax({ open }: ForContext, detail: string): void {
+    if (!this.recovery) {
+      this.diag(INVALID_FOR, detail, this.peek().range, between(open.range, this.peek().range));
+    }
+  }
+
+  private invalidFor(context: ForContext, detail: string): Expression {
+    this.reportForSyntax(context, detail);
+    return this.recoverFor(context);
+  }
+
+  private readForVariables(context: ForContext): ForVariables | Expression {
+    if (this.peek().type !== "TokenIdent") {
+      return this.invalidFor(context, "For expression requires variable name after 'for'.");
+    }
+    const first = text(this.read());
+    if (this.peek().type !== "TokenComma") {return { keyVar: "", valueVar: first };}
+    this.read();
+    if (this.peek().type !== "TokenIdent") {
+      return this.invalidFor(context, "For expression requires value variable name after comma.");
+    }
+    return { keyVar: first, valueVar: text(this.read()) };
+  }
+
+  private readForHead(context: ForContext): ForHead | Expression {
+    const variables = this.readForVariables(context);
+    if ("kind" in variables) {return variables;}
+    if (!keyword(this.peek(), "in")) {
+      return this.invalidFor(context, "For expression requires the 'in' keyword after its name declarations.");
+    }
+    this.read();
+    return this.readForCollection(context, variables);
+  }
+
+  private readForCollection(context: ForContext, variables: ForVariables): ForHead | Expression {
+    const { expression: collection, failed } = this.expressionAttempt(() => this.parseExpression());
+    if (failed) {return this.recoverFor(context);}
+    if (this.peek().type !== "TokenColon") {
+      return this.invalidFor(context, "For expression requires a colon after the collection expression.");
+    }
+    this.read();
+    return { collection, ...variables };
+  }
+
+  private readForValue(): ForValue {
+    const first = this.parseExpression();
+    if (this.peek().type !== "TokenFatArrow") {return { key: HCL_NULL, value: first };}
+    this.read();
+    return { key: first, value: this.parseExpression() };
+  }
+
+  private parseForValue(context: ForContext): ForValue | Expression {
+    const before = this.diagnostics.length;
+    const value = this.readForValue();
+    return this.failedSince(before) ? this.recoverFor(context) : value;
+  }
+
+  private forClause(context: ForContext): ForClause | Expression {
+    const ellipsis = this.peek().type === "TokenEllipsis" ? this.read() : undefined;
+    if (!keyword(this.peek(), "if")) {return { condition: HCL_NULL, ellipsis };}
+    this.read();
+    const { expression: condition, failed } = this.expressionAttempt(() => this.parseExpression());
+    if (failed) {
+      const close = this.recover(opposite(context.open.type));
+      return dynamic(between(context.open.range, close.range));
+    }
+    return { condition, ellipsis };
+  }
+
+  private closeFor(context: ForContext): Token {
+    if (this.peek().type === context.closeType) {return this.read();}
+    this.reportForSyntax(context, "Extra characters after the end of the 'for' expression.");
+    return this.recover(context.closeType);
+  }
+
+  private validateForConstruction({ makeObject, open }: ForContext, { key, value }: ForValue, { close, ellipsis }: { close: Token; ellipsis: Token | undefined }): void {
+    if (makeObject && !key) {
+      this.diag(INVALID_FOR, "Key expression is required when building an object.", value.range, between(open.range, close.range));
+    }
+    if (!makeObject && key) {
+      this.diag(INVALID_FOR, "Key expression is not valid when building a tuple.", key.range, between(open.range, close.range));
+    }
+    if (!makeObject && ellipsis) {
+      this.diag(INVALID_FOR, "Grouping ellipsis (...) cannot be used when building a tuple.", ellipsis.range, between(open.range, close.range));
+    }
+  }
+
+  private forExpression(context: ForContext, head: ForHead, result: ForValue & ForClause): Expression {
+    const { condition, ellipsis, key, value } = result;
+    const { open } = context;
+    const close = this.closeFor(context);
+    this.validateForConstruction(context, result, { close, ellipsis });
+    const { collection, keyVar, valueVar } = head;
+    // oxlint-disable-next-line eslint/sort-keys -- Preserve the public 'for' AST order.
+    return { kind: "for", keyVar, valueVar, collection, key, value, condition, group: Boolean(ellipsis), range: between(open.range, close.range), openRange: open.range, closeRange: close.range };
+  }
+
+  private forInterior(context: ForContext): Expression {
+    const head = this.readForHead(context);
+    if ("kind" in head) {return head;}
+    const value = this.parseForValue(context);
+    if ("kind" in value) {return value;}
+    const clause = this.forClause(context);
+    if ("kind" in clause) {return clause;}
+    return this.forExpression(context, head, { ...value, ...clause });
+  }
+
   private finishParsingForExpr(open: Token): Expression {
     this.pushIncludeNewlines(false);
     try {
-      if (!keyword(this.read(), 'for')) {throw new Error("finishParsingForExpr called without peeker pointing to 'for' identifier");}
-      const makeObject = open.type === 'TokenOBrace'; const closeType = makeObject ? 'TokenCBrace' : 'TokenCBrack';
-      const invalid = (detail: string): Expression => {
-        if (!this.recovery) {this.diag("Invalid 'for' expression", detail, this.peek().range, between(open.range, this.peek().range));}
-        return dynamic(between(open.range, this.recover(closeType).range));
-      };
-      if (this.peek().type !== 'TokenIdent') {return invalid("For expression requires variable name after 'for'.");}
-      let valueVar = text(this.read()); let keyVar = '';
-      if (this.peek().type === 'TokenComma') {
-        keyVar = valueVar; this.read();
-        if (this.peek().type !== 'TokenIdent') {return invalid('For expression requires value variable name after comma.');}
-        valueVar = text(this.read());
+      if (!keyword(this.read(), "for")) {
+        // oxlint-disable-next-line rules/require-tagged-error -- The internal parser invariant keeps its native Error without importing Effect.
+        throw new Error("finishParsingForExpr called without peeker pointing to 'for' identifier");
       }
-      if (!keyword(this.peek(), 'in')) {return invalid("For expression requires the 'in' keyword after its name declarations.");}
-      this.read();
-      const collBefore = this.diagnostics.length; const collection = this.parseExpression();
-      if (this.failedSince(collBefore)) {return dynamic(between(open.range, this.recover(closeType).range));}
-      if (this.peek().type !== 'TokenColon') {return invalid('For expression requires a colon after the collection expression.');}
-      this.read();
-      const valueBefore = this.diagnostics.length;
-      let value = this.parseExpression(); let key: Expression | null = null;
-      if (this.peek().type === 'TokenFatArrow') { this.read(); key = value; value = this.parseExpression() }
-      if (this.failedSince(valueBefore)) {return dynamic(between(open.range, this.recover(closeType).range));}
-      let group = false; let ellipsis: Token | undefined;
-      if (this.peek().type === 'TokenEllipsis') { ellipsis = this.read(); group = true }
-      let condition: Expression | null = null;
-      if (keyword(this.peek(), 'if')) {
-        this.read(); const before = this.diagnostics.length; condition = this.parseExpression();
-        if (this.failedSince(before)) {return dynamic(between(open.range, this.recover(opposite(open.type)).range));}
-      }
-      let close: Token;
-      if (this.peek().type === closeType) {close = this.read();}
-      else {
-        if (!this.recovery) {this.diag("Invalid 'for' expression", "Extra characters after the end of the 'for' expression.", this.peek().range, between(open.range, this.peek().range));}
-        close = this.recover(closeType);
-      }
-      if (!makeObject) {
-        if (key) {this.diag("Invalid 'for' expression", 'Key expression is not valid when building a tuple.', key.range, between(open.range, close.range));}
-        if (group) {this.diag("Invalid 'for' expression", 'Grouping ellipsis (...) cannot be used when building a tuple.', ellipsis!.range, between(open.range, close.range));}
-      } else if (!key) {this.diag("Invalid 'for' expression", 'Key expression is required when building an object.', value.range, between(open.range, close.range));}
-      return { kind: 'for', keyVar, valueVar, collection, key, value, condition, group, range: between(open.range, close.range), openRange: open.range, closeRange: close.range };
-    } finally { this.popIncludeNewlines() }
+      const makeObject = open.type === "TokenOBrace";
+      const closeType = makeObject ? "TokenCBrace" : "TokenCBrack";
+      return this.forInterior({ closeType, makeObject, open });
+    } finally {
+      this.popIncludeNewlines();
+    }
   }
 
   private parseExpressionTraversals(from: Expression): Expression {
