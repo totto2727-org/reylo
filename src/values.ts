@@ -23,17 +23,18 @@
 //
 // This module runs in every generated module's process, so it names no Node type: a Buffer is
 // Reached through `globalThis` where one exists.
-import { civilFromDays, daysFromCivil } from "./gregorian-day.ts";
 import type { EngineType } from "./engine-type.ts";
 import {
-  hasObjectType, isEmptyArray, isEmptyString, matchesBigInt, matchesBoolean, matchesNull,
+  isEmptyArray, isEmptyString, matchesBigInt, matchesBoolean, matchesNull,
   matchesNumber, matchesString, matchesUndefined,
 } from "./native-predicates.ts";
 
 import { describe } from "./value-errors.ts";
+import { instant, instantOfDate, isoDate as date, timestamp, utcText } from "./value-time.ts";
 import { bigInteger, DecodeError, exactInteger, float32s, truth } from "./value-numbers.ts";
 
 export { describe, ParameterError } from "./value-errors.ts";
+export { instant, instantOfDate, postgresYear, zoned } from "./value-time.ts";
 export { bigInteger, DecodeError, exactInteger, float32s, refuseTruth, truth } from "./value-numbers.ts";
 
 export type Dialect = "postgres" | "mysql" | "sqlite" | "duckdb";
@@ -215,119 +216,10 @@ export const kindType = function kindType(kind: Kind): string {
 
 export type Decoder = (text: string) => unknown;
 
+const TEXT_START = 0;
+
 const identity: Decoder = (x) => x;
 const number: Decoder = (x) => +x;
-
-const FIRST_YEAR_AD = 1;
-const ISO_YEAR_ZERO = 0;
-const YEAR_DIGITS = 4;
-const EXTENDED_YEAR_DIGITS = 6;
-const LAST_FOUR_DIGIT_YEAR = 9999;
-const CLOCK_DIGITS = 2;
-const TEXT_START = 0;
-const BC_SUFFIX = " BC";
-const SECONDS_PER_MINUTE = 60;
-const MINUTES_PER_HOUR = 60;
-const SECONDS_PER_HOUR = SECONDS_PER_MINUTE * MINUTES_PER_HOUR;
-const SECONDS_PER_DAY = 86_400;
-const NO_OFFSET = 0;
-const EAST_OFFSET = 1;
-const WEST_OFFSET = -1;
-
-const pad = (value: number, width = CLOCK_DIGITS): string => String(value).padStart(width, "0");
-
-/**
- * An ISO 8601 year: four digits from 0000 (1 BC) to 9999, and the extended form, a sign and six
- * digits, outside them (`+010000`, `-000001` for 2 BC), as `Temporal` reads and writes it. A year
- * past 999999, which only a Postgres `date` reaches (up to 5874897), takes the digits it needs after
- * the sign (`+5874897`): ISO 8601 leaves the number of extended digits to the parties that exchange
- * them, Temporal holds no such date in any form, and a sign keeps the rule that every year outside
- * 0000–9999 has one, which `postgresYear` reads back.
- */
-const isoYear = (year: number): string => (year >= ISO_YEAR_ZERO && year <= LAST_FOUR_DIGIT_YEAR ? pad(year, YEAR_DIGITS) : `${year < ISO_YEAR_ZERO ? "-" : "+"}${pad(Math.abs(year), EXTENDED_YEAR_DIGITS)}`);
-
-/**
- * A date's or timestamp's text with its year as `isoYear` writes it: Postgres writes a year past
- * 9999 with more digits (`12345-01-01`) and one before 1 AD in its own form (`0002-06-01 BC`), which
- * `Temporal.PlainDate.from` refuses, so `12345-01-01` is `+012345-01-01` and `0002-06-01 BC` is
- * `-000001-06-01`. A four-digit year after 1 BC, `infinity` and `-infinity` are left as they are.
- */
-const isoDate = (value: string): string => {
-  const dash = value.indexOf("-");
-  const beforeChrist = value.endsWith(BC_SUFFIX);
-  if (dash < YEAR_DIGITS || (dash === YEAR_DIGITS && !beforeChrist)) {return value;}
-  const digits = value.slice(TEXT_START, dash);
-  if (!/^\d+$/u.test(digits)) {return value;}
-  const year = beforeChrist ? FIRST_YEAR_AD - Number(digits) : Number(digits);
-  return isoYear(year) + value.slice(dash, beforeChrist ? -BC_SUFFIX.length : undefined);
-};
-
-/** `2026-10-20` as it is; `0002-06-01 BC` → `-000001-06-01` and `12345-01-01` → `+012345-01-01` (`isoDate`). */
-const date: Decoder = isoDate;
-
-/** `2026-10-20 10:00:00.123456` → `2026-10-20T10:00:00.123456`, its year as a date's (`isoDate`); `infinity` as written. */
-const timestamp: Decoder = (x) => isoDate(x.replace(" ", "T"));
-
-// Timestamptz in DateStyle ISO: `2026-10-20 03:03:00.123456-07`, offsets with seconds before
-// Standard time (`-07:52:58`), years past 9999, ` BC`. `new Date(text)`, which postgres.js and
-// PGlite use, returns Invalid Date for the last three and reads year 0001 as 2001
-// (wiki/driver-decoding/spike/postgres.md); and a Date holds milliseconds, not the server's
-// Microseconds. So Reylo moves the wall-clock time to UTC itself, in whole seconds on a day count,
-// And keeps the fraction as the server wrote it.
-const TSTZ = /^(?<year>\d{4,})-(?<month>\d\d)-(?<day>\d\d) (?<hour>\d\d):(?<minute>\d\d):(?<second>\d\d)(?<fraction>\.\d{1,6})?(?<zoneSign>[+-])(?<zoneHour>\d\d)(?::(?<zoneMinute>\d\d))?(?::(?<zoneSecond>\d\d))?(?<era> BC)?$/u;
-
-/**
- * A date or time parameter's text as Postgres reads it, the inverse of `isoYear` for what `run`
- * returns (the round-trip rule): Postgres 18 refuses an ISO 8601 extended year (`+010000-01-01`,
- * "time zone displacement out of range") and the year 0000 ("date/time field value out of range"),
- * and reads `10000-01-01` and a year before 1 as its own ` BC` form, year 1 − n, so `-000001` is
- * `0002 … BC` and `0000` or `+000000` is `0001 … BC`. Any other text is left as it is.
- */
-export const postgresYear = (text: string): string => {
-  const parts = /^(?<year>[+-]\d{6,}|0000)(?<rest>-.*)$/u.exec(text)?.groups;
-  if (matchesUndefined(parts) || /\sbc$/iu.test(text)) {return text;}
-  const year = Number(parts.year);
-  return year > ISO_YEAR_ZERO
-    ? `${pad(year, YEAR_DIGITS)}${parts.rest}`
-    : `${pad(FIRST_YEAR_AD - year, YEAR_DIGITS)}${parts.rest}${BC_SUFFIX}`;
-};
-
-/**
- * A timestamptz's text as the instant's ISO 8601 text in UTC: `2026-10-20 10:00:00.123456+02` is
- * `2026-10-20T08:00:00.123456Z`, the fraction as the server wrote it (trailing zeros dropped, none
- * for a whole second), which `Temporal.Instant.from` reads. `infinity` and `-infinity` stay those
- * words.
- */
-export const instant = (text: string): string => {
-  const parts = TSTZ.exec(text)?.groups;
-  if (matchesUndefined(parts)) {return text;}
-  const year = matchesUndefined(parts.era) ? Number(parts.year) : FIRST_YEAR_AD - Number(parts.year);
-  const zoneSign = parts.zoneSign === "-" ? WEST_OFFSET : EAST_OFFSET;
-  const offset = zoneSign * (
-    Number(parts.zoneHour) * SECONDS_PER_HOUR
-    + Number(parts.zoneMinute ?? NO_OFFSET) * SECONDS_PER_MINUTE
-    + Number(parts.zoneSecond ?? NO_OFFSET)
-  );
-  const day = daysFromCivil(year, Number(parts.month), Number(parts.day));
-  const seconds = day * SECONDS_PER_DAY + Number(parts.hour) * SECONDS_PER_HOUR + Number(parts.minute) * SECONDS_PER_MINUTE + Number(parts.second) - offset;
-  const utcDay = Math.floor(seconds / SECONDS_PER_DAY);
-  const utcTime = seconds - utcDay * SECONDS_PER_DAY;
-  const [utcYear, utcMonth, utcDate] = civilFromDays(utcDay);
-  const utcHour = Math.floor(utcTime / SECONDS_PER_HOUR);
-  const utcMinute = Math.floor(utcTime / SECONDS_PER_MINUTE) % MINUTES_PER_HOUR;
-  const utcSecond = utcTime % SECONDS_PER_MINUTE;
-  return `${isoYear(utcYear)}-${pad(utcMonth)}-${pad(utcDate)}T${pad(utcHour)}:${pad(utcMinute)}:${pad(utcSecond)}${parts.fraction ?? ""}Z`;
-};
-
-/**
- * The instant a driver already decoded to a Date (Bun.sql's timestamptz), as the same text: to the
- * millisecond, which is all a Date holds, with its fraction's trailing zeros dropped as the server
- * drops them, so that a value the driver did not cut reads alike on every driver.
- */
-export const instantOfDate = function instantOfDate(d: Date, column: string): string {
-  validDate(d, column);
-  return d.toISOString().replace(/\.?0+Z$/u, "Z");
-};
 
 // Interval in IntervalStyle postgres: `1 year 2 mons 3 days 04:05:06.789`. Postgres keeps three
 // Parts, each signed on its own: months (written as years and months), days, and a time that may
@@ -623,37 +515,6 @@ export const textDecoder = function textDecoder(kind: Kind, delim = ","): Decode
 // And for the rare value a driver decoded before Reylo could name its type. Each converts the
 // Forms a driver is measured to give (wiki/driver-decoding/spike/) and leaves a value already in
 // Reylo's form as it is.
-
-/**
- * A string for a `timestamptz` names its zone: without one the server reads it in the session's
- * TimeZone, which the driver or the server sets.
- */
-export const zoned = /(?:\d:\d\d(?::\d\d(?:\.\d+)?)?(?:\s*(?:z|[+-]\d\d?(?::?\d\d){0,2})|\s+[a-z][\w/+-]*)|^-?infinity|^epoch|^now)(?:\s+bc)?$/i;
-
-/**
- * A Date a driver handed back must hold a time. Bun.sql 1.4 decodes a date, timestamp or timestamptz
- * before 1 AD as an Invalid Date (its infinities come as the numbers ±Infinity), so an Invalid Date
- * is a value the driver lost, and Reylo refuses it rather than return a wrong one.
- */
-function validDate(d: Date, column: string): void {
-  if (Number.isNaN(d.getTime())) {throw new DecodeError(`Column "${column}": the driver returned an Invalid Date, which is how Bun.sql decodes a date or timestamp before 1 AD. Reylo refuses it rather than return a wrong value.`);}
-}
-
-const FIRST_ISO_MONTH = 1;
-const MILLISECOND_DIGITS = 3;
-
-/**
- * A Date a driver read as UTC (Bun.sql's date and timestamp) back to the text the server's would
- * decode to: `YYYY-MM-DD`, or with `T` and the fraction the driver kept, the year as `isoYear`
- * writes it.
- */
-const utcText = function (d: Date, kind: "date" | "timestamp", column: string): string {
-  validDate(d, column);
-  const date = `${isoYear(d.getUTCFullYear())}-${pad(d.getUTCMonth() + FIRST_ISO_MONTH)}-${pad(d.getUTCDate())}`;
-  if (kind === "date") {return date;}
-  const ms = d.getUTCMilliseconds();
-  return `${date}T${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}:${pad(d.getUTCSeconds())}${ms ? `.${pad(ms, MILLISECOND_DIGITS).replace(/0+$/u, "")}` : ""}`;
-};
 
 const isBytes = (v: unknown): v is Uint8Array => v instanceof Uint8Array;
 /**
