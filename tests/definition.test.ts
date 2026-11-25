@@ -9,98 +9,181 @@ import { DatabaseSync } from "node:sqlite";
 // oxlint-disable-next-line rules/no-node-imports -- The Nub integration fixtures use this built-in to select the host's real temporary directory.
 import { tmpdir } from "node:os";
 // oxlint-disable-next-line rules/no-node-imports -- The Nub integration fixtures use this built-in to resolve paths using the host platform's filesystem conventions.
-import { join } from "node:path";
+import path from "node:path";
 // oxlint-disable-next-line rules/no-node-imports -- The Nub integration fixtures use this built-in to convert local module URLs with the host platform's path rules.
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { ROOT, languageServer, requireFixtureValue } from "./helpers.ts";
+// oxlint-disable-next-line rules/no-node-imports -- Poll the native language server while its SQL project initializes.
+import { setTimeout as delay } from "node:timers/promises";
+import { isRecord, matchesString } from "#reylo-source/native-predicates.ts";
+import { forEachFixtureInOrder, languageServer, requireFixtureValue, ROOT } from "./helpers.ts";
 
-// Go-to-definition from what a `.sql` module declares opens the `.sql` file at its statement, through
-// The span map the content mapper returns (src/mapper.ts), and a hover shows the file's comment and
-// Statement, from the doc comments the module carries (src/doc-comment.ts). The language server
-// Runs as an editor runs it, `tsc --lsp --stdio` with runExternalCode on, over a SQLite project, so
-// No server is needed.
+interface Position { character: number; line: number }
+interface Range { end: Position; start: Position }
+const START = 0;
+const NEXT = 1;
+const LAST = -1;
+const RETRIES = 100;
+const SERVER_WAIT_MS = 200;
+const REVISION = 1;
+const PATH_START = 3;
+const ROW_START = 1;
+const COLUMN_START = 2;
+const SQL_PROPERTY = 7;
+const STATEMENT_FIRST_LINE = 1;
+const STATEMENT_LAST_LINE = 4;
+const STATEMENT_END = 17;
 
-interface Position { line: number; character: number }
-interface Range { start: Position; end: Position }
-
-const project = async function (): Promise<string> {
-  const temporary = await mkdtemp(join(tmpdir(), "reylo-definition-"));
-  const root = await realpath(temporary);
-  await writeFile(join(root, "package.json"), `{ "type": "module" }`);
-  await writeFile(join(root, ".env"), "DATABASE_URL=file:./app.db\n");
-  const db = new DatabaseSync(join(root, "app.db"));
+const createDatabase = (root: string): void => {
+  const db = new DatabaseSync(path.join(root, "app.db"));
   db.exec("create table posts (id integer primary key, title text not null, body text)");
   db.close();
-  await mkdir(join(root, "node_modules", "@totto2727"), { recursive: true });
-  await symlink(ROOT, join(root, "node_modules", "@totto2727/reylo"));
-  await symlink(join(ROOT, "packages", "sqlite"), join(root, "node_modules", "@totto2727", "reylo-sqlite"));
-  const compilerOptions = { target: "esnext", module: "nodenext", lib: ["esnext"], types: [], strict: true, noEmit: true, skipLibCheck: true, allowImportingTsExtensions: true, paths: { "@/*": ["./*"] } };
-  await writeFile(join(root, "tsconfig.json"), JSON.stringify({ compilerOptions, contentMappers: [{ package: "@totto2727/reylo", extensions: [".sql"] }], include: ["main.ts"] }));
-  await mkdir(join(root, "queries"));
-  await writeFile(join(root, "queries", "posts.sql"), "\n-- every post after one\nselect id, title, body\nfrom posts\nwhere id > :after\n");
-  // SQLite's `@name` at the start of a line, which outside a code block TypeScript reads as a tag.
-  await writeFile(join(root, "queries", "add_post.sql"), "insert into posts (title, body)\nvalues (\n  @title,\n  @body\n)\n");
-  await writeFile(join(root, "main.ts"), `import posts from "@/queries/posts.sql";\nimport type { Row } from "@/queries/posts.sql";\nexport const query = posts;\nexport type Title = Row["title"];\nexport const sent = posts.sql;\nimport addPost from "@/queries/add_post.sql";\nexport const add = addPost;\n`);
+};
+
+const linkPackages = async (root: string): Promise<void> => {
+  const packages = path.join(root, "node_modules", "@totto2727");
+  await mkdir(packages, { recursive: true });
+  await symlink(ROOT, path.join(packages, "reylo"));
+  await symlink(path.join(ROOT, "packages", "sqlite"), path.join(packages, "reylo-sqlite"));
+};
+
+const writeTypeScriptConfig = async (root: string): Promise<void> => {
+  const compilerOptions = {
+    allowImportingTsExtensions: true,
+    lib: ["esnext"],
+    module: "nodenext",
+    noEmit: true,
+    paths: { "@/*": ["./*"] },
+    skipLibCheck: true,
+    strict: true,
+    target: "esnext",
+    types: [],
+  };
+  const contentMappers = [{ extensions: [".sql"], package: "@totto2727/reylo" }];
+  await writeFile(path.join(root, "tsconfig.json"), JSON.stringify({ compilerOptions, contentMappers, include: ["main.ts"] }));
+};
+
+const writeStatements = async (root: string): Promise<void> => {
+  const queries = path.join(root, "queries");
+  await mkdir(queries);
+  await writeFile(path.join(queries, "posts.sql"), "\n-- every post after one\nselect id, title, body\nfrom posts\nwhere id > :after\n");
+  // A line starting with @name stays inside SQL in the hover's code block.
+  await writeFile(path.join(queries, "add_post.sql"), "insert into posts (title, body)\nvalues (\n  @title,\n  @body\n)\n");
+  await writeFile(path.join(root, "main.ts"), `import posts from "@/queries/posts.sql";\nimport type { Row } from "@/queries/posts.sql";\nexport const query = posts;\nexport type Title = Row["title"];\nexport const sent = posts.sql;\nimport addPost from "@/queries/add_post.sql";\nexport const add = addPost;\n`);
+};
+
+const project = async (): Promise<string> => {
+  const temporary = await mkdtemp(path.join(tmpdir(), "reylo-definition-"));
+  const root = await realpath(temporary);
+  await writeFile(path.join(root, "package.json"), `{ "type": "module" }`);
+  await writeFile(path.join(root, ".env"), "DATABASE_URL=file:./app.db\n");
+  createDatabase(root);
+  await linkPackages(root);
+  await writeTypeScriptConfig(root);
+  await writeStatements(root);
   return root;
+};
+
+type LanguageServer = ReturnType<typeof languageServer>;
+type FindPosition = (needle: string, offset: number) => Position;
+interface Document { root: string; text: string; uri: string }
+
+const readDocument = async (root: string): Promise<Document> => {
+  const main = path.join(root, "main.ts");
+  return { root, text: await readFile(main, "utf8"), uri: pathToFileURL(main).href };
+};
+
+const positionIn = (text: string): FindPosition => (needle, offset) => {
+  const before = text.slice(START, text.indexOf(needle) + offset).split("\n");
+  return { character: requireFixtureValue(before.at(LAST)).length, line: before.length - NEXT };
+};
+
+const openDocument = async (lsp: LanguageServer, { root, text, uri }: Document): Promise<void> => {
+  await lsp.request("initialize", {
+    capabilities: { textDocument: { definition: { linkSupport: true }, hover: { contentFormat: ["markdown"] } } },
+    initializationOptions: { runExternalCode: true },
+    processId: process.pid,
+    rootUri: pathToFileURL(root).href,
+  });
+  lsp.notify("initialized", {});
+  lsp.notify("textDocument/didOpen", { textDocument: { languageId: "typescript", text, uri, version: REVISION } });
+};
+
+type Hover = (position: Position) => Promise<string>;
+
+const hoverReader = (lsp: LanguageServer, uri: string): Hover => async (position) => {
+  const reply = await lsp.request("textDocument/hover", { position, textDocument: { uri } });
+  if (!isRecord(reply) || !isRecord(reply.contents) || !matchesString(reply.contents.value)) {return "";}
+  return reply.contents.value;
+};
+
+const awaitHover = async (position: Position, hover: Hover, includes: string): Promise<string> => {
+  const state = { attempt: START, text: "" };
+  while (state.attempt < RETRIES && !state.text.includes(includes)) {
+    // oxlint-disable-next-line eslint/no-await-in-loop -- Poll one real language-server response at a time while the project initializes.
+    if (state.attempt > START) {await delay(SERVER_WAIT_MS);}
+    // oxlint-disable-next-line eslint/no-await-in-loop -- A new hover waits for the previous attempt before retrying.
+    state.text = await hover(position);
+    state.attempt += NEXT;
+  }
+  return state.text;
+};
+
+const assertTypedHovers = async (at: FindPosition, hover: Hover): Promise<void> => {
+  const inferred = await awaitHover(at("query = posts", START), hover, "title: string");
+  assert.match(inferred, /title: string;\s+body: string \| null;/u);
+  const imported = await hover(at("posts from", START));
+  const statementBlock = "```sql\nselect id, title, body\nfrom posts\nwhere id > :after\n```";
+  assert.ok(imported.endsWith(`\nevery post after one\n\n${statementBlock}`), imported);
+  const sent = await hover(at("posts.sql;", SQL_PROPERTY));
+  assert.match(sent, /^\(property\) sql: "\\n-- every post after one\\nselect id, title, body\\nfrom posts\\nwhere id > \?"$/mu);
+  assert.ok(!sent.includes("```sql"), sent);
+  const added = await awaitHover(at("addPost from", START), hover, "```sql");
+  assert.ok(added.endsWith("\n```sql\ninsert into posts (title, body)\nvalues (\n  @title,\n  @body\n)\n```"), added);
+};
+
+const nativePath = (uri: string): string => {
+  const name = fileURLToPath(uri);
+  return process.platform === "win32" ? name.toLowerCase() : name;
+};
+
+interface DefinitionReader { at: FindPosition; lsp: LanguageServer; root: string; uri: string }
+
+const definitionLinks = (reply: unknown): [string, unknown][] => {
+  assert.ok(Array.isArray(reply), "Expected native TypeScript definition links");
+  return reply.map((link: unknown) => {
+    assert.ok(isRecord(link) && matchesString(link.targetUri));
+    return [nativePath(link.targetUri), link.targetSelectionRange];
+  });
+};
+
+const assertDefinitions = async ({ at, lsp, root, uri }: DefinitionReader): Promise<void> => {
+  const sql = nativePath(pathToFileURL(path.join(root, "queries", "posts.sql")).href);
+  const statement: Range = {
+    end: { character: STATEMENT_END, line: STATEMENT_LAST_LINE },
+    start: { character: START, line: STATEMENT_FIRST_LINE },
+  };
+  const origins = [
+    ["the import's path", at(`"@/queries/posts.sql"`, PATH_START)],
+    ["the query", at("= posts", PATH_START)],
+    ["Row", at(`Row["title"]`, ROW_START)],
+    ["a column", at(`"title"]`, COLUMN_START)],
+  ] as const;
+  await forEachFixtureInOrder(origins, async ([part, position]) => {
+    const reply = await lsp.request("textDocument/definition", { position, textDocument: { uri } });
+    assert.deepEqual(definitionLinks(reply), [[sql, statement]], part);
+  });
 };
 
 // oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
 test("go-to-definition on a query, its import's path, its Row and a column opens the .sql file at its statement, and a hover shows its comment and statement", async () => {
   const root = await project();
-  const main = join(root, "main.ts");
-  const text = await readFile(main, "utf8");
-  const at = (needle: string, offset: number): Position => {
-    const before = text.slice(0, text.indexOf(needle) + offset).split("\n");
-    return { line: before.length - 1, character: requireFixtureValue(before.at(-1)).length };
-  };
+  const document = await readDocument(root);
+  const at = positionIn(document.text);
   const lsp = languageServer(root);
   try {
-    await lsp.request("initialize", { processId: process.pid, rootUri: pathToFileURL(root).href, capabilities: { textDocument: { definition: { linkSupport: true }, hover: { contentFormat: ["markdown"] } } }, initializationOptions: { runExternalCode: true } });
-    lsp.notify("initialized", {});
-    const uri = pathToFileURL(main).href;
-    lsp.notify("textDocument/didOpen", { textDocument: { uri, languageId: "typescript", version: 1, text } });
-    // The mapper analyzed the statement: the query's hover carries the row's columns.
-    let hover = "";
-    for (let i = 0; i < 100 && !hover.includes("title: string"); i++) {
-      if (i) {await new Promise((resolve) => setTimeout(resolve, 200));}
-      hover = (await lsp.request("textDocument/hover", { textDocument: { uri }, position: at("query = posts", 0) }))?.contents?.value ?? "";
-    }
-    assert.match(hover, /title: string;\s+body: string \| null;/u);
-
-    // The hover over the import shows the comment at the top of the file as prose, then the
-    // Statement as written; the one over its `.sql` the compiled statement, once, as its type,
-    // Without the comment naming the file. The doc comment's lines in the module move nothing the
-    // Definitions below land on.
-    const hoverAt = async (position: Position): Promise<string> => (await lsp.request("textDocument/hover", { textDocument: { uri }, position }))?.contents?.value ?? "";
-    const statementBlock = "```sql\nselect id, title, body\nfrom posts\nwhere id > :after\n```";
-    const imported = await hoverAt(at("posts from", 0));
-    assert.ok(imported.endsWith(`\nevery post after one\n\n${statementBlock}`), imported);
-    const sent = await hoverAt(at("posts.sql;", 7));
-    assert.match(sent, /^\(property\) sql: "\\n-- every post after one\\nselect id, title, body\\nfrom posts\\nwhere id > \?"$/mu);
-    assert.ok(!sent.includes("```sql"), sent);
-    // A line of the statement that starts with `@` stays in the code block, not a tag after it.
-    let added = "";
-    for (let i = 0; i < 100 && !added.includes("```sql"); i++) {
-      if (i) {await new Promise((resolve) => setTimeout(resolve, 200));}
-      added = await hoverAt(at("addPost from", 0));
-    }
-    assert.ok(added.endsWith("\n```sql\ninsert into posts (title, body)\nvalues (\n  @title,\n  @body\n)\n```"), added);
-
-    // A file URI read back as its path: on Windows the server writes the drive in lowercase with its
-    // Colon encoded (`file:///c%3A/…`), and the system matches a path's letters without regard to case.
-    const path = (uri: string): string => (process.platform === "win32" ? fileURLToPath(uri).toLowerCase() : fileURLToPath(uri));
-    const sql = path(pathToFileURL(join(root, "queries", "posts.sql")).href);
-    // Lines 2 to 5 of the file: the comment above the statement, through `:after`.
-    const statement: Range = { start: { line: 1, character: 0 }, end: { line: 4, character: 17 } };
-    for (const [what, position] of [
-      ["the import's path", at(`"@/queries/posts.sql"`, 3)],
-      ["the query", at("= posts", 3)],
-      ["Row", at(`Row["title"]`, 1)],
-      ["a column", at(`"title"]`, 2)],
-    ] as const) {
-      const links: { targetUri: string; targetSelectionRange: Range }[] = await lsp.request("textDocument/definition", { textDocument: { uri }, position });
-      assert.deepEqual(links.map((link) => [path(link.targetUri), link.targetSelectionRange]), [[sql, statement]], what);
-    }
+    await openDocument(lsp, document);
+    await assertTypedHovers(at, hoverReader(lsp, document.uri));
+    await assertDefinitions({ at, lsp, root, uri: document.uri });
   } finally {
     await lsp.close();
   }
