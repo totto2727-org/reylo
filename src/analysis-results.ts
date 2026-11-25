@@ -2,6 +2,10 @@ import { reason } from "./engine.ts";
 import { isRecord, matchesString } from "./native-predicates.ts";
 import type { Analysis } from "./engine.ts";
 
+export const DATABASE_FAILURE = 5;
+export const MISSING_DATABASE_URL = 4;
+export const INVALID_PROJECT = 11;
+
 export type Outcome =
   | { ok: true; analysis: Analysis; source: "cache" | "database"; entry: string }
   | { ok: false; message: string; code: number };

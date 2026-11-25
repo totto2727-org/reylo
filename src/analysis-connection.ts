@@ -1,11 +1,14 @@
 import { refusedLogin } from "./connection.ts";
 import { duckdbDatabase } from "./duckdb.ts";
 import { AnswerCache, MissingEngine } from "./engine.ts";
-import type { Analysis, Connection, Engine } from "./engine.ts";
+import type { Analysis, Connection, Diagnostic, Engine } from "./engine.ts";
 import { duckdbPath, hclPath, sqlitePath } from "./project.ts";
 import type { ResolvedProject } from "./project.ts";
 import type { SqliteDriver } from "./sqlite-drivers.ts";
-import { matchesUndefined } from "./native-predicates.ts";
+import { matchesNullish, matchesUndefined } from "./native-predicates.ts";
+
+import type { ConnectionOwner } from "./analysis-connection-owner.ts";
+import type { Outcome } from "./analysis-results.ts";
 
 export interface AnalysisConnection {
   analyze: (sql: string) => Promise<Analysis>;
@@ -156,4 +159,39 @@ export const withLoginRetry = (
     forget: async () => call(async (connection) => connection.forget()),
     query: async (text, params) => call(async (connection) => connection.query(text, params)),
   };
+};
+
+const PROJECT_DRIVER_REFUSAL = 6;
+
+const firstDriverRefusal = async (sql: string, analysis: Analysis, drivers: ArrayIterator<SqliteDriver>): Promise<Diagnostic | undefined> => {
+  const { done, value: driver } = drivers.next();
+  if (done === true) {
+    return undefined;
+  }
+  const refusal = await driver.refuses(analysis.rewritten.sql, analysis.rewritten.order.length);
+  if (matchesUndefined(refusal)) {
+    return firstDriverRefusal(sql, analysis, drivers);
+  }
+  const { placeRefusal } = await import("./sqlite-drivers.ts");
+  const { start, length } = placeRefusal(sql, refusal);
+  const message = driver.says(refusal);
+  // oxlint-disable-next-line eslint/sort-keys -- Keep the analysis diagnostic in its existing wire order.
+  return { message, start, length, code: PROJECT_DRIVER_REFUSAL };
+};
+
+interface DriverCheck {
+  connections: ConnectionOwner;
+  schema: string | null | undefined;
+}
+
+// An idle connection can reopen for driver checks. The project's drivers are never cached.
+export const applyProjectDrivers = async (sql: string, outcome: Extract<Outcome, { ok: true }>, { connections, schema }: DriverCheck): Promise<Outcome> => {
+  const { analysis } = outcome;
+  if (analysis.diagnostics.length || matchesNullish(schema)) {
+    return outcome;
+  }
+  const io = await getOpenConnection(connections.get());
+  const drivers = (io?.drivers ?? []).values();
+  const diagnostic = await firstDriverRefusal(sql, analysis, drivers);
+  return matchesUndefined(diagnostic) ? outcome : { ...outcome, analysis: { ...analysis, diagnostics: [diagnostic] } };
 };

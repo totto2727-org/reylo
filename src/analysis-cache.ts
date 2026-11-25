@@ -6,6 +6,13 @@ import type { Analysis } from "./engine.ts";
 import { isRecord } from "./native-predicates.ts";
 import type { ResolvedProject } from "./project.ts";
 
+import { NotMysql, reason, Unreachable } from "./connection.ts";
+import type { AnalysisConnection } from "./analysis-connection.ts";
+import type { ConnectionOwner } from "./analysis-connection-owner.ts";
+import { cacheTime, DATABASE_FAILURE, errorMessage, failedAnalysis, offlineSchema, successfulAnalysis } from "./analysis-results.ts";
+import type { Outcome } from "./analysis-results.ts";
+import type { SchemaTracker } from "./analysis-schema.ts";
+
 export const CACHE_ENTRY_VERSION = 1;
 
 /** What `.reylo/` holds for one statement. */
@@ -117,4 +124,64 @@ export const writeCacheEntry = async (root: string, file: string, entry: Entry):
       pendingWrites.delete(file);
     }
   }
+};
+
+export interface AnalysisOptions {
+  force?: boolean;
+  store?: boolean;
+}
+
+interface AnalysisTarget {
+  file: string;
+  fingerprint: string;
+  options: AnalysisOptions;
+}
+
+interface LiveAnalysisContext {
+  cannotConnect: (why: string) => string;
+  catalog: SchemaTracker;
+  connections: ConnectionOwner;
+  project: () => ResolvedProject;
+  refused: (error: NotMysql) => string;
+  root: string;
+}
+
+const liveAnalysisFailure = (context: LiveAnalysisContext, pending: Promise<AnalysisConnection>, error: unknown): Outcome => {
+  if (error instanceof Unreachable) {
+    context.connections.drop(pending);
+    context.catalog.snapshot = offlineSchema(cacheTime(), reason(error));
+    return failedAnalysis(context.cannotConnect(reason(error)), DATABASE_FAILURE);
+  }
+  if (error instanceof NotMysql) {
+    context.connections.drop(pending);
+    const message = context.refused(error);
+    context.catalog.snapshot = offlineSchema(cacheTime(), message, true);
+    return failedAnalysis(message, DATABASE_FAILURE);
+  }
+  return failedAnalysis(errorMessage(error), DATABASE_FAILURE);
+};
+
+const databaseAnalysis = async (sql: string, file: string, context: LiveAnalysisContext): Promise<Outcome> => {
+  const pending = context.connections.get();
+  try {
+    const connection = await pending;
+    const analysis = await connection.analyze(sql);
+    return successfulAnalysis(analysis, "database", file);
+  } catch (error) {
+    return liveAnalysisFailure(context, pending, error);
+  }
+};
+
+export const analyzeLive = async (sql: string, { file, fingerprint, options }: AnalysisTarget, context: LiveAnalysisContext): Promise<Outcome> => {
+  const entry = options.force === true || options.store === false ? undefined : await readCacheEntry(file);
+  if (entry?.schema === fingerprint) {
+    return successfulAnalysis(entry.analysis, "cache", file);
+  }
+  const outcome = await databaseAnalysis(sql, file, context);
+  if (outcome.ok && options.store !== false) {
+    // oxlint-disable-next-line eslint/sort-keys -- Preserve the byte order of a serialized version 1 cache entry.
+    const updated: Entry = { version: CACHE_ENTRY_VERSION, dialect: context.project().dialect, schema: fingerprint, analysis: outcome.analysis, at: cacheTime() };
+    await writeCacheEntry(context.root, file, updated);
+  }
+  return outcome;
 };
