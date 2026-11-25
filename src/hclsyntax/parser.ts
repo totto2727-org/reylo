@@ -6,8 +6,10 @@
 // Translated from hclsyntax/parser.go, parser_template.go and public.go at
 // Hashicorp/hcl 00057cf06d7b38a3f89e6e54d622eee98322b314.
 // The AST is data-only. cty evaluation is outside this port's boundary.
-import { lexConfig, lexExpression, lexTemplate, graphemeClusters } from './scanner.ts';
+import { lexConfig, lexExpression, lexTemplate } from './scanner.ts';
 import { Peeker } from './peeker.ts';
+import { flushHeredocTemplateParts, meldConsecutiveStringLiterals } from './parser-template-tokens.ts';
+import type { TemplateParts, TemplateToken } from './parser-template-tokens.ts';
 import { parseStringLiteralToken } from './string-literal.ts';
 import { trimLeadingWhitespace as trimLeft, trimTrailingWhitespace as trimRight } from './whitespace.ts';
 import { rangeBetween as between, emptyRangeAt, rangeString, isStringLiteral } from './types.ts';
@@ -754,14 +756,6 @@ export class Parser extends Peeker {
 // For FEFF and NEL, so do not use String.trim() here.
 const cloneRange = (range: Range): Range => ({ filename: range.filename, start: { ...range.start }, end: { ...range.end } });
 
-type TemplateToken =
-  | { kind: 'literal'; value: string; range: Range }
-  | { kind: 'interpolation'; expression: Expression; range: Range }
-  | { kind: 'if'; condition: Expression; range: Range }
-  | { kind: 'for'; keyVar: string; valueVar: string; collection: Expression; range: Range }
-  | { kind: 'else' | 'endif' | 'endfor' | 'end'; range: Range };
-interface TemplateParts { tokens: TemplateToken[]; range: Range }
-
 class TemplateParser {
   private pos = 0;
   private readonly tokens: TemplateToken[];
@@ -839,42 +833,5 @@ class TemplateParser {
     const value: Expression = { kind: 'template', parts: expressions, range: between(expressions[0]!.range, expressions.at(-1)!.range) };
     const tuple: ForExpression = { kind: 'for', keyVar: open.keyVar, valueVar: open.valueVar, collection: open.collection, key: null, value, condition: null, group: false, range: between(open.range, endRange), openRange: open.range, closeRange: endRange };
     return { kind: 'templateJoin', tuple, range: tuple.range };
-  }
-}
-
-function flushHeredocTemplateParts(parts: TemplateParts): void {
-  let minSpaces = Number.MAX_SAFE_INTEGER; let newline = true;
-  const adjust: Extract<TemplateToken, { kind: 'literal' }>[] = [];
-  for (const token of parts.tokens) {
-    if (newline) {
-      newline = false;
-      let spaces = 0;
-      if (token.kind === 'literal') {
-        const trimmed = trimLeft(token.value);
-        if (trimmed.length === 0 && token.value.endsWith('\n')) {spaces = Number.MAX_SAFE_INTEGER;}
-        else {
-          const prefix = token.value.slice(0, token.value.length - trimmed.length);
-          spaces = graphemeClusters(encoder.encode(prefix)).length; adjust.push(token);
-        }
-      } else if (token.kind === 'end') {break;}
-      if (spaces < minSpaces) {minSpaces = spaces;}
-    }
-    if (token.kind === 'literal' && token.value.endsWith('\n')) {newline = true;}
-  }
-  Iterator.from(adjust).forEach((token) => {
-    const bytes = encoder.encode(token.value); const clusters = graphemeClusters(bytes);
-    let byteCount = 0;
-    for (let i = 0; i < minSpaces; i++) {byteCount += clusters[i]!.length;}
-    token.value = decoder.decode(bytes.subarray(byteCount));
-    token.range.start.column += minSpaces; token.range.start.byte += byteCount;
-  });
-}
-function meldConsecutiveStringLiterals(parts: TemplateParts): void {
-  let i = 1;
-  while (i < parts.tokens.length) {
-    const previous = parts.tokens[i - 1]!; const current = parts.tokens[i]!;
-    if (previous.kind === 'literal' && current.kind === 'literal') {
-      previous.value += current.value; previous.range.end = { ...current.range.end }; parts.tokens.splice(i, 1);
-    } else {i++;}
   }
 }
