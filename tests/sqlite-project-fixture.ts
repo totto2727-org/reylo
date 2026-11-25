@@ -56,12 +56,22 @@ export const querySource = async function (root: string, name: string, sql: stri
   return file;
 };
 
-export const built = async function (root: string, name: string, sql: string): Promise<SqliteQueryFixture<"many">> {
+const buildSqliteQueryModule = async function (root: string, name: string, sql: string): Promise<URL> {
   const file = await querySource(root, name, sql);
   const { code } = await sqlModule(file, sql);
   const out = path.join(root, `${name}.mjs`);
   await writeFile(out, code.replace(`from "@totto2727/reylo"`, `from ${JSON.stringify(INDEX)}`));
-  return importSqliteQueryFixture(pathToFileURL(out).href, "many");
+  return pathToFileURL(out);
+};
+
+export const importBuiltSqliteQuery = async function (root: string, name: string, sql: string): ReturnType<typeof importSqliteQueryFixture> {
+  const file = await buildSqliteQueryModule(root, name, sql);
+  return importSqliteQueryFixture(file.href);
+};
+
+export const built = async function (root: string, name: string, sql: string): Promise<SqliteQueryFixture<"many">> {
+  const file = await buildSqliteQueryModule(root, name, sql);
+  return importSqliteQueryFixture(file.href, "many");
 };
 
 export const analysis = async function (root: string, sql: string): Promise<Analysis> {
