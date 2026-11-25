@@ -25,10 +25,20 @@ interface Project {
 }
 const projects = new Map<string, Project>();
 
+const DEFAULT_PROTOCOL_VERSION = 1;
+const FIRST_BYTE_OFFSET = 0;
+const BYTE_WIDTH = 1;
+const ONE_BYTE_DIAGNOSTIC = 1;
+const GENERAL_DIAGNOSTIC = 1;
+const MISSING_PROJECT_DIAGNOSTIC = 9;
+const SETTINGS_LOCATION_DIAGNOSTIC = 104;
+
 /** A diagnostic of the file, its range kept inside the file's `size` bytes (`withinFile`). */
-const diag = function (size: number, messageText: string, start: number, length: number, code = 1) {
+const diag = function (size: number, messageText: string, start: number, length: number, code = GENERAL_DIAGNOSTIC) {
   return { messageText, ...withinFile(start, length, size), code };
 };
+
+const byteIsWhitespace = (byte: number): boolean => /\s/u.test(String.fromCodePoint(byte));
 
 /**
  * The span map TypeScript reads as `mappings`: `[virtualStart, virtualLength, originalStart,
@@ -41,13 +51,13 @@ const diag = function (size: number, messageText: string, start: number, length:
  */
 const mapToStatement = function (text: string, sql: string): number[][] {
   const bytes = Buffer.from(sql, "utf8");
-  let start = 0;
+  let start = FIRST_BYTE_OFFSET;
   let end = bytes.length;
-  while (start < end && /\s/u.test(String.fromCharCode(bytes[start]!))) {start++;}
-  while (end > start && /\s/u.test(String.fromCharCode(bytes[end - 1]!))) {end--;}
+  while (start < end && byteIsWhitespace(bytes.readUInt8(start))) {start += BYTE_WIDTH;}
+  while (end > start && byteIsWhitespace(bytes.readUInt8(end - BYTE_WIDTH))) {end -= BYTE_WIDTH;}
   const ATOM = 1;
   const DEFINITION = 8; const TYPE_DEFINITION = 16; const IMPLEMENTATION = 32;
-  return [[0, Buffer.byteLength(text), start, end - start, ATOM, DEFINITION | TYPE_DEFINITION | IMPLEMENTATION]];
+  return [[FIRST_BYTE_OFFSET, Buffer.byteLength(text), start, end - start, ATOM, DEFINITION | TYPE_DEFINITION | IMPLEMENTATION]];
 };
 
 export type MapperHandlers = Record<string, (params: unknown) => unknown | Promise<unknown>>;
@@ -64,7 +74,7 @@ export function mapperHandlers(): MapperHandlers {
       // Builds from 2026-09-18 on send `protocolVersion: 1` and refuse a mapper that does not
       // Answer with the version it speaks; the npm nightly of the same day does not send it yet.
       const { protocolVersion } = (params ?? {}) as { protocolVersion?: number };
-      return { protocolVersion: protocolVersion ?? 1, positionEncoding: CONTENT_MAPPER_POSITION_ENCODING, diagnosticSource: "reylo" };
+      return { protocolVersion: protocolVersion ?? DEFAULT_PROTOCOL_VERSION, positionEncoding: CONTENT_MAPPER_POSITION_ENCODING, diagnosticSource: "reylo" };
     },
     async openProject(params) {
       const p = params as { projectHandle: string; options?: Record<string, unknown>; configFileName: string };
@@ -72,7 +82,7 @@ export function mapperHandlers(): MapperHandlers {
       // Every setting lives in the project file, which other hosts read too.
       const resolved = resolveProject(await anyEngine(), projectDir);
       const projectFile = resolved.file ? relative(projectDir, resolved.file).split(sep).join("/") || resolved.file : PROJECT_FILE;
-      const optionDiagnostics = Object.keys(p.options ?? {}).map((key) => ({ path: [key], messageText: `reylo reads its settings from ${projectFile}, not from the content mapper's options; move "${key}" there.`, code: 104 }));
+      const optionDiagnostics = Object.keys(p.options ?? {}).map((key) => ({ path: [key], messageText: `reylo reads its settings from ${projectFile}, not from the content mapper's options; move "${key}" there.`, code: SETTINGS_LOCATION_DIAGNOSTIC }));
       projects.set(p.projectHandle, { strictParams: resolved.strictParams, projectFile, session: Session.open(projectDir) });
       let schemaIdentity: string | undefined;
       try {
@@ -81,7 +91,8 @@ export function mapperHandlers(): MapperHandlers {
       } catch {
         schemaIdentity = "unreadable HCL source";
       }
-      const configIdentity = createHash("sha1").update(JSON.stringify([resolved.file ?? null, resolved.dialect, resolved.strictParams, resolved.url ?? null, resolved.error ?? null, p.options ?? null, ...(schemaIdentity ? [schemaIdentity] : [])])).digest("hex");
+      // JSON arrays encode absent settings as null in the configuration digest.
+      const configIdentity = createHash("sha1").update(JSON.stringify([resolved.file, resolved.dialect, resolved.strictParams, resolved.url, resolved.error, p.options, ...(matchesUndefined(schemaIdentity) ? [] : [schemaIdentity])])).digest("hex");
       return { configIdentity, watchedFiles: resolved.watched, optionDiagnostics };
     },
     async transform(params) {
@@ -96,7 +107,7 @@ export function mapperHandlers(): MapperHandlers {
       if (!project) {
         // A transform for a project this process never opened: answer, never throw, so the file
         // Keeps its default export instead of becoming an empty module.
-        diagnostics.push(diag(size, `The content mapper has no project for this file; restart the TypeScript server.`, 0, 1, 9));
+        diagnostics.push(diag(size, `The content mapper has no project for this file; restart the TypeScript server.`, FIRST_BYTE_OFFSET, ONE_BYTE_DIAGNOSTIC, MISSING_PROJECT_DIAGNOSTIC));
         const leading = leadingComment(sql);
         const doc = docComment(leading.prose, statementAfter(sql, leading));
         const text = `import type { Query } from "@totto2727/reylo";\nexport type Params = unknown;\nexport type Row = unknown;\nexport type QueryError = import("@totto2727/reylo").QueryError;\n${doc}declare const query: Query<unknown, unknown, "many", "postgres">;\nexport default query;\n`;
@@ -149,7 +160,7 @@ export function mapperHandlers(): MapperHandlers {
       };
 
       if (!outcome.ok) {
-        diagnostics.push(diag(size, outcome.message, 0, 1, outcome.code));
+        diagnostics.push(diag(size, outcome.message, FIRST_BYTE_OFFSET, ONE_BYTE_DIAGNOSTIC, outcome.code));
         return emit(undefined, "unknown", "unknown", "many", lexed?.params ?? []);
       }
       const { analysis } = outcome;
