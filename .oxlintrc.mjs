@@ -41,6 +41,16 @@ export default defineConfig({
       },
     },
     {
+      // Keep the upstream descriptor and its checked examples byte-identical, including JSON key order and encoding labels.
+      files: ['spec/type-descriptor.ts'],
+      rules: {
+        'eslint/max-lines': 'off',
+        'eslint/sort-keys': 'off',
+        'unicorn/numeric-separators-style': 'off',
+        'unicorn/text-encoding-identifier-case': 'off',
+      },
+    },
+    {
       // The published package and upstream consumers use this entry path.
       files: ['src/index.ts'],
       rules: { 'rules/no-index-filename': 'off' },

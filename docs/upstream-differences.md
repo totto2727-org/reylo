@@ -156,6 +156,7 @@ Relative to the upstream release at `7a3928a8ff4dfb387b34ed584ab1319aa72f3f3b`, 
 Oxlint loads the published `@totto2727/oxlint/preset/library` with type-aware checking across handwritten source, tests, examples, and tooling.
 The HCL scanner generator owns `src/hclsyntax/scanner-tables.ts` and `src/hclsyntax/string-literal-tables.ts`. Oxlint omits those generated transition tables.
 The generated MySQL and SQLite error tables keep the upstream protocol numbers and key order through file-scoped lint exceptions.
+Four style exceptions in the upstream type descriptor keep its checked examples, JSON key order, and encoding labels byte-identical.
 The Bun example uses Bun type definitions at the root so Oxlint can type-check it after a root-only install. `nub run lint` checks the generated SQL declarations against the content mapper and a temporary database seeded from the example schema. The Bun example keeps its normal type check with `--runExternalCode`.
 The Effect adapter documents local exceptions where its public readonly types and native `TypeError` causes are part of the integration contract.
 
