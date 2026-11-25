@@ -8,30 +8,22 @@
 import { readFileSync } from "node:fs";
 // oxlint-disable-next-line rules/no-node-imports -- This server-side entry point uses this built-in to compute the existing digest using the host's hash implementation.
 import { createHash } from "node:crypto";
-import { anyEngine, AnswerCache, engine, reason, MissingEngine, Unreachable } from './engine.ts';
+import { anyEngine, engine, reason, MissingEngine, Unreachable } from './engine.ts';
 import type { Analysis, Engine, Lexed } from './engine.ts';
 import { duckdbPath, hclPath, packageDir, resolveProject, sqlitePath } from './project.ts';
 import type { ResolvedProject } from './project.ts';
-import { duckdbDatabase } from "./duckdb.ts";
 import { NotMysql, refusedLogin } from "./connection.ts";
-import type { SqliteDriver } from "./sqlite-drivers.ts";
 import { isEmptyString, isRecord, matchesNull, matchesNullish, matchesString, matchesUndefined } from "./native-predicates.ts";
 import { CACHE_ENTRY_VERSION, cacheEntryFile, readCacheEntry, readOfflineEntry, writeCacheEntry } from "./analysis-cache.ts";
 import { FINGERPRINT } from "./schema-fingerprint.ts";
+import { openAnalysisConnection } from "./analysis-connection.ts";
+import type { AnalysisConnection } from "./analysis-connection.ts";
 
 export type { Entry } from "./analysis-cache.ts";
 
 export type Outcome =
   | { ok: true; analysis: Analysis; source: "cache" | "database"; entry: string }
   | { ok: false; message: string; code: number };
-
-/**
- * A connection the engine holds (src/engine.ts): `analyze` runs a statement's whole analysis over
- * it, `query` runs the schema's fingerprint, and `forget` drops the answers the engine keeps once
- * the schema changes. On SQLite, `drivers` are the app's own, which each statement is prepared on
- * too (src/sqlite-drivers.ts).
- */
-interface Io { analyze(sql: string): Promise<Analysis>; query(sql: string, params: unknown[]): Promise<unknown[][]>; forget: () => Promise<void>; close: () => Promise<void>; drivers?: SqliteDriver[] }
 
 const DIGEST_START = 0;
 const SERVER_DIGEST_LENGTH = 16;
@@ -107,7 +99,7 @@ export class Session {
   /** Where the project was resolved from, and with what environment, for `#reread`. */
   readonly #dir: string;
   readonly #env: Record<string, string | undefined>;
-  #io: Promise<Io> | undefined;
+  #io: Promise<AnalysisConnection> | undefined;
   /** The URL the connection opens: the project's, until a command in `direct_url` gives a fresh one. */
   #url: string | undefined;
   #busy = NO_ACTIVE_ANALYSIS;
@@ -350,7 +342,7 @@ export class Session {
     }
     if (this.#schema && now - this.#schema.at < (matchesNull(this.#schema.value) ? OFFLINE_TTL : SCHEMA_TTL)) {return this.#schema;}
     const pending = this.#connection();
-    let io: Io;
+    let io: AnalysisConnection;
     try {
       io = await pending;
     } catch (error) {
@@ -462,9 +454,9 @@ export class Session {
     if (io) {await io.then((i) => i.close()).catch(() => {});}
   }
 
-  #connection(): Promise<Io> {
-    this.#io ??= (async (): Promise<Io> => {
-      let first: Io;
+  #connection(): Promise<AnalysisConnection> {
+    this.#io ??= (async (): Promise<AnalysisConnection> => {
+      let first: AnalysisConnection;
       try {
         first = await this.#open(this.#url!);
       } catch (error) {
@@ -478,8 +470,8 @@ export class Session {
       // Together, as every call waiting when a token expires is, share one reopen, so that the
       // Command runs once and one connection replaces the old; a call that fails on a connection
       // Already replaced is asked again on the one that replaced it.
-      let current: Promise<Io> = Promise.resolve(first);
-      const again = async <T>(call: (on: Io) => Promise<T>): Promise<T> => {
+      let current: Promise<AnalysisConnection> = Promise.resolve(first);
+      const again = async <T>(call: (on: AnalysisConnection) => Promise<T>): Promise<T> => {
         const used = current;
         const on = await used;
         try {
@@ -517,9 +509,9 @@ export class Session {
    * Forgets a connection a call found dead, and closes it, since one opened in its place with a
    * command's fresh output may be live. Only the connection that call ran on: a call that fails
    * late never ends one opened since.
-   * @param {Promise<Io>} io The connection promise used by the failed operation.
+   * @param {Promise<AnalysisConnection>} io The connection promise used by the failed operation.
    */
-  #drop(io: Promise<Io>): void {
+  #drop(io: Promise<AnalysisConnection>): void {
     if (this.#io !== io) {return;}
     this.#io = undefined;
     io.then((i) => i.close()).catch(() => {});
@@ -540,46 +532,8 @@ export class Session {
     return fresh;
   }
 
-  async #open(url: string): Promise<Io> {
-    const { dialect, root } = this.project;
-    // The URL names a database whose engine the project lacks: its error, as the import's.
-    if (this.#engine instanceof MissingEngine) {throw this.#engine;}
-    const source = hclPath(url, root);
-    if (!matchesUndefined(source)) {return (await import("./hcl.ts")).hclCatalog(source, this.#engine);}
-    // DuckDB runs inside the app: the engine's needs are answered by the project's own DuckDB
-    // (src/duckdb.ts), which opens the file for each analysis and holds nothing between them.
-    if (dialect === "duckdb") {
-      const engine = this.#engine;
-      const db = duckdbDatabase(duckdbPath(url, root), root);
-      const cache = new AnswerCache();
-      return {
-        analyze: (sql) => db.run((io) => engine.analyze(sql, "duckdb", io, cache)),
-        query: (text, params) => db.run((io) => io.query(text, params)),
-        forget: async () => cache.clear(),
-        close: async () => {},
-      };
-    }
-    // The engine opens the database itself: on SQLite the file the project names, and the statement
-    // Is prepared on the app's own SQLite drivers too, which are the app's, not the engine's.
-    const target = dialect === "sqlite" ? sqlitePath(url, root) : url;
-    const connection = await this.#engine.open(target);
-    let drivers: SqliteDriver[] | undefined;
-    try {
-      drivers = dialect === "sqlite" ? await (await import("./sqlite-drivers.ts")).openProjectDrivers(root, target) : undefined;
-    } catch (error) {
-      await connection.close();
-      throw error;
-    }
-    return {
-      analyze: (sql) => connection.analyze(sql),
-      query: (text, params) => connection.query(text, params),
-      forget: () => connection.forget(),
-      close: async () => {
-        await Promise.all((drivers ?? []).map((d) => d.close().catch(() => {})));
-        await connection.close();
-      },
-      ...(drivers && { drivers }),
-    };
+  async #open(url: string): Promise<AnalysisConnection> {
+    return openAnalysisConnection(this.#engine, this.project, url);
   }
 }
 
