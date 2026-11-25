@@ -1,296 +1,181 @@
-// The engine's type model as TypeScript text. Reylo gives every value it returns its type itself,
-// On every driver (src/values.ts): one representation per SQL type, so
-// A column's type is its kind's, from the same table the run time decodes with. Inside a JSON value
-// The database has already serialized it, so the same type reads as JSON writes it there, and a
-// Value nothing types there, or a `json` or `jsonb` value nothing constrains, is any JSON value:
-// `Json`, which the generated module imports from `reylo`.
-import type { EngineType } from "./engine.ts";
-import { kindType as typeOfKind, scalarKind } from './values.ts';
-import type { Dialect } from './values.ts';
-import { hasObjectType, matchesBoolean, matchesNull, matchesNumber, matchesString, matchesUndefined } from "./native-predicates.ts";
+// Render the engine's SQL type model using the same scalar representations as the native runtime.
+import type { EngineType } from "./engine-core.ts";
+import { isEmptyArray, matchesUndefined } from "./native-predicates.ts";
+import { schemaType } from "./render-json.ts";
+import { jsonScalar } from "./render-json-scalars.ts";
+import { ident, JSON_TYPE, lastOfEachName, objectFields, orNull } from "./render-text.ts";
+import { kindType as typeOfKind, scalarKind } from "./values.ts";
+import type { Dialect } from "./values.ts";
 
-// What a database writes inside a JSON document (`json_build_object`, `json_agg`, a composite
-// Inside one): a number for the integers and decimals, the text of a date, hexadecimal for bytes.
-// JSON has no number for a non-finite value, so Postgres writes a float's or a decimal's as text.
-const nonFinite = `number | "NaN" | "Infinity" | "-Infinity"`;
-const json: Record<string, string> = {
-  bool: "boolean",
-  // An oid is not one of the numbers JSON has a number for: Postgres writes its text.
-  int2: "number", int4: "number", oid: "string", float4: nonFinite, float8: nonFinite,
-  int8: "number", numeric: nonFinite,
-  text: "string", varchar: "string", bpchar: "string", name: "string", char: "string", citext: "string",
-  uuid: "string", time: "string", timetz: "string", interval: "string",
-  date: "string", timestamp: "string", timestamptz: "string",
-  bytea: "string",
-  money: "string", inet: "string", cidr: "string", macaddr: "string", macaddr8: "string", xml: "string",
-  bit: "string", varbit: "string", tsvector: "string", tsquery: "string", regclass: "string", regtype: "string",
-  int4range: "string", int8range: "string", numrange: "string", tsrange: "string", tstzrange: "string", daterange: "string",
-  int4multirange: "string", int8multirange: "string", nummultirange: "string", tsmultirange: "string", tstzmultirange: "string", datemultirange: "string",
-  ltree: "string", lquery: "string", ltxtquery: "string",
-  // Types with no cast to JSON, which Postgres writes inside a document as their text: built-in
-  // Geometric and system types, and the extensions' on Neon and Supabase (pgvector, PostGIS's
-  // Others, cube, seg, isn, intarray, h3, hll, ip4r, pgx_ulid, prefix, rdkit, roaringbitmap,
-  // Semver, unit, VectorChord).
-  point: "string", line: "string", lseg: "string", box: "string", path: "string", polygon: "string", circle: "string",
-  pg_lsn: "string", jsonpath: "string", xid: "string", xid8: "string",
-  regproc: "string", regprocedure: "string", regoper: "string", regoperator: "string", regnamespace: "string", regrole: "string", regcollation: "string", regconfig: "string", regdictionary: "string",
-  vector: "string", halfvec: "string", sparsevec: "string", geography: "string", box2d: "string", box3d: "string", spheroid: "string", raster: "string",
-  cube: "string", seg: "string", ean13: "string", isbn: "string", isbn13: "string", ismn: "string", ismn13: "string", issn: "string", issn13: "string", upc: "string",
-  query_int: "string", h3index: "string", hll: "string", hll_hashval: "string",
-  ip4: "string", ip4r: "string", ip6: "string", ip6r: "string", ipaddress: "string", iprange: "string", ulid: "string", prefix_range: "string",
-  mol: "string", qmol: "string", xqmol: "string", reaction: "string", bfp: "string", sfp: "string", roaringbitmap: "string", s3vec: "string",
-  semver: "string", semverrange: "string", semvermultirange: "string", unit: "string", unitrange: "string", unitmultirange: "string", rabitq8: "string", rabitq4: "string",
-  // An hstore is an object of its keys inside a document, each value text or null (`{"a": "1", "b": null}`).
-  hstore: "Record<string, string | null>",
-  // PostGIS writes a geometry through its cast to JSON: a GeoJSON geometry, `{"type":"Point","coordinates":[1,2]}`.
-  geometry: "{ type: string; [key: string]: Json | undefined }",
-  // A row whose columns were not read (a subquery's): an object of them inside a document.
-  record: "Record<string, Json>",
-};
-// MySQL stores no infinity and no NaN, so its numbers inside a document are numbers.
-const mysqlJson: Record<string, string> = { ...json, float4: "number", float8: "number", numeric: "number" };
-const sqliteJson: Record<string, string> = { integer: "number", int8: "number", real: "number", numeric: "number | string", text: "string", bool: "boolean" };
+export { schemaType } from "./render-json.ts";
+export { ident, JSON_TYPE, lastOfEachName, orNull } from "./render-text.ts";
 
-/** Any JSON value, as a module names it: the type `reylo` exports. */
-export const JSON_TYPE = "Json";
+type Field = Extract<EngineType, { kind: "object" }>["fields"][number];
+type ArrayType = Extract<EngineType, { kind: "array" }>;
+type RowType = Extract<EngineType, { kind: "rows" }>;
+type DuckdbAggregate = Extract<EngineType, { kind: "struct" | "map" | "tuple" | "union" }>;
+type OrdinaryResult = Exclude<EngineType, DuckdbAggregate | RowType | { kind: "unknown" }>;
 
-/** A type that may also be null. `Json` already admits null, which a NOT NULL `jsonb` column can hold, so it reads the same either way. */
-export const orNull = (type: string): string => (type === JSON_TYPE ? type : `${type} | null`);
+const DRIVER_MODE = false;
+const JSON_MODE = true;
+const STANDARD_DIALECT = "postgres";
+const NESTED_PARAM = true;
+const INTEGER_INPUT = "number | bigint | string";
+// Date and timestamp inputs use the value's text to keep driver timezone settings out of binding.
+const temporal = new Set(["date", "timestamp", "timestamptz"]);
+const duckdbTextInputs = new Set([...temporal, "decimal", "interval"]);
+// SQLite writes a Boolean column with NUMERIC affinity as 1 or 0.
+const sqliteScalarInput = new Map([
+  ["bool", "boolean | number"], ["int8", "number | bigint"], ["integer", "number"], ["numeric", "number | string | boolean"],
+]);
 
-export const ident = (name: string): string => (/^[A-Za-z_$][\w$]*$/u.test(name) ? name : JSON.stringify(name));
+const arrayOf = (text: string): string => /[|&]/u.test(text) ? `(${text})[]` : `${text}[]`;
+const isRecordValue = (type: EngineType): boolean =>
+  type.kind === "composite" || (type.kind === "scalar" && type.name === "record");
 
-export const renderType = function renderType(t: EngineType, inJson = false, dialect: Dialect = "postgres"): string {
-  switch (t.kind) {
-    case "scalar": {
-      // `a|b` is either: a MySQL column whose type the execution decides (`:n + 1` is a BIGINT
-      // Or a DOUBLE by what is bound), or a truth value a document holds as `true` or as 1.
-      if (!inJson) {return typeOfKind(scalarKind(t.name, dialect));}
-      const parts = t.name.split("|").map((name) => (dialect === "sqlite" ? sqliteJson : (dialect === "mysql" ? mysqlJson : json))[name] ?? JSON_TYPE);
-      return parts.includes(JSON_TYPE) ? JSON_TYPE : [...new Set(parts.flatMap((part) => part.split(" | ")))].join(" | ");
-    }
-    case "enum": { return t.labels.length ? t.labels.map((label) => JSON.stringify(label)).join(" | ") : "string"; }
-    case "array": {
-      if (((t.of.kind === "scalar" && t.of.name === "record") || t.of.kind === "composite") && !inJson) {return "string";}
-      // Postgres lets any array hold NULL elements, whatever a column's NOT NULL says, so a result's
-      // Elements may be null unless the statement builds the array from values it shows are not
-      // (`array[1, 2]`, `array_agg` over a NOT NULL column). A parameter's are strict
-      // (`renderParamType`).
-      const item = renderType(t.of, inJson, dialect);
-      const inner = t.nullable_items === false ? item : orNull(item);
-      return /[|&]/u.test(inner) ? `(${inner})[]` : `${inner}[]`;
-    }
-    // A JSON value whose shape the statement builds.
-    case "object": { return renderFields(t.fields, dialect); }
-    // A composite whose columns the catalog gave: on the wire it is a row value like `record`,
-    // Which no driver parses; inside a JSON document the database writes it as an object.
-    case "composite": { return inJson ? renderFields(t.fields, dialect) : "string"; }
-    case "list": {
-      const item = renderType(t.of, true, dialect);
-      const inner = t.nullable_items ? orNull(item) : item;
-      return /[|&]/u.test(inner) ? `(${inner})[]` : `${inner}[]`;
-    }
-    case "json": { return matchesUndefined(t.schema) ? JSON_TYPE : schemaType(t.schema); }
-    // Only a parameter is one; no column is.
-    case "rows": { return renderParamType(t, dialect); }
-    // A DuckDB struct's fields, map's entries and union's value stand as a row's values do.
-    case "struct": { return t.fields.length ? `{ ${lastOfEachName(t.fields).map((f) => `${ident(f.name)}: ${orNull(renderType(f.type, false, dialect))}`).join("; ")} }` : "Record<never, never>"; }
-    case "map": { return `{ key: ${renderType(t.key, false, dialect)}; value: ${orNull(renderType(t.value, false, dialect))} }[]`; }
-    case "tuple": { return `[${t.items.map((item) => orNull(renderType(item, false, dialect))).join(", ")}]`; }
-    case "union": { return t.members.length ? t.members.map((m) => `{ tag: ${JSON.stringify(m.name)}; value: ${orNull(renderType(m.type, false, dialect))} }`).join(" | ") : "never"; }
-    // Inside a document the database built, a value nothing types is still JSON; anywhere else
-    // (SQLite's `json_extract`, a column of no declared type) it may be any value.
-    case "unknown": { return inJson ? JSON_TYPE : "unknown"; }
-  }
+const enumLabels = (labels: string[]): string =>
+  isEmptyArray(labels) ? "string" : labels.map((label) => JSON.stringify(label)).join(" | ");
+
+const nonSqliteInput = (name: string): string | undefined => {
+  if (name === "int8") {return INTEGER_INPUT;}
+  if (name.split("|").every((part) => temporal.has(part)) || name === "numeric") {return "string";}
+  return undefined;
 };
 
-/** A union of JSON types: `Json` absorbs the rest, and `never` adds nothing. */
-const union = function union(parts: string[]): string {
-  const kept = [...new Set(parts)];
-  if (kept.includes(JSON_TYPE)) {return JSON_TYPE;}
-  const real = kept.filter((p) => p !== "never");
-  return real.length ? real.join(" | ") : "never";
-};
-
-/** The TypeScript literal type of one JSON value. */
-const literalType = function literalType(v: unknown): string {
-  if (matchesNull(v)) {return "null";}
-  if (matchesString(v)) {return JSON.stringify(v);}
-  if (matchesNumber(v) || matchesBoolean(v)) {return String(v);}
-  if (Array.isArray(v)) {return `[${v.map(literalType).join(", ")}]`;}
-  if (hasObjectType(v)) {
-    const entries = Object.entries(v as Record<string, unknown>);
-    return entries.length ? `{ ${entries.map(([key, x]) => `${ident(key)}: ${literalType(x)}`).join("; ")} }` : "Record<never, never>";
-  }
-  return "unknown";
-};
-
-/**
- * The TypeScript type of a JSON value the engine's canonical JSON Schema describes: the values a
- * CHECK's schema admits (upstream engine/core/src/schema_type.rs), where a schema that says nothing more is any
- * JSON value, `Json`. An object that may hold keys besides the ones it names says so with an index
- * signature, `Json | undefined` beside named keys, since TypeScript requires every named key's type,
- * `undefined` included for an optional one, to fit the signature.
- */
-export function schemaType(schema: unknown, input = false): string {
-  if (schema === false) {return "never";}
-  if (matchesNull(schema) || !hasObjectType(schema) || Array.isArray(schema)) {return JSON_TYPE;}
-  const m = schema as Record<string, unknown>;
-  const sub = (s: unknown): string => schemaType(s, input);
-  if (Array.isArray(m.anyOf)) {return union(m.anyOf.map(sub));}
-  if (Array.isArray(m.enum)) {return union(m.enum.map(literalType));}
-  if (!matchesUndefined(m.not)) {return "never";}
-  const kinds = matchesString(m.type) ? [m.type] : (Array.isArray(m.type) ? m.type.filter((k): k is string => matchesString(k)) : []);
-  return kinds.length ? union(kinds.map((kind) => kindType(kind, m, input))) : JSON_TYPE;
-}
-
-/**
- * `input`: the value is one the caller passes, a typed JSON parameter's or a `json('…')` member's,
- * whose keys the schema does not name are ignored unless it closes the object; its type names the
- * keys alone, so that TypeScript still flags a misspelled one in an object literal.
- */
-function kindType(kind: string, m: Record<string, unknown>, input = false): string {
-  const schemaType_ = (s: unknown): string => schemaType(s, input);
-  switch (kind) {
-    case "string": { return "string"; }
-    case "integer": case "number": { return "number"; }
-    case "boolean": { return "boolean"; }
-    case "null": { return "null"; }
-    case "array": {
-      const prefix = Array.isArray(m.prefixItems) ? m.prefixItems.map(schemaType_) : [];
-      const rest = matchesUndefined(m.items) ? JSON_TYPE : schemaType_(m.items);
-      if (!prefix.length) {return rest === "never" ? "[]" : `${grouped(rest)}[]`;}
-      const min = matchesNumber(m.minItems) ? m.minItems : 0;
-      const items = prefix.map((item, index) => (index < min ? item : `${grouped(item)}?`));
-      if (rest !== "never") {items.push(`...${grouped(rest)}[]`);}
-      return `[${items.join(", ")}]`;
-    }
-    case "object": {
-      const properties = !matchesNull(m.properties) && hasObjectType(m.properties) && !Array.isArray(m.properties) ? (m.properties as Record<string, unknown>) : {};
-      const required = Array.isArray(m.required) ? m.required : [];
-      const fields = Object.entries(properties).map(([key, value]) => `${ident(key)}${required.includes(key) ? "" : "?"}: ${schemaType_(value)}`);
-      const open = matchesUndefined(m.additionalProperties) || m.additionalProperties === true;
-      const rest = matchesUndefined(m.additionalProperties) || m.additionalProperties === false || (input && open && Object.keys(properties).length > 0) ? "never" : schemaType_(m.additionalProperties);
-      if (rest !== "never") {fields.push(`[key: string]: ${fields.length ? `${JSON_TYPE} | undefined` : rest}`);}
-      if (fields.length) {return `{ ${fields.join("; ")} }`;}
-      return matchesUndefined(m.additionalProperties) ? `Record<string, ${JSON_TYPE}>` : "Record<never, never>";
-    }
-    default: { return JSON_TYPE; }
-  }
-}
-
-/** A type in parentheses where it is a union at its own top level, as an array's element or an optional tuple element must be. */
-function grouped(ts: string): string {
-  let depth = 0;
-  let quoted = false;
-  for (let i = 0; i < ts.length; i++) {
-    const c = ts[i]!;
-    if (quoted) {
-      if (c === "\\") {i++;}
-      else if (c === '"') {quoted = false;}
-    } else if (c === '"') {quoted = true;}
-    else if ("{([<".includes(c)) {depth++;}
-    else if ("})]>".includes(c)) {depth--;}
-    else if (c === "|" && depth === 0) {return `(${ts})`;}
-  }
-  return ts;
-}
-
-/**
- * The last of each name: a row a driver builds is an object, which keeps the last of two columns
- * of one name, and so does `JSON.parse` of two keys of one name. The engine reports the columns.
- */
-export function lastOfEachName<T extends { name: string }>(items: Readonly<T[]>): T[] {
-  return items.filter((item, index) => !items.slice(index + 1).some((later) => later.name === item.name));
-}
-
-/** An object type of JSON-encoded fields, each nullable as the engine says. */
-function renderFields(fields: { name: string; type: EngineType; nullable: boolean }[], dialect: Dialect): string {
-  fields = lastOfEachName(fields);
-  return fields.length ? `{ ${fields.map((field) => `${ident(field.name)}: ${field.nullable ? orNull(renderType(field.type, true, dialect)) : renderType(field.type, true, dialect)}`).join("; ")} }` : "Record<never, never>";
-}
-
-/**
- * The type of a value whose JSON Schema the statement writes, a typed JSON parameter's
- * (`:p::jsonb('…')`) or a `json('…')` member's: the caller's, so a key its schema does not name is
- * left out of the type (src/render.ts, `schemaType`'s `input`); `undefined` for any other.
- */
-export const declaredType = function declaredType(t: EngineType, declared: unknown): string | undefined {
-  return !matchesUndefined(declared) && t.kind === "json" && !matchesUndefined(t.schema) ? schemaType(t.schema, true) : undefined;
-};
-
-/**
- * The type a parameter accepts: what `run` returns for its SQL type, so that a row goes back in as
- * it came out (the round-trip rule), and what else every driver binds
- * the same way. Every Postgres and MySQL driver binds a number, a BigInt or a digit string for a
- * 64-bit integer, so `limit :n` takes a number. On MySQL the engine types a parameter by the
- * column it is written to or compared with (upstream engine/mysql `column_types`), since the prepare
- * describes every integer context as a BIGINT and every BIT one alike: a BIGINT column's is
- * `int8`, a TINYINT(1)'s or a BIT(1)'s `bool|int4`, which takes the truth value the row returns;
- * a SQLite BOOLEAN column's is NUMERIC, which takes it too, and `src/execute.ts` binds it as 1 or 0. A `timestamptz` is
- * an instant, which `run` returns as its ISO 8601 text in UTC, and takes that text, or any that
- * names its zone (`src/execute.ts`), and no `Date`, which `date.toISOString()` writes as such a
- * string. A `timestamp` or a `date` (MySQL's DATETIME and TIMESTAMP are the engine's
- * `timestamp`) is a wall-clock reading with no zone, and the drivers write a `Date`'s in different
- * zones, the app's (pg, mysql2), the server's (postgres.js) or UTC (PGlite, Bun.sql), so it takes
- * the text alone. An array parameter's elements take no NULL, as a parameter with a cast is its
- * cast's type: a NULL element
- * of `= any(:ids)` matches nothing. An array inside a structured
- * parameter's member (`inRow`) keeps NULL elements, which `src/rows.ts` binds, so an array a
- * statement builds with NULL elements (`array_agg` over a left join is `(string | null)[]`) goes
- * back into a row.
- */
-export function renderParamType(t: EngineType, dialect: Dialect = "postgres", inRow = false): string {
-  // DuckDB binds a number, a BigInt or the digits for a 64-bit or wider integer, the exact text for
-  // A DECIMAL, the text for a date or a time, and bytes for a BLOB; a struct takes an object of
-  // Its fields and a map its entries.
+const scalarInput = (name: string, dialect: Dialect): string | undefined => {
   if (dialect === "duckdb") {
-    if (t.kind === "scalar") {
-      const kind = scalarKind(t.name, dialect);
-      if (kind === "int8") {return "number | bigint | string";}
-      if (kind === "decimal" || kind === "date" || kind === "timestamp" || kind === "timestamptz" || kind === "interval") {return "string";}
+    const kind = scalarKind(name, dialect);
+    if (kind === "int8") {return INTEGER_INPUT;}
+    if (duckdbTextInputs.has(kind)) {return "string";}
+  }
+  const specific = dialect === "sqlite" ? sqliteScalarInput.get(name) : nonSqliteInput(name);
+  if (!matchesUndefined(specific)) {return specific;}
+  return name === "bytea" || name === "blob" ? "Uint8Array" : undefined;
+};
+
+/**
+ * Render a caller-specified JSON schema in the position where the caller supplies that value.
+ * @param {EngineType} type - The analyzed parameter or structured field type.
+ * @param {unknown} declared - The schema supplied in the statement, if any.
+ * @returns {string | undefined} The caller's JSON type when the statement declares one.
+ */
+export const declaredType = function declaredType(type: EngineType, declared: unknown): string | undefined {
+  return !matchesUndefined(declared) && type.kind === "json" && !matchesUndefined(type.schema) ? schemaType(type.schema, true) : undefined;
+};
+
+class Renderer {
+  #dialect: Dialect;
+
+  public constructor(dialect: Dialect) {this.#dialect = dialect;}
+
+  public result(type: EngineType, inJson: boolean): string {
+    if (type.kind === "rows") {return this.#rowsParam(type);}
+    if (type.kind === "unknown") {return inJson ? JSON_TYPE : "unknown";}
+    if (type.kind === "struct" || type.kind === "map" || type.kind === "tuple" || type.kind === "union") {
+      return this.#duckdbResult(type);
     }
-    if (t.kind === "struct") {return t.fields.length ? `{ ${t.fields.map((field) => `${ident(field.name)}: ${orNull(renderParamType(field.type, dialect, true))}`).join("; ")} }` : "Record<never, never>";}
-    if (t.kind === "map") {return `readonly { key: ${renderParamType(t.key, dialect, true)}; value: ${orNull(renderParamType(t.value, dialect, true))} }[]`;}
-    if (t.kind === "tuple") {return `readonly [${t.items.map((item) => orNull(renderParamType(item, dialect, true))).join(", ")}]`;}
+    return this.#ordinaryResult(type, inJson);
   }
-  if (t.kind === "scalar" && dialect !== "sqlite") {
-    if (t.name === "int8") {return "number | bigint | string";}
-    if (t.name.split("|").every((name) => name === "timestamp" || name === "timestamptz" || name === "date")) {return "string";}
+
+  #ordinaryResult(type: OrdinaryResult, inJson: boolean): string {
+    if (type.kind === "scalar") {return this.#scalarResult(type.name, inJson);}
+    if (type.kind === "enum") {return enumLabels(type.labels);}
+    if (type.kind === "array") {return this.#arrayResult(type, inJson);}
+    return this.#documentResult(type, inJson);
   }
-  // A SQLite driver binds a number for an INTEGER. A BOOLEAN column has NUMERIC affinity, so a
-  // Parameter written to or compared with one is NUMERIC, and takes the truth value the column
-  // Returns, which the run time binds as 1 or 0.
-  // A column declared BIGINT's parameter keeps an INTEGER's type for now.
-  if (t.kind === "scalar" && dialect === "sqlite" && t.name === "integer") {return "number";}
-  // A BIGINT, INT8 or UNSIGNED BIG INT column comes back as a bigint, which its parameter takes.
-  if (t.kind === "scalar" && dialect === "sqlite" && t.name === "int8") {return "number | bigint";}
-  if (t.kind === "scalar" && dialect === "sqlite" && t.name === "numeric") {return "number | string | boolean";}
-  if (t.kind === "scalar" && dialect === "sqlite" && t.name === "bool") {return "boolean | number";}
-  // Every driver binds a Uint8Array (a Buffer is one) for a binary value, mariadb and Neon's
-  // Neon() before 0.10 once `execute` has converted it, a digit string for a decimal, and any
-  // JSON value for a JSON parameter.
-  if (t.kind === "scalar" && (t.name === "bytea" || t.name === "blob")) {return "Uint8Array";}
-  if (t.kind === "scalar" && t.name === "numeric" && dialect !== "sqlite") {return "string";}
-  // A JSON parameter takes the JSON a result of its type holds, which `.run()` writes with
-  // `JSON.stringify`; its null is JSON's null where the statement takes no SQL NULL
-  // (src/execute.ts), so `Json` admits it either way.
-  if (t.kind === "json") {return matchesUndefined(t.schema) ? JSON_TYPE : schemaType(t.schema);}
-  // A structured parameter: each key as a parameter of its type takes it, `?` where the caller
-  // May leave it out, `| null` where it may be null.
-  if (t.kind === "rows") {
-    const fields = t.fields.map((field) => {
-      const type = declaredType(field.type, field.schema) ?? renderParamType(field.type, dialect, true);
-      return `${ident(field.name)}${field.optional ? "?" : ""}: ${field.nullable ? orNull(type) : type}`;
+
+  #scalarResult(name: string, inJson: boolean): string {
+    return inJson ? jsonScalar(name, this.#dialect) : typeOfKind(scalarKind(name, this.#dialect));
+  }
+
+  #arrayResult(type: ArrayType, inJson: boolean): string {
+    // A driver returns a Postgres row array as text. In documents it returns JSON.
+    if (!inJson && isRecordValue(type.of)) {return "string";}
+    const item = this.result(type.of, inJson);
+    // Array elements can be null unless the analysis proves that the statement excludes nulls.
+    return arrayOf(type.nullable_items === false ? item : orNull(item));
+  }
+
+  #documentResult(type: Exclude<OrdinaryResult, { kind: "scalar" | "enum" | "array" }>, inJson: boolean): string {
+    if (type.kind === "json") {return matchesUndefined(type.schema) ? JSON_TYPE : schemaType(type.schema);}
+    if (type.kind === "object") {return this.#jsonFields(type.fields);}
+    if (type.kind === "composite") {return inJson ? this.#jsonFields(type.fields) : "string";}
+    const item = this.result(type.of, JSON_MODE);
+    return arrayOf(type.nullable_items ? orNull(item) : item);
+  }
+
+  #jsonFields(fields: Field[]): string {
+    return objectFields(lastOfEachName(fields).map((field) => {
+      const name = ident(field.name);
+      const { nullable } = field;
+      const type = this.result(field.type, JSON_MODE);
+      return `${name}: ${nullable ? orNull(type) : type}`;
+    }));
+  }
+
+  #driverFields(fields: Field[]): string {
+    return objectFields(lastOfEachName(fields).map((field) => `${ident(field.name)}: ${orNull(this.result(field.type, DRIVER_MODE))}`));
+  }
+
+  #duckdbResult(type: DuckdbAggregate): string {
+    if (type.kind === "struct") {return this.#driverFields(type.fields);}
+    if (type.kind === "map") {return `{ key: ${this.result(type.key, DRIVER_MODE)}; value: ${orNull(this.result(type.value, DRIVER_MODE))} }[]`;}
+    if (type.kind === "tuple") {return `[${type.items.map((item) => orNull(this.result(item, DRIVER_MODE))).join(", ")}]`;}
+    if (isEmptyArray(type.members)) {return "never";}
+    return type.members.map((member) => `{ tag: ${JSON.stringify(member.name)}; value: ${orNull(this.result(member.type, DRIVER_MODE))} }`).join(" | ");
+  }
+
+  public param(type: EngineType, inRow: boolean): string {
+    if (type.kind === "scalar") {return scalarInput(type.name, this.#dialect) ?? this.result(type, DRIVER_MODE);}
+    if (type.kind === "rows") {return this.#rowsParam(type);}
+    if (type.kind === "array") {return this.#arrayParam(type, inRow);}
+    return this.#compoundParam(type);
+  }
+
+  #compoundParam(type: Exclude<EngineType, { kind: "scalar" | "rows" | "array" }>): string {
+    if (this.#dialect !== "duckdb") {return this.result(type, DRIVER_MODE);}
+    if (type.kind === "struct") {return objectFields(type.fields.map((field) => `${ident(field.name)}: ${orNull(this.param(field.type, NESTED_PARAM))}`));}
+    if (type.kind === "map") {return `readonly { key: ${this.param(type.key, NESTED_PARAM)}; value: ${orNull(this.param(type.value, NESTED_PARAM))} }[]`;}
+    if (type.kind === "tuple") {return `readonly [${type.items.map((item) => orNull(this.param(item, NESTED_PARAM))).join(", ")}]`;}
+    return this.result(type, DRIVER_MODE);
+  }
+
+  #rowsParam(type: RowType): string {
+    const fields = type.fields.map((field) => {
+      const value = declaredType(field.type, field.schema) ?? this.param(field.type, NESTED_PARAM);
+      const optional = field.optional ? "?" : "";
+      return `${ident(field.name)}${optional}: ${field.nullable ? orNull(value) : value}`;
     });
-    const row = fields.length ? `{ ${fields.join("; ")} }` : "Record<never, never>";
-    return t.one ? row : `readonly ${row}[]`;
+    const row = objectFields(fields);
+    return type.one ? row : `readonly ${row}[]`;
   }
-  if (t.kind === "array") {
-    // An array of row values comes back as the text Postgres prints, which the parameter takes back
-    // Beside an array of each row's own text.
-    if ((t.of.kind === "scalar" && t.of.name === "record") || t.of.kind === "composite") {return "string | string[]";}
-    const inner = inRow ? orNull(renderParamType(t.of, dialect, inRow)) : renderParamType(t.of, dialect);
-    return /[|&]/u.test(inner) ? `(${inner})[]` : `${inner}[]`;
+
+  #arrayParam(type: ArrayType, inRow: boolean): string {
+    if (isRecordValue(type.of)) {return "string | string[]";}
+    const inner = this.param(type.of, inRow);
+    // A nested record can pass null array elements back to the database.
+    return arrayOf(inRow ? orNull(inner) : inner);
   }
-  return renderType(t, false, dialect);
 }
+
+/**
+ * Render the value the native driver returns for an analyzed SQL type.
+ * @param {EngineType} type - The analyzed result type.
+ * @param {boolean} [inJson] - Whether the database serializes this value inside a JSON document.
+ * @param {Dialect} [dialect] - The database dialect.
+ * @returns {string} The result's TypeScript representation.
+ */
+export const renderType = function renderType(type: EngineType, inJson = DRIVER_MODE, dialect: Dialect = STANDARD_DIALECT): string {
+  return new Renderer(dialect).result(type, inJson);
+};
+
+/**
+ * Render what the runtime accepts for a SQL parameter, including each supported round-trip value.
+ * @param {EngineType} type - The analyzed parameter type.
+ * @param {Dialect} [dialect] - The database dialect.
+ * @param {boolean} [inRow] - Whether to retain null elements inside structured input fields.
+ * @returns {string} The parameter's TypeScript representation.
+ */
+export const renderParamType = function renderParamType(type: EngineType, dialect: Dialect = STANDARD_DIALECT, inRow = false): string {
+  return new Renderer(dialect).param(type, inRow);
+};
