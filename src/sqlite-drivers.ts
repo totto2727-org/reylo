@@ -13,8 +13,6 @@
 // Functions its SQLite has (an allowlist it applies as SQLite compiles a statement, which nothing
 // Lists: it refuses `pragma_function_list` too) and lacks others (FTS4, Geopoly), so the only way
 // To know is to compile the statement there (src/d1-proxy.ts).
-// oxlint-disable-next-line rules/no-node-imports -- The D1 worker must use Node's fork IPC channel.
-import { fork } from "node:child_process";
 // oxlint-disable-next-line rules/no-node-imports -- Read package metadata during synchronous driver discovery.
 import { existsSync, readFileSync, statSync } from "node:fs";
 // oxlint-disable-next-line rules/no-node-imports -- Resolve the optional drivers from the consumer's Node package.
@@ -23,9 +21,9 @@ import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
 // oxlint-disable-next-line rules/no-node-imports -- Compare statements with Node's built-in SQLite engine and its synchronous driver.
 import { DatabaseSync } from "node:sqlite";
-// oxlint-disable-next-line rules/no-node-imports -- Convert native driver and worker module URLs for Node's loader.
-import { fileURLToPath } from "node:url";
 import { packageDir } from "./project.ts";
+import { startD1 } from "./sqlite-d1-client.ts";
+import type { D1Process } from "./sqlite-d1-client.ts";
 import { nativeDrivers } from "./sqlite-native-drivers.ts";
 import type { SqliteDriverOpener } from "./sqlite-native-drivers.ts";
 import { matchesUndefined } from "./native-predicates.ts";
@@ -38,16 +36,6 @@ export interface SqliteDriver {
   /** The error a refusal is: "@libsql/client runs SQLite 3.45.1, which refuses this statement: …". */
   says(refusal: string): string;
   close(): Promise<void>;
-}
-
-/** How long workerd may take to start before D1 is left out. */
-const D1_START = 30_000;
-
-/** A D1 child process: the version of wrangler it runs, and a statement compiled there against `ddl`. */
-interface D1Process {
-  readonly version: string;
-  explain(sql: string, params: number, ddl: string[]): Promise<string | undefined>;
-  close(): void;
 }
 
 /**
@@ -128,90 +116,6 @@ function schemaDdl(db: DatabaseSync): string[] {
       )
       .all() as { sql: string }[]
   ).map((r) => r.sql);
-}
-
-/** Starts the D1 child of the project in `dir`; `ended` is called when it ends after it started. */
-async function startD1(entry: string, dir: string, ended: () => void): Promise<D1Process> {
-  const version = wranglerVersion(entry);
-  const extension = import.meta.url.slice(import.meta.url.lastIndexOf("."));
-  const child = fork(fileURLToPath(new URL(`./d1-proxy${extension}`, import.meta.url)), [entry, dir], {
-    stdio: ["ignore", "ignore", "ignore", "ipc"],
-    env: { ...process.env, WRANGLER_SEND_METRICS: "false" },
-  });
-  child.unref();
-  type Reply = { kind: "ready"; d1: boolean } | { kind: "explain"; id: number; error?: string };
-  const pending = new Map<number, (error: string | undefined) => void>();
-  let next = 0;
-  // The schema D1 was last given, so it is sent again only when it changes.
-  let sent: string | undefined;
-  const gone = new Promise<never>((_resolve, reject) => {
-    child.once("exit", () => {reject(new Error("D1's process ended"));});
-  });
-  gone.catch(() => {});
-  // The channel keeps this process alive only while a statement waits on its answer, so a type
-  // Check or a build ends when its own work does; the child ends with this process.
-  child.on("message", (m: Reply) => {
-    if (m.kind !== "explain") {return;}
-    pending.get(m.id)?.(m.error);
-    pending.delete(m.id);
-    if (!pending.size) {child.channel?.unref();}
-  });
-  let running = false;
-  child.once("exit", () => {
-    if (running) {ended();}
-    Iterator.from(pending.values()).forEach((settle) => {settle(undefined);});
-    pending.clear();
-  });
-  const stop = (): void => {
-    if (child.connected) {child.send({ kind: "close" });}
-    setTimeout(() => child.kill(), 2000).unref();
-  };
-  try {
-    const timeout = new Promise<never>((_resolve, reject) => {
-      setTimeout(() => {reject(new Error("workerd did not start"));}, D1_START).unref();
-    });
-    const ready = await Promise.race([gone, timeout, new Promise<Extract<Reply, { kind: "ready" }>>((resolve) => child.once("message", resolve))]);
-    if (!ready.d1) {throw new Error("the wrangler config binds no D1 database");}
-  } catch (error) {
-    stop();
-    throw error;
-  }
-  running = true;
-  child.channel?.unref();
-  return {
-    version,
-    close: stop,
-    explain: (sql, params, ddl) =>
-      new Promise((resolve) => {
-        if (child.connected) {
-          const id = next++;
-          pending.set(id, (error) => {
-            // D1 wraps SQLite's message: "D1_ERROR: no such function: x at offset 7: SQLITE_ERROR".
-            const message = error?.replace(/^D1_ERROR: /u, "").replace(/ at offset \d+/u, "").replace(/: SQLITE_\w+$/u, "");
-            // A count of bindings D1 reads otherwise than the analysis is no refusal of the statement.
-            resolve(message && !message.startsWith('Wrong number of parameter bindings') ? message : undefined);
-          });
-          child.channel?.ref();
-          const text = JSON.stringify(ddl);
-          if (text !== sent) {
-            child.send({ kind: "schema", ddl });
-            sent = text;
-          }
-          child.send({ kind: "explain", id, sql, params });
-        } else {resolve(undefined);}
-      }),
-  };
-}
-
-/** The installed wrangler's version, from the package.json above its entry point. */
-function wranglerVersion(entry: string): string {
-  for (let dir = dirname(entry); dirname(dir) !== dir; dir = dirname(dir)) {
-    const file = join(dir, "package.json");
-    if (!existsSync(file)) {continue;}
-    const pkg = JSON.parse(readFileSync(file, "utf8")) as { name?: string; version?: string };
-    if (pkg.name === "wrangler") {return pkg.version ?? "";}
-  }
-  return "";
 }
 
 // Keep the order in which diagnostics list the optional drivers.

@@ -122,7 +122,7 @@ await Promise.all(DATABASES.map(async (db) => {
   // Driver, and nothing native, is bundled.
   const native = Object.keys(half.metafile.inputs).filter((input) => /node_modules\/(?:postgres|mysql2|@duckdb|@bytecodealliance\/jco-node-fs)\//u.test(input));
   if (native.length) {throw new Error(`dist/${db}/tooling.js bundles a driver or a native addon: ${native.join(", ")}`);}
-  // A child process src/sqlite-drivers.ts starts beside the module that starts it.
+  // The D1 client starts this worker beside the tooling module.
   await bundle({ ...bundled, entryPoints: [join(root, "src/d1-proxy.ts")], outfile: join(to, "d1-proxy.js") });
   const shipped = await readdir(to);
   const missing = engine.files.filter((file) => !shipped.includes(file));
