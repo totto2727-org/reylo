@@ -54,6 +54,7 @@ type ClientMembers = Record<string, unknown>;
 type DriverRows = PromiseLike<unknown[]>;
 interface BunProtocol { unsafe: (text: string, params: unknown[]) => DriverRows }
 
+// oxlint-disable-next-line typescript/no-unnecessary-type-parameters -- A runtime member check selects the native driver protocol specified by the caller.
 const inspectClient = <Protocol = object>(client: unknown): ClientMembers & Protocol =>
   // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- Inspect native members and describe the calling protocol selected for their receiver.
   client as ClientMembers & Protocol;
@@ -284,6 +285,15 @@ const jsonText = (candidate: unknown): string => JSON.stringify(jsonValue(candid
 
 const isTime = (type: EngineType | undefined): boolean => type?.kind === "scalar" && type.name.split("|").every((part) => part === "timestamp" || part === "timestamptz" || part === "date");
 
+const checkZonedTime = (name: string, parameterValue: unknown): void => {
+  if (parameterValue instanceof Date) {
+    throw new ParameterError(`Parameter "${name}" is a timestamptz, which takes the instant as a string that names its zone, as \`.run()\` returns one, not a Date: pass date.toISOString() ("2026-10-12T19:06:48.282Z").`);
+  }
+  if (matchesString(parameterValue) && !zoned.test(parameterValue.trim())) {
+    throw new ParameterError(`Parameter "${name}" is a timestamptz, an instant, so a string for it names its zone ("2026-10-12T19:06:48.282Z", "2026-10-12 19:06:48+09", "2026-10-12 19:06:48 America/Los_Angeles"); got ${JSON.stringify(parameterValue)}, which the server would read in the session's time zone.`);
+  }
+};
+
 const checkTime = function checkTime(type: EngineType | undefined, name: string, parameterValue: unknown): void {
   if (matchesUndefined(type) || matchesNullish(parameterValue)) {return;}
   if (type.kind === "array") {
@@ -292,13 +302,10 @@ const checkTime = function checkTime(type: EngineType | undefined, name: string,
   }
   if (type.kind !== "scalar") {return;}
   if (type.name === "timestamptz") {
-    if (parameterValue instanceof Date) {
-      throw new ParameterError(`Parameter "${name}" is a timestamptz, which takes the instant as a string that names its zone, as \`.run()\` returns one, not a Date: pass date.toISOString() ("2026-10-12T19:06:48.282Z").`);
-    }
-    if (matchesString(parameterValue) && !zoned.test(parameterValue.trim())) {
-      throw new ParameterError(`Parameter "${name}" is a timestamptz, an instant, so a string for it names its zone ("2026-10-12T19:06:48.282Z", "2026-10-12 19:06:48+09", "2026-10-12 19:06:48 America/Los_Angeles"); got ${JSON.stringify(parameterValue)}, which the server would read in the session's time zone.`);
-    }
-  } else if (parameterValue instanceof Date && type.name.split("|").every((part) => part === "timestamp" || part === "date")) {
+    checkZonedTime(name, parameterValue);
+    return;
+  }
+  if (parameterValue instanceof Date && type.name.split("|").every((part) => part === "timestamp" || part === "date")) {
     throw new ParameterError(`Parameter "${name}" is a ${type.name === "date" ? "date" : "timestamp"} without a time zone, so it takes the wall-clock text ("2026-10-12 19:06:48.282", "2026-10-12"), not a Date: drivers write a Date's time in different zones (the app's, the server's or UTC).`);
   }
 };
@@ -326,6 +333,11 @@ const checkBinary = function checkBinary(type: EngineType | undefined, name: str
 const vectorType = (type: EngineType): Extract<EngineType, { kind: "scalar" }> | undefined =>
   type.kind === "scalar" && (type.name === "vector" || type.name === "halfvec") ? type : undefined;
 
+const vectorEntryText = (parameterValue: unknown): string => {
+  if (matchesString(parameterValue)) {return JSON.stringify(parameterValue);}
+  return matchesNumber(parameterValue) ? String(parameterValue) : typeof parameterValue;
+};
+
 /**
  * A vector's floats as the text a VECTOR's `to_vector` and pgvector's input read; JSON's, which would write NaN and ±Infinity as null, so those are refused.
  *
@@ -337,7 +349,7 @@ const vectorType = (type: EngineType): Extract<EngineType, { kind: "scalar" }> |
 const vectorText = function vectorText(vector: Readonly<unknown[]>, name: string, what: string): string {
   vector.forEach((element, index) => {
     if (!matchesNumber(element) || !Number.isFinite(element)) {
-      throw new ParameterError(`Parameter "${name}" is ${what}, an array of finite numbers, and the element at [${index}] is ${matchesString(element) ? JSON.stringify(element) : (matchesNumber(element) ? element : typeof element)}.`);
+      throw new ParameterError(`Parameter "${name}" is ${what}, an array of finite numbers, and the element at [${index}] is ${vectorEntryText(element)}.`);
     }
   });
   return JSON.stringify(vector);
@@ -357,26 +369,46 @@ const SQLITE_TRUE_INTEGER = 1;
 // Execute()) or expanded it into a list of values (mysql2's query(), mariadb). On Postgres a
 // Pgvector vector the same way, as the text its input reads, and an array of vectors as an array
 // Of those texts.
-const encode = function encode(type: EngineType | undefined, parameterValue: unknown, dialect: Dialect, name: string): unknown {
-  if (matchesUndefined(type) || matchesNullish(parameterValue)) {return parameterValue;}
-  if (dialect === "duckdb") {return encodeDuckdb(type, parameterValue, name);}
-  if (dialect === "sqlite") {
-    if (matchesBoolean(parameterValue)) {return parameterValue ? SQLITE_TRUE_INTEGER : SQLITE_FALSE_INTEGER;}
-    return parameterValue;
-  }
-  if (dialect === "mysql") {return type.kind === "array" && Array.isArray(parameterValue) ? vectorText(parameterValue, name, "a VECTOR") : parameterValue;}
-  if (type.kind === "array") {return Array.isArray(parameterValue) ? parameterValue.map((element) => encode(Array.isArray(element) && matchesUndefined(vectorType(type.of)) ? type : type.of, element, dialect, name)) : parameterValue;}
-  const vector = vectorType(type);
-  if (vector && Array.isArray(parameterValue)) {
-    if (!parameterValue.length) {throw new ParameterError(`Parameter "${name}" is a pgvector ${vector.name}, which has one dimension at least; got an empty array.`);}
-    return vectorText(parameterValue, name, `a pgvector ${vector.name}`);
-  }
-  if (type.kind === "scalar" && type.name === "hstore" && hasObjectType(parameterValue)) {return hstoreText(parameterValue, (message) => {
-    throw new ParameterError(`Parameter "${name}" ${message}`);
-  });}
-  if (!matchesString(parameterValue)) {return parameterValue;}
+const sqliteBoolean = (parameterValue: unknown): unknown => {
+  if (matchesBoolean(parameterValue)) {return parameterValue ? SQLITE_TRUE_INTEGER : SQLITE_FALSE_INTEGER;}
+  return parameterValue;
+};
+
+const pgvectorText = (type: Extract<EngineType, { kind: "scalar" }>, name: string, values: Readonly<unknown[]>): string => {
+  if (!values.length) {throw new ParameterError(`Parameter "${name}" is a pgvector ${type.name}, which has one dimension at least; got an empty array.`);}
+  return vectorText(values, name, `a pgvector ${type.name}`);
+};
+
+const postgresEncodedText = (type: EngineType, parameterValue: string): string => {
   if (isTime(type)) {return postgresYear(parameterValue);}
   return type.kind === "scalar" && type.name === "interval" ? postgresInterval(parameterValue) : parameterValue;
+};
+
+const postgresScalar = (type: EngineType, parameterValue: unknown, name: string): unknown => {
+  const vector = vectorType(type);
+  if (vector && Array.isArray(parameterValue)) {return pgvectorText(vector, name, parameterValue);}
+  if (type.kind === "scalar" && type.name === "hstore" && !matchesNull(parameterValue) && hasObjectType(parameterValue)) {
+    return hstoreText(parameterValue, (message) => {throw new ParameterError(`Parameter "${name}" ${message}`);});
+  }
+  return matchesString(parameterValue) ? postgresEncodedText(type, parameterValue) : parameterValue;
+};
+
+const encodePostgres = (type: EngineType | undefined, parameterValue: unknown, name: string): unknown => {
+  if (matchesUndefined(type) || matchesNullish(parameterValue)) {return parameterValue;}
+  if (type.kind === "array") {
+    return Array.isArray(parameterValue)
+      ? parameterValue.map((element) => encodePostgres(Array.isArray(element) && matchesUndefined(vectorType(type.of)) ? type : type.of, element, name))
+      : parameterValue;
+  }
+  return postgresScalar(type, parameterValue, name);
+};
+
+const encode = ({ dialect, name }: { dialect: Dialect; name: string }, type: EngineType | undefined, parameterValue: unknown): unknown => {
+  if (matchesUndefined(type) || matchesNullish(parameterValue)) {return parameterValue;}
+  if (dialect === "duckdb") {return encodeDuckdb(type, parameterValue, name);}
+  if (dialect === "sqlite") {return sqliteBoolean(parameterValue);}
+  if (dialect === "mysql") {return type.kind === "array" && Array.isArray(parameterValue) ? vectorText(parameterValue, name, "a VECTOR") : parameterValue;}
+  return encodePostgres(type, parameterValue, name);
 };
 
 // Sqlite3 6.0.1 binds a BigInt as NULL, with no error (`select cast(? as text)` with
@@ -433,6 +465,7 @@ const dateText = function dateText(date: Date): string {
   return `${yearText}-${calendarDay}T${time}${zone}${beforeEra ? " BC" : ""}`;
 };
 
+// oxlint-disable-next-line typescript/no-base-to-string -- Match pg's native string coercion for untyped scalar parameters.
 const postgresScalarText = (element: unknown): string => hasObjectType(element) ? JSON.stringify(element) : String(element);
 
 /**
@@ -475,6 +508,14 @@ const slonikParam = function (parameterValue: unknown): unknown {
 const postgresTypedArray = (values: unknown[], type: Extract<EngineType, { kind: "array" }>): string =>
   arrayLiteral(isJson(type.of.kind) ? values.map((element) => (matchesNullish(element) ? element : JSON.stringify(element))) : values, type.delimiter);
 
+const untypedPostgresText = (parameterValue: unknown): string => {
+  if (Array.isArray(parameterValue)) {return arrayLiteral(parameterValue);}
+  if (parameterValue instanceof Uint8Array) {return byteaHex(parameterValue);}
+  if (matchesBoolean(parameterValue)) {return parameterValue ? "t" : "f";}
+  if (parameterValue instanceof Date) {return dateText(parameterValue);}
+  return postgresScalarText(parameterValue);
+};
+
 /**
  * A bound value as the text Postgres's input function reads, as `.run()` sends it through pg.
  *
@@ -488,11 +529,7 @@ const postgresText = function postgresText(query: QueryModule, name: string, par
   const inputType = query.inputs?.[name]?.type;
   if (Array.isArray(parameterValue) && inputType?.kind === "array") {return postgresTypedArray(parameterValue, inputType);}
   if (isJsonValue(query, name, parameterValue)) {return jsonText(parameterValue);}
-  if (Array.isArray(parameterValue)) {return arrayLiteral(parameterValue);}
-  if (parameterValue instanceof Uint8Array) {return byteaHex(parameterValue);}
-  if (matchesBoolean(parameterValue)) {return parameterValue ? "t" : "f";}
-  if (parameterValue instanceof Date) {return dateText(parameterValue);}
-  return postgresScalarText(parameterValue);
+  return untypedPostgresText(parameterValue);
 };
 
 const MISSING_PARAMETER = -1;
@@ -616,7 +653,7 @@ const statement = function statement(query: QueryModule, params: ParamsInput): B
     if (!matchesUndefined(cast) && !matchesUndefined(type)) {checksFor(query, name).checkCast(name, cast, type, bound.values[index], query.dialect);}
     checkTime(type, name, bound.values[index]);
     checkBinary(type, name, bound.values[index]);
-    bound.values[index] = jsonNull ? JSON_NULL : encode(type, bound.values[index], query.dialect, name);
+    bound.values[index] = jsonNull ? JSON_NULL : encode({ dialect: query.dialect, name }, type, bound.values[index]);
   });
   // Every MySQL and SQLite driver binds JSON text as text, which the database reads as JSON (a
   // Structured parameter's is written already).
@@ -673,6 +710,7 @@ export const executeSync = function executeSync<D extends Dialect>(client: SyncC
   if (!isSyncSqlite(currentClient) && !isDurableObjectSql(currentClient)) {throw refuseSyncClient("this client answers through a promise");}
   const rows = executeSyncSqlite(currentClient, query, params);
   if (Array.isArray(rows)) {return rows;}
+  // oxlint-disable-next-line promise/prefer-await-to-then -- This synchronous API consumes the incompatible driver's rejection before throwing its own TypeError.
   rows.catch(() => {
     // The synchronous TypeError below already reports the incompatible driver.
   });
