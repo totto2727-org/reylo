@@ -21,11 +21,12 @@
 // - DuckDB: @duckdb/node-api throws a plain Error whose message names the kind of error first
 //   (`Constraint Error: Duplicate key …`), DuckDB's exception type, and nothing else.
 import type { Dialect } from "./execute.ts";
-import { SQLITE_CODES } from "./error-codes-sqlite.ts";
-import { hasObjectType, matchesNull, matchesNumber, matchesString, matchesUndefined } from "./native-predicates.ts";
+import { matchesNumber, matchesString, matchesUndefined } from "./native-predicates.ts";
 
+import { driverFields, driverText, messageGroup, queryError } from "./query-error-native.ts";
+import { sqliteQueryError } from "./query-error-sqlite.ts";
 import { DUCKDB_CODES } from "./query-error-types.ts";
-import type { DuckdbCode, DuckdbQueryError, MysqlQueryError, PostgresQueryError, QueryError, SqliteCode, SqliteQueryError } from "./query-error-types.ts";
+import type { DuckdbCode, DuckdbQueryError, MysqlQueryError, PostgresQueryError, QueryError } from "./query-error-types.ts";
 
 export type {
   DuckdbCode,
@@ -46,47 +47,37 @@ export type {
   SqliteQueryError,
 } from "./query-error-types.ts";
 
-class DatabaseError extends Error {
-  public constructor(message: string, cause: unknown, fields: Record<string, unknown>) {
-    super(message, { cause });
-    Object.assign(this, fields);
-  }
-}
-Object.defineProperty(DatabaseError.prototype, "name", { value: "QueryError", writable: true, configurable: true });
-
 const SQLSTATE = /^[0-9A-Z]{5}$/u;
-const text = (v: unknown): string | undefined => (matchesString(v) && v !== "" ? v : undefined);
-const record = (e: unknown): Record<string, unknown> | undefined => (hasObjectType(e) && !matchesNull(e) ? (e as Record<string, unknown>) : undefined);
 
 const postgresError = function postgresError(error: unknown) {
-  const e = record(error);
+  const e = driverFields(error);
   if (!e || !matchesString(e.severity) || !matchesString(e.message)) {return undefined;}
   const code = matchesString(e.code) && SQLSTATE.test(e.code) ? e.code : (matchesString(e.errno) && SQLSTATE.test(e.errno) ? e.errno : undefined);
   if (matchesUndefined(code)) {return undefined;}
-  const position = text(e.position);
+  const position = driverText(e.position);
   return {
     code,
     message: e.message,
     fields: {
       severity: e.severity,
-      detail: text(e.detail),
-      hint: text(e.hint),
+      detail: driverText(e.detail),
+      hint: driverText(e.hint),
       position: !matchesUndefined(position) && /^\d+$/u.test(position) ? Number(position) : undefined,
-      where: text(e.where),
-      schema: text(e.schema ?? e.schema_name),
-      table: text(e.table ?? e.table_name),
-      column: text(e.column ?? e.column_name),
-      dataType: text(e.dataType ?? e["data type_name"]),
-      constraint: text(e.constraint ?? e.constraint_name),
+      where: driverText(e.where),
+      schema: driverText(e.schema ?? e.schema_name),
+      table: driverText(e.table ?? e.table_name),
+      column: driverText(e.column ?? e.column_name),
+      dataType: driverText(e.dataType ?? e["data type_name"]),
+      constraint: driverText(e.constraint ?? e.constraint_name),
     },
   };
 };
 
 const mysqlError = function mysqlError(error: unknown) {
-  const e = record(error);
+  const e = driverFields(error);
   if (!e || !matchesString(e.message)) {return undefined;}
   let { errno, sqlState } = e;
-  let message = text(e.sqlMessage) ?? text(e.text) ?? e.message;
+  let message = driverText(e.sqlMessage) ?? driverText(e.text) ?? e.message;
   if (matchesUndefined(errno)) {
     // `<message> (errno 1062) (sqlstate 23000) during query: …`, the message behind Vitess's
     // `target: …: desc = ` on PlanetScale itself.
@@ -99,9 +90,6 @@ const mysqlError = function mysqlError(error: unknown) {
   if (errno > 45_000 && errno < 46_000 && /^\(conn[:=]/u.test(e.message)) {return undefined;}
   return { errno, sqlState, message };
 };
-
-const messageGroup = (pattern: RegExp, message: string, key: string): string | undefined =>
-  pattern.exec(message)?.groups?.[key];
 
 /** What a MySQL message names, for the errors that name a key, a constraint or a column. */
 const mysqlNames = function mysqlNames(errno: number, message: string) {
@@ -143,111 +131,39 @@ const mysqlNames = function mysqlNames(errno: number, message: string) {
   return { key: names.key, constraint: names.constraint, table: names.table, column: names.column };
 };
 
+/**
+ * Reads a driver error through the synchronous SQLite boundary.
+ * @param {Dialect} dialect The driver dialect.
+ * @param {unknown} error The error raised by the driver.
+ * @returns {QueryError | undefined} A recognized SQLite error or undefined.
+ */
+export const readQueryErrorSync = function readQueryErrorSync(dialect: Dialect, error: unknown): QueryError | undefined {
+  return dialect === "sqlite" ? sqliteQueryError(error) : undefined;
+};
+
 /** The database's error `error` is, or undefined where it is another. */
 export const readQueryError = async function readQueryError(dialect: Dialect, error: unknown): Promise<QueryError | undefined> {
-  if (dialect === "sqlite") {return readQueryErrorSync(dialect, error);}
+  if (dialect === "sqlite") {return sqliteQueryError(error);}
   if (dialect === "duckdb") {
     // A plain Error, its message opening with the kind of error: Reylo's own errors are of classes of their own.
-    const e = record(error);
+    const e = driverFields(error);
     const kind = error instanceof Error && Object.getPrototypeOf(error) === Error.prototype && matchesString(e?.message) ? messageGroup(/^(?<kind>[A-Za-z ]+?) Error: /u, e.message, "kind") : undefined;
     if (matchesUndefined(kind)) {return undefined;}
-    return new DatabaseError(e!.message as string, error, { code: (DUCKDB_CODES as Record<string, DuckdbCode>)[kind] }) as DuckdbQueryError;
+    return queryError(e!.message as string, error, { code: (DUCKDB_CODES as Record<string, DuckdbCode>)[kind] }) as DuckdbQueryError;
   }
   if (dialect === "postgres") {
     // Slonik wraps pg's error in its own (InputSyntaxError, UniqueIntegrityConstraintViolationError),
     // Keeping pg's as its cause.
-    const read = postgresError(error) ?? postgresError(record(error)?.cause);
+    const read = postgresError(error) ?? postgresError(driverFields(error)?.cause);
     if (!read) {return undefined;}
     // The lists are loaded where an error needs one, so a bundle carries them apart from the run time.
     const { POSTGRES_CODES } = await import("./error-codes-postgres.ts");
-    return new DatabaseError(read.message, error, { code: read.code, condition: (POSTGRES_CODES as Record<string, string>)[read.code], ...read.fields }) as PostgresQueryError;
+    return queryError(read.message, error, { code: read.code, condition: (POSTGRES_CODES as Record<string, string>)[read.code], ...read.fields }) as PostgresQueryError;
   }
   const read = mysqlError(error);
   if (!read) {return undefined;}
   const { MYSQL_CODES } = await import("./error-codes-mysql.ts");
   let code: string | undefined;
   Iterator.from(MYSQL_CODES).forEach(([first, names]) => {if (read.errno >= first && read.errno < first + names.length) {code = names[read.errno - first];}});
-  return new DatabaseError(read.message, error, { code, errno: read.errno, sqlState: read.sqlState, ...mysqlNames(read.errno, read.message) }) as MysqlQueryError;
+  return queryError(read.message, error, { code, errno: read.errno, sqlState: read.sqlState, ...mysqlNames(read.errno, read.message) }) as MysqlQueryError;
 };
-
-const SQLITE_PRIMARY_CODE_MASK = 0xFF;
-
-interface SqliteNames {
-  table: string | undefined;
-  columns: string[] | undefined;
-  constraint: string | undefined;
-}
-
-const sqliteColumns = (columnList: string): Pick<SqliteNames, "columns" | "table"> => {
-  const references = columnList.split(", ").map((part) => /^(?<table>[^.]+)\.(?<column>[\s\S]+)$/u.exec(part)?.groups);
-  const table = references[0]?.table;
-  if (matchesUndefined(table) || !references.every((reference) => reference?.table === table)) {
-    return { columns: undefined, table: undefined };
-  }
-  return { columns: references.map((reference) => reference?.column ?? ""), table };
-};
-
-/** What SQLite's message names, for a constraint it failed. */
-const sqliteNames = function sqliteNames(errcode: number | undefined, message: string): SqliteNames {
-  const names: SqliteNames = { table: undefined, columns: undefined, constraint: undefined };
-  if (matchesUndefined(errcode) || (errcode & SQLITE_PRIMARY_CODE_MASK) !== SQLITE_CODES.SQLITE_CONSTRAINT) {return names;}
-  const index = messageGroup(/^UNIQUE constraint failed: index '(?<constraint>[\s\S]*)'$/u, message, "constraint");
-  if (!matchesUndefined(index)) {return { ...names, constraint: index };}
-  const columns = messageGroup(/^(?:UNIQUE|NOT NULL) constraint failed: (?<columns>[\s\S]+)$/u, message, "columns");
-  if (!matchesUndefined(columns)) {return { ...names, ...sqliteColumns(columns) };}
-  const check = messageGroup(/^CHECK constraint failed: (?<constraint>[\s\S]*)$/u, message, "constraint");
-  if (!matchesUndefined(check)) {return { ...names, constraint: check };}
-  const datatype = /^cannot store \S+ value in \S+ column (?<table>[^.]+)\.(?<column>[\s\S]+)$/u.exec(message)?.groups;
-  return matchesUndefined(datatype) ? names : { ...names, columns: [datatype.column ?? ""], table: datatype.table };
-};
-
-/** `readQueryError` for the synchronous SQLite clients, whose list is no import away. */
-export function readQueryErrorSync(dialect: Dialect, error: unknown): QueryError | undefined {
-  if (dialect !== "sqlite") {return undefined;}
-  const read = sqliteError(error);
-  if (!read) {return undefined;}
-  return new DatabaseError(read.message, error, { code: read.code, errcode: read.errcode, ...sqliteNames(read.errcode, read.message) }) as SqliteQueryError;
-}
-
-const SQLITE_NAMES = new Map<number, SqliteCode>(Object.entries(SQLITE_CODES).map(([name, code]) => [code, name as SqliteCode]));
-const SQLITE_NAME = /^SQLITE_[A-Z_]+$/u;
-
-const readWrappedSqliteMessage = (
-  message: string,
-  mayBeTurso: boolean,
-): Readonly<Record<string, string | undefined>> | undefined =>
-  /^(?:D1_ERROR: )?(?<message>[\s\S]*): (?<primary>SQLITE_[A-Z_]+)(?: \(extended: (?<extended>SQLITE_[A-Z_]+)\))?$/u.exec(message)?.groups ??
-  (mayBeTurso
-    ? /^(?:prepare|step) failed: (?:Runtime error: )?(?<message>[\s\S]*?)(?: \((?<code>\d+)\))?$/u.exec(message)?.groups
-    : undefined);
-
-function sqliteError(error: unknown) {
-  const e = record(error);
-  if (!e || !matchesString(e.message)) {return undefined;}
-  let {message} = e;
-  const codes: number[] = [];
-  let named = false;
-  const name = (v: unknown): void => {
-    if (!matchesString(v) || !SQLITE_NAME.test(v)) {return;}
-    named = true;
-    const code = (SQLITE_CODES as Record<string, number>)[v];
-    if (!matchesUndefined(code)) {codes.push(code);}
-  };
-  name(e.extendedCode);
-  name(e.code);
-  if (matchesNumber(e.errcode) && e.code === "ERR_SQLITE_ERROR") {codes.push(e.errcode);}
-  if (matchesNumber(e.rawCode)) {codes.push(e.rawCode);}
-  if (matchesNumber(e.errno) && named) {codes.push(e.errno);}
-  if (named && matchesString(e.code) && message.startsWith(`${e.code}: `)) {message = message.slice(e.code.length + 2);}
-  if (!named && !codes.length) {
-    const wrapped = readWrappedSqliteMessage(message, e.code === "GenericFailure");
-    if (matchesUndefined(wrapped)) {return undefined;}
-    message = wrapped.message ?? "";
-    name(wrapped.extended);
-    name(wrapped.primary);
-    if (!matchesUndefined(wrapped.code)) {codes.push(Number(wrapped.code));}
-  }
-  // The most specific code given: an extended one where any is.
-  const errcode = codes.find((code) => code > SQLITE_PRIMARY_CODE_MASK) ?? codes[0];
-  return { code: matchesUndefined(errcode) ? undefined : SQLITE_NAMES.get(errcode), errcode, message };
-}
