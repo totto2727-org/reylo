@@ -139,6 +139,12 @@ const closes = function closes(text: string): number {
   return NO_CLOSING_PAREN;
 };
 
+// Bare identifiers retain the scanner's original range, including lone surrogates and astral code points.
+const SQLITE_IDENTIFIER = /^(?:"(?<doubleQuoted>(?:[^"]|"")*)"|`(?<backtickQuoted>(?:[^`]|``)*)`|\[(?<bracketed>[^\]]*)\]|(?<bare>[A-Za-z_\u0080-\u{10FFFF}][\w$\u0080-\u{10FFFF}]*))$/u;
+const SQLITE_DEFAULT_KEYWORD = /^(?:true|false|null|current_time|current_date|current_timestamp)$/u;
+
+const quoteSqliteIdentifier = (name: string): string => `'${name.replaceAll("'", "''")}'`;
+
 /**
  * A SQLite default's text in one spelling, since engines that read the same schema write it
  * differently: `pragma_table_xinfo` gives the text as written on SQLite (`member`,
@@ -150,10 +156,13 @@ const closes = function closes(text: string): number {
  */
 export function sqliteDefault(text: string): string {
   const trimmed = text.trim();
-  const lone = /^(?:"((?:[^"]|"")*)"|`((?:[^`]|``)*)`|\[([^\]]*)\]|([A-Za-z_\u0080-\uFFFF][\w$\u0080-\uFFFF]*))$/.exec(trimmed);
-  if (lone && !(!matchesUndefined(lone[4]) && /^(?:true|false|null|current_time|current_date|current_timestamp)$/i.test(lone[4]))) {
-    const name = matchesUndefined(lone[1]) ? !matchesUndefined(lone[2]) ? lone[2].replace(/``/gu, "`") : (lone[3] ?? lone[4])! : lone[1].replace(/""/gu, '"');
-    return `'${name.replaceAll('\'', "''")}'`;
+  const identifier = SQLITE_IDENTIFIER.exec(trimmed)?.groups;
+  if (!matchesUndefined(identifier)) {
+    const { doubleQuoted, backtickQuoted, bracketed, bare } = identifier;
+    if (!matchesUndefined(doubleQuoted)) {return quoteSqliteIdentifier(doubleQuoted.replaceAll('""', '"'));}
+    if (!matchesUndefined(backtickQuoted)) {return quoteSqliteIdentifier(backtickQuoted.replaceAll("``", "`"));}
+    if (!matchesUndefined(bracketed)) {return quoteSqliteIdentifier(bracketed);}
+    if (!matchesUndefined(bare) && !SQLITE_DEFAULT_KEYWORD.test(asciiLower(bare))) {return quoteSqliteIdentifier(bare);}
   }
   let out = "";
   let offset = TEXT_START;
