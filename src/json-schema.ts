@@ -1,4 +1,5 @@
-import { basicFailure, equal, pointer, regex } from "./json-schema-constraints.ts";
+import { checkArray } from "./json-schema-arrays.ts";
+import { basicFailure, pointer, regex } from "./json-schema-constraints.ts";
 import { fillDefaults } from "./json-schema-defaults.ts";
 
 import { hasObjectType, isRecord, matchesNumber, matchesUndefined } from "./native-predicates.ts";
@@ -40,23 +41,12 @@ function check(schema: unknown, value: unknown, path: string, out: Failure[]): E
 
   const message = basicFailure(s, value);
   if (!matchesUndefined(message)) {return fail(out, path, message);}
-  if (Array.isArray(value)) {
-    if (matchesNumber(s.maxItems) && value.length > s.maxItems) {return fail(out, path, `must have at most ${s.maxItems} items`);}
-    if (matchesNumber(s.minItems) && value.length < s.minItems) {return fail(out, path, `must have at least ${s.minItems} items`);}
-    if (s.uniqueItems === true) {
-      for (let i = 0; i < value.length; i++) {for (let j = i + 1; j < value.length; j++) {if (equal(value[i], value[j])) {return fail(out, path, `must have no two equal items (${i} and ${j})`);}}}
-    }
-    const prefix = Array.isArray(s.prefixItems) ? (s.prefixItems as Schema[]) : [];
-    for (let i = 0; i < Math.min(prefix.length, value.length); i++) {if (check(prefix[i]!, value[i], `${path}/${i}`, out) === false) {return false;}}
-    if (!matchesUndefined(s.items)) {for (let i = prefix.length; i < value.length; i++) {if (check(s.items as Schema, value[i], `${path}/${i}`, out) === false) {return false;}}}
-    if (!matchesUndefined(s.contains)) {
-      let matched = 0;
-      Iterator.from(value).forEach((item) => {if (check(s.contains as Schema, item, path, []) !== false) {matched++;}});
-      const min = matchesNumber(s.minContains) ? s.minContains : 1;
-      if (matched < min) {return fail(out, path, min === 1 ? "must contain an item that matches its `contains` schema" : `must contain at least ${min} items that match its \`contains\` schema`);}
-      if (matchesNumber(s.maxContains) && matched > s.maxContains) {return fail(out, path, `must contain at most ${s.maxContains} items that match its \`contains\` schema`);}
-    }
-  }
+  if (Array.isArray(value) && !checkArray(s, value, {
+    check: (subschema, item, position) => check(subschema, item, position, out) !== false,
+    fail: (reason) => fail(out, path, reason),
+    path,
+    probe: (subschema, item) => check(subschema, item, path, []) !== false,
+  })) {return false;}
   if (isRecord(value)) {
     const o = value;
     const keys = Object.keys(o);
