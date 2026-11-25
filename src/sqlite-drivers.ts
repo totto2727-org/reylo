@@ -99,31 +99,31 @@ const DRIVERS: [string, Open][] = [
         close(cb: () => void): void;
       };
       const sqlite3 = require("sqlite3") as { Database: new (path: string, mode: number, cb: (error: Error | null) => void) => Db; OPEN_READONLY: number };
-      const db = await new Promise<Db>((done, fail) => {
+      const db = await new Promise<Db>((resolve, reject) => {
         const database: Db = new sqlite3.Database(path, sqlite3.OPEN_READONLY, (error) => {
-          if (error) {fail(error);}
-          else {done(database);}
+          if (error) {reject(error);}
+          else {resolve(database);}
         });
       });
-      const version = await new Promise<string>((done, fail) => {
+      const version = await new Promise<string>((resolve, reject) => {
         db.get("select sqlite_version() as v", (error, row) => {
-          if (error) {fail(error);}
-          else {done(row.v);}
+          if (error) {reject(error);}
+          else {resolve(row.v);}
         });
       });
       return {
         name: "sqlite3",
         says: (refusal) => `sqlite3 runs SQLite ${version}, which refuses this statement: ${refusal}`,
         refuses: (sql) =>
-          new Promise((done) => {
+          new Promise((resolve) => {
             const statement = db.prepare(sql, (error) => {
               if (!error) {statement.finalize();}
               // Node-sqlite3 writes the result code before SQLite's message.
-              done(error ? error.message.replace(/^SQLITE_\w+: /u, "") : undefined);
+              resolve(error ? error.message.replace(/^SQLITE_\w+: /u, "") : undefined);
             });
           }),
-        close: () => new Promise<void>((done) => {
-          db.close(() => {done();});
+        close: () => new Promise<void>((resolve) => {
+          db.close(() => {resolve();});
         }),
       };
     },
@@ -242,8 +242,8 @@ async function startD1(entry: string, dir: string, ended: () => void): Promise<D
   let next = 0;
   // The schema D1 was last given, so it is sent again only when it changes.
   let sent: string | undefined;
-  const gone = new Promise<never>((_done, fail) => {
-    child.once("exit", () => {fail(new Error("D1's process ended"));});
+  const gone = new Promise<never>((_resolve, reject) => {
+    child.once("exit", () => {reject(new Error("D1's process ended"));});
   });
   gone.catch(() => {});
   // The channel keeps this process alive only while a statement waits on its answer, so a type
@@ -265,10 +265,10 @@ async function startD1(entry: string, dir: string, ended: () => void): Promise<D
     setTimeout(() => child.kill(), 2000).unref();
   };
   try {
-    const timeout = new Promise<never>((_done, fail) => {
-      setTimeout(() => {fail(new Error("workerd did not start"));}, D1_START).unref();
+    const timeout = new Promise<never>((_resolve, reject) => {
+      setTimeout(() => {reject(new Error("workerd did not start"));}, D1_START).unref();
     });
-    const ready = await Promise.race([gone, timeout, new Promise<Extract<Reply, { kind: "ready" }>>((done) => child.once("message", done))]);
+    const ready = await Promise.race([gone, timeout, new Promise<Extract<Reply, { kind: "ready" }>>((resolve) => child.once("message", resolve))]);
     if (!ready.d1) {throw new Error("the wrangler config binds no D1 database");}
   } catch (error) {
     stop();
@@ -280,14 +280,14 @@ async function startD1(entry: string, dir: string, ended: () => void): Promise<D
     version,
     close: stop,
     explain: (sql, params, ddl) =>
-      new Promise((done) => {
+      new Promise((resolve) => {
         if (child.connected) {
           const id = next++;
           pending.set(id, (error) => {
             // D1 wraps SQLite's message: "D1_ERROR: no such function: x at offset 7: SQLITE_ERROR".
             const message = error?.replace(/^D1_ERROR: /u, "").replace(/ at offset \d+/u, "").replace(/: SQLITE_\w+$/u, "");
             // A count of bindings D1 reads otherwise than the analysis is no refusal of the statement.
-            done(message && !message.startsWith('Wrong number of parameter bindings') ? message : undefined);
+            resolve(message && !message.startsWith('Wrong number of parameter bindings') ? message : undefined);
           });
           child.channel?.ref();
           const text = JSON.stringify(ddl);
@@ -296,7 +296,7 @@ async function startD1(entry: string, dir: string, ended: () => void): Promise<D
             sent = text;
           }
           child.send({ kind: "explain", id, sql, params });
-        } else {done(undefined);}
+        } else {resolve(undefined);}
       }),
   };
 }
@@ -333,21 +333,46 @@ export async function openProjectDrivers(root: string, path: string): Promise<Sq
   if (!names.length) {return [];}
   const require = createRequire(join(packageDir(root), "package.json"));
   const opened = await Promise.all(DRIVERS.filter(([name]) => names.includes(name)).map(([, open]) => open(require, path).catch(() => undefined)));
-  return opened.filter((d): d is SqliteDriver => !matchesUndefined(d));
+  return opened.filter((driver) => !matchesUndefined(driver));
 }
 
 const utf8 = new TextEncoder();
+const START_OF_TEXT = 0;
+const MIN_REPORTED_BYTES = 1;
+const FIRST_MATCH = 0;
+
+// oxlint-disable-next-line eslint/require-unicode-regexp -- Keep SQLite's ASCII case folding for named functions, including the original word character set.
+const NAMED_FUNCTION = /(?:no such function|not authorized to use function): (?<functionName>[\w$]+)/i;
+// oxlint-disable-next-line eslint/require-unicode-regexp -- Keep SQLite's ASCII case folding for named functions, including the original word character set.
+const ARGUMENT_FUNCTION = /arguments to function (?<functionName>[\w$]+)\(\)/i;
+const QUOTED_ERROR = /near "(?<text>[^"]+)"/u;
+
+const escapeRefusal = (text: string): string => text.replaceAll(/[.*+?^${}()|[\]\\]/gu, String.raw`\$&`);
+
+const refusalToken = (sql: string, message: string): { index: number; text: string } => {
+  const functionName = NAMED_FUNCTION.exec(message)?.groups?.functionName ?? ARGUMENT_FUNCTION.exec(message)?.groups?.functionName;
+  const quoted = QUOTED_ERROR.exec(message)?.groups?.text;
+  const wanted = functionName ?? quoted;
+  if (!matchesUndefined(wanted)) {
+    const escaped = escapeRefusal(wanted);
+    const source = matchesUndefined(functionName) ? escaped : `\\b${escaped}\\s*\\(`;
+    // oxlint-disable-next-line eslint/require-unicode-regexp -- Match names and syntax text with the legacy case-insensitive behavior, including the ASCII word boundary.
+    const match = new RegExp(source, "i").exec(sql);
+    if (match) {return { index: match.index, text: wanted };}
+  }
+  return { index: sql.search(/\S/u), text: /\S+/u.exec(sql)?.[FIRST_MATCH] ?? "" };
+};
 
 /**
  * Where in the file a driver's refusal points: the call SQLite names ("no such function: x",
  * "wrong number of arguments to function x()", D1's "not authorized to use function: x"), else the text a syntax error is near, else the
  * statement's first word. In UTF-8 bytes, as the analysis's diagnostics are.
+ * @param {string} sql - The original SQL statement.
+ * @param {string} message - The driver's diagnostic message.
+ * @returns {{ start: number, length: number }} The reported byte range.
  */
-export function placeRefusal(sql: string, message: string): { start: number; length: number } {
-  const escape = (s: string): string => s.replaceAll(/[.*+?^${}()|[\]\\]/gu, String.raw`\$&`);
-  const fn = /(?:no such function|not authorized to use function): ([\w$]+)/i.exec(message)?.[1] ?? /arguments to function ([\w$]+)\(\)/i.exec(message)?.[1];
-  const near = /near "([^"]+)"/.exec(message)?.[1];
-  const found = fn ? new RegExp(`\\b${escape(fn)}\\s*\\(`, "i").exec(sql) : (near ? new RegExp(escape(near), "i").exec(sql) : null);
-  const at = found ? { index: found.index, text: fn ?? near! } : { index: sql.search(/\S/), text: /\S+/.exec(sql)?.[0] ?? "" };
-  return { start: utf8.encode(sql.slice(0, Math.max(at.index, 0))).length, length: Math.max(utf8.encode(at.text).length, 1) };
-}
+export const placeRefusal = function placeRefusal(sql: string, message: string): { start: number; length: number } {
+  const { index, text } = refusalToken(sql, message);
+  // oxlint-disable-next-line eslint/sort-keys -- Keep the diagnostic range's established field order.
+  return { start: utf8.encode(sql.slice(START_OF_TEXT, Math.max(index, START_OF_TEXT))).length, length: Math.max(utf8.encode(text).length, MIN_REPORTED_BYTES) };
+};
