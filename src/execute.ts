@@ -261,10 +261,12 @@ const isSlonik = function (client: ClientMembers): boolean {
   return hasFunctionType(client.maybeOneFirst) && hasFunctionType(client.anyFirst);
 };
 
+const HEX_RADIX = 16;
+
 const asByteaHex = function asByteaHex(v: unknown) {
   if (!(v instanceof Uint8Array)) {return v;}
   let hex = String.raw`\x`;
-  Iterator.from(v).forEach((byte) => {hex += (byte < 16 ? "0" : "") + byte.toString(16);});
+  Iterator.from(v).forEach((byte) => {hex += (byte < HEX_RADIX ? "0" : "") + byte.toString(HEX_RADIX);});
   return hex;
 };
 
@@ -419,6 +421,9 @@ const vectorText = function vectorText(v: Readonly<unknown[]>, name: string, wha
   return JSON.stringify(v);
 };
 
+const SQLITE_FALSE_INTEGER = 0;
+const SQLITE_TRUE_INTEGER = 1;
+
 // What `run` returns goes back in as the database reads it (the round-trip rule, src/render.ts):
 // On Postgres a date or time with an extended or BC year in Postgres's own form, which refuses
 // `+010000` and `0000`, and a negative interval with each part signed (`-P1D` as `P-1D`), since
@@ -433,7 +438,10 @@ const vectorText = function vectorText(v: Readonly<unknown[]>, name: string, wha
 const encode = function encode(type: EngineType | undefined, v: unknown, dialect: Dialect, name: string): unknown {
   if (matchesUndefined(type) || matchesNullish(v)) {return v;}
   if (dialect === "duckdb") {return encodeDuckdb(type, v, name);}
-  if (dialect === "sqlite") {return matchesBoolean(v) ? (v ? 1 : 0) : v;}
+  if (dialect === "sqlite") {
+    if (matchesBoolean(v)) {return v ? SQLITE_TRUE_INTEGER : SQLITE_FALSE_INTEGER;}
+    return v;
+  }
   if (dialect === "mysql") {return type.kind === "array" && Array.isArray(v) ? vectorText(v, name, "a VECTOR") : v;}
   if (type.kind === "array") {return Array.isArray(v) ? v.map((e) => encode(Array.isArray(e) && !isVector(type.of) ? type : type.of, e, dialect, name)) : v;}
   if (isVector(type) && Array.isArray(v)) {
@@ -468,13 +476,26 @@ const durableObjectValues = function durableObjectValues(query: QueryModule, nam
   return values.map((currentValue, index) => numberOrDigits(currentValue, query.inputs?.[names[index]!]?.type, "durable-object"));
 };
 
+const CLOCK_FIELD_WIDTH = 2;
+const YEAR_FIELD_WIDTH = 4;
+const MILLISECOND_FIELD_WIDTH = 3;
+const FIRST_AD_YEAR = 1;
+const FIRST_CALENDAR_MONTH = 1;
+const MINUTES_PER_HOUR = 60;
+const ZERO_ZONE_OFFSET = 0;
+
 /** Pg's `dateToString`: the local date and time to the millisecond, then the offset; BC for a year before 1. */
-const dateText = function dateText(d: Date): string {
-  const pad = (n: number, width = 2): string => String(n).padStart(width, "0");
-  const year = d.getFullYear();
-  const offset = -d.getTimezoneOffset();
-  const abs = Math.abs(offset);
-  return `${pad(year < 1 ? 1 - year : year, 4)}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}.${pad(d.getMilliseconds(), 3)}${offset < 0 ? "-" : "+"}${pad(Math.floor(abs / 60))}:${pad(abs % 60)}${year < 1 ? " BC" : ""}`;
+const dateText = function dateText(date: Date): string {
+  const pad = (field: number, width = CLOCK_FIELD_WIDTH): string => String(field).padStart(width, "0");
+  const year = date.getFullYear();
+  const offset = -date.getTimezoneOffset();
+  const absoluteOffset = Math.abs(offset);
+  const beforeEra = year < FIRST_AD_YEAR;
+  const yearText = pad(beforeEra ? FIRST_AD_YEAR - year : year, YEAR_FIELD_WIDTH);
+  const calendarDay = `${pad(date.getMonth() + FIRST_CALENDAR_MONTH)}-${pad(date.getDate())}`;
+  const time = `${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}.${pad(date.getMilliseconds(), MILLISECOND_FIELD_WIDTH)}`;
+  const zone = `${offset < ZERO_ZONE_OFFSET ? "-" : "+"}${pad(Math.floor(absoluteOffset / MINUTES_PER_HOUR))}:${pad(absoluteOffset % MINUTES_PER_HOUR)}`;
+  return `${yearText}-${calendarDay}T${time}${zone}${beforeEra ? " BC" : ""}`;
 };
 
 /**
@@ -522,10 +543,13 @@ const postgresText = function postgresText(query: QueryModule, name: string, v: 
   return String(v);
 };
 
+const MISSING_PARAMETER = -1;
+const FIRST_NUMBERED_PARAMETER = 1;
+
 const indexOf = function indexOf(query: QueryModule, p: { name: string; start: number; end: number }): number {
   const index = query.params.indexOf(p.name);
   // A hand-built query whose `params` misses a placeholder would bind `$0`.
-  if (index === -1) {throw new Error(`The statement's placeholder ${query.sql.slice(p.start, p.end)} is parameter "${p.name}", which the query's params (${JSON.stringify(query.params)}) do not list.`);}
+  if (index === MISSING_PARAMETER) {throw new Error(`The statement's placeholder ${query.sql.slice(p.start, p.end)} is parameter "${p.name}", which the query's params (${JSON.stringify(query.params)}) do not list.`);}
   return index;
 };
 
@@ -548,7 +572,7 @@ export function compile(query: QueryModule): { text: string; order: Readonly<str
   const order: string[] = [];
   Iterator.from(placeholders).forEach((p) => {
     const index = indexOf(query, p);
-    text += query.sql.slice(last, p.start) + (numbered ? `$${index + 1}` : "?");
+    text += query.sql.slice(last, p.start) + (numbered ? `$${index + FIRST_NUMBERED_PARAMETER}` : "?");
     order.push(p.name);
     last = p.end;
   });
@@ -681,6 +705,8 @@ const accepted: Record<Dialect, string> = {
   duckdb: "runAndReadAll(sql, values) as on @duckdb/node-api's DuckDBConnection",
 };
 
+const MAX_DRIVER_METHODS_IN_DIAGNOSTIC = 12;
+
 const unsupported = function unsupported(c: unknown, dialect: Dialect): TypeError {
   let seen: string;
   if (matchesNull(c) || (!hasObjectType(c) && !hasFunctionType(c))) {seen = String(c);}
@@ -692,7 +718,7 @@ const unsupported = function unsupported(c: unknown, dialect: Dialect): TypeErro
         if (key !== "constructor" && hasFunctionType(d?.value)) {names.add(key);}
       });
     }
-    seen = names.size ? `an object with ${[...names].slice(0, 12).join(", ")}${names.size > 12 ? ", ..." : ""}` : "an object with no methods";
+    seen = names.size ? `an object with ${Iterator.from(names).take(MAX_DRIVER_METHODS_IN_DIAGNOSTIC).toArray().join(", ")}${names.size > MAX_DRIVER_METHODS_IN_DIAGNOSTIC ? ", ..." : ""}` : "an object with no methods";
   }
   // Node:sqlite's tag store keeps its database on db. Kysely and Prisma decode every value of a
   // Raw query themselves, by their own rules or the driver's parsers, before it returns.
