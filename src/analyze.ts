@@ -15,7 +15,7 @@ import type { ResolvedProject } from './project.ts';
 import { duckdbDatabase } from "./duckdb.ts";
 import { NotMysql, refusedLogin } from "./connection.ts";
 import type { SqliteDriver } from "./sqlite-drivers.ts";
-import { matchesNull, matchesNullish, matchesUndefined } from "./native-predicates.ts";
+import { isEmptyString, isRecord, matchesNull, matchesNullish, matchesString, matchesUndefined } from "./native-predicates.ts";
 import { CACHE_ENTRY_VERSION, cacheEntryFile, readCacheEntry, readOfflineEntry, writeCacheEntry } from "./analysis-cache.ts";
 import { FINGERPRINT } from "./schema-fingerprint.ts";
 
@@ -61,6 +61,25 @@ const cacheTime = (): number => Date.now();
 // oxlint-disable-next-line node/no-process-env -- The public Session factories default to the current host environment when the caller supplies none.
 const hostEnvironment = (): NodeJS.ProcessEnv => process.env;
 
+const nonemptyText = (value: string | null | undefined): string | undefined =>
+  matchesNullish(value) || isEmptyString(value) ? undefined : value;
+
+const errorMessage = (cause: unknown): string => {
+  const message = isRecord(cause) ? cause.message : undefined;
+  return matchesString(message) ? message : reason(cause);
+};
+
+const remoteDatabaseLocation = (url: string | undefined): string => {
+  try {
+    const currentUrl = new URL(url ?? "");
+    const host = nonemptyText(currentUrl.hostname) ?? nonemptyText(currentUrl.searchParams.get("host")) ?? "localhost";
+    const port = isEmptyString(currentUrl.port) ? "" : `:${currentUrl.port}`;
+    return `${host}${port}${currentUrl.pathname}`;
+  } catch {
+    return "the database";
+  }
+};
+
 const sessions = new Map<string, Session>();
 
 /**
@@ -72,7 +91,7 @@ const sessions = new Map<string, Session>();
  */
 const openProject = async function (dir: string, env: Record<string, string | undefined>): Promise<{ project: ResolvedProject; engine: Engine | MissingEngine }> {
   const project = resolveProject(await anyEngine(), dir, env);
-  const own = await engine(project.dialect).catch((error: unknown) => (error instanceof MissingEngine ? error : new MissingEngine((error as Error).message)));
+  const own = await engine(project.dialect).catch((error: unknown) => (error instanceof MissingEngine ? error : new MissingEngine(errorMessage(error))));
   return { project, engine: own };
 };
 
@@ -118,9 +137,9 @@ export class Session {
    * restart.
    */
   async #reread(): Promise<void> {
-    if (!this.project.error || !this.project.refreshUrl) {return;}
+    if (matchesUndefined(nonemptyText(this.project.error)) || matchesUndefined(this.project.refreshUrl)) {return;}
     const { project, engine } = await openProject(this.#dir, this.#env);
-    if (project.error) {return;}
+    if (!matchesUndefined(nonemptyText(project.error))) {return;}
     this.#adopt(engine, project);
     this.#schema = undefined;
   }
@@ -256,11 +275,12 @@ export class Session {
   }
 
   async #analyze(sql: string, options: { force?: boolean; store?: boolean }): Promise<Outcome> {
-    if (this.project.error) {return { ok: false, message: this.project.error, code: 11 };}
+    const projectError = nonemptyText(this.project.error);
+    if (!matchesUndefined(projectError)) {return { ok: false, message: projectError, code: 11 };}
     // With no URL, `.reylo/` answers as it does where the database cannot be reached (the dialect
     // Is the installed engine's), and a statement it lacks needs a URL.
-    if (!this.project.url) {
-      const hit = this.#engine instanceof MissingEngine || options.force ? undefined : await this.#offlineEntry(sql);
+    if (matchesUndefined(nonemptyText(this.project.url))) {
+      const hit = this.#engine instanceof MissingEngine || options.force === true ? undefined : await this.#offlineEntry(sql);
       return hit ? { ok: true, analysis: hit.entry.analysis, source: "cache", entry: hit.file } : { ok: false, message: this.project.missingUrl, code: 4 };
     }
     // The URL names the database, whose engine package the project has to have installed.
@@ -268,13 +288,16 @@ export class Session {
     if (engine instanceof MissingEngine) {return { ok: false, message: engine.message, code: 11 };}
     const file = this.entryFile(sql);
     const schema = await this.schema();
-    if (schema.fatal) {return { ok: false, message: schema.error!, code: 5 };}
+    if (schema.fatal === true) {
+      // oxlint-disable-next-line typescript/no-non-null-assertion -- Every fatal schema result has a diagnostic, while the public schema result retains its existing optional fields.
+      return { ok: false, message: schema.error!, code: 5 };
+    }
     if (matchesNull(schema.value)) {
-      const hit = options.force ? undefined : await this.#offlineEntry(sql);
+      const hit = options.force === true ? undefined : await this.#offlineEntry(sql);
       if (hit) {return { ok: true, analysis: hit.entry.analysis, source: "cache", entry: hit.file };}
       return { ok: false, message: `${this.cannotConnect(schema.error)}; .reylo has no analysis of this statement, so run reylo generate where the database can be reached.`, code: 5 };
     }
-    const entry = options.force || options.store === false ? undefined : await readCacheEntry(file);
+    const entry = options.force === true || options.store === false ? undefined : await readCacheEntry(file);
     if (entry && entry.schema === schema.value) {return { ok: true, analysis: entry.analysis, source: "cache", entry: file };}
     let analysis: Analysis;
     const io = this.#connection();
@@ -289,10 +312,11 @@ export class Session {
       }
       if (error instanceof NotMysql) {
         this.#drop(io);
-        this.#schema = { value: null, at: cacheTime(), error: this.notMysql(error), fatal: true };
-        return { ok: false, message: this.#schema.error!, code: 5 };
+        const message = this.notMysql(error);
+        this.#schema = { value: null, at: cacheTime(), error: message, fatal: true };
+        return { ok: false, message, code: 5 };
       }
-      return { ok: false, message: (error as Error).message, code: 5 };
+      return { ok: false, message: errorMessage(error), code: 5 };
     }
     if (options.store !== false) {await writeCacheEntry(this.root, file, { version: CACHE_ENTRY_VERSION, dialect: this.project.dialect, schema: schema.value, analysis, at: cacheTime() });}
     return { ok: true, analysis, source: "database", entry: file };
@@ -307,8 +331,8 @@ export class Session {
    */
   public async schema(): Promise<{ value: string | null; error?: string; fatal?: boolean }> {
     const now = cacheTime();
-    const source = this.project.url && hclPath(this.project.url, this.root);
-    if (source) {
+    const source = hclPath(this.project.url ?? "", this.root);
+    if (!matchesUndefined(source)) {
       // Unlike a remote database, a local source is checked before every cache hit, without a TTL.
       try {
         // oxlint-disable-next-line node/no-sync -- Capture the local catalog bytes before yielding so every cache check starts with this revision.
@@ -320,7 +344,7 @@ export class Session {
         }
       } catch (error) {
         await this.#release();
-        this.#schema = { value: null, at: now, error: `Cannot read HCL schema ${source}: ${(error as Error).message}`, fatal: true };
+        this.#schema = { value: null, at: now, error: `Cannot read HCL schema ${source}: ${errorMessage(error)}`, fatal: true };
         return this.#schema;
       }
     }
@@ -331,20 +355,21 @@ export class Session {
       io = await pending;
     } catch (error) {
       this.#drop(pending);
-      this.#schema = error instanceof Unreachable ? { value: null, at: now, error: reason(error) } : { value: null, at: now, error: error instanceof NotMysql ? this.notMysql(error) : (error as Error).message, fatal: true };
+      this.#schema = error instanceof Unreachable ? { value: null, at: now, error: reason(error) } : { value: null, at: now, error: error instanceof NotMysql ? this.notMysql(error) : errorMessage(error), fatal: true };
       return this.#schema;
     }
     try {
       // HCL is the complete schema source. Its content hash replaces a live catalog fingerprint.
-      const rows = source ? [] : await io.query(FINGERPRINT[this.project.dialect], []);
-      const value = digestPrefix(JSON.stringify(source ? [this.#hclHash, rows] : rows), SCHEMA_DIGEST_LENGTH);
+      const rows = matchesUndefined(source) ? await io.query(FINGERPRINT[this.project.dialect], []) : [];
+      const value = digestPrefix(JSON.stringify(matchesUndefined(source) ? rows : [this.#hclHash, rows]), SCHEMA_DIGEST_LENGTH);
       // The engine's answers describe the old schema too.
-      if (this.#schema?.value && this.#schema.value !== value) {await io.forget().catch(() => {});}
+      const previousFingerprint = nonemptyText(this.#schema?.value);
+      if (!matchesUndefined(previousFingerprint) && previousFingerprint !== value) {await io.forget().catch(() => {});}
       this.#schema = { value, at: now };
     } catch (error) {
-      if (source) {
+      if (!matchesUndefined(source)) {
         this.#drop(pending);
-        this.#schema = { value: null, at: now, error: (error as Error).message, fatal: true };
+        this.#schema = { value: null, at: now, error: errorMessage(error), fatal: true };
       } else if (error instanceof Unreachable) {
         this.#drop(pending);
         this.#schema = { value: null, at: now, error: reason(error) };
@@ -372,18 +397,20 @@ export class Session {
    */
   public cannotConnect(why?: string): string {
     const { dialect, url, root, urlSource } = this.project;
-    if (dialect === "sqlite") {return `Cannot open the database ${sqlitePath(url ?? "", root)} (${urlSource})${why ? `: ${why}` : ""}`;}
-    if (dialect === "duckdb") {return `Cannot open the database ${duckdbPath(url ?? "", root)} (${urlSource})${why ? `: ${why}` : ""}`;}
-    return `Cannot connect to the database at ${this.where()} (${urlSource})${why ? `: ${why}` : ""}`;
+    const detail = nonemptyText(why);
+    const suffix = matchesUndefined(detail) ? "" : `: ${detail}`;
+    if (dialect === "sqlite") {return `Cannot open the database ${sqlitePath(url ?? "", root)} (${urlSource})${suffix}`;}
+    if (dialect === "duckdb") {return `Cannot open the database ${duckdbPath(url ?? "", root)} (${urlSource})${suffix}`;}
+    return `Cannot connect to the database at ${this.where()} (${urlSource})${suffix}`;
   }
 
   /**
    * Explains why an incompatible MySQL server was rejected.
-   * @param {NotMysql} e The error that identifies the server implementation.
+   * @param {NotMysql} refusal The error that identifies the server implementation.
    * @returns {string} A diagnostic describing the required replacement server.
    */
-  public notMysql(e: NotMysql): string {
-    return `Cannot type-check against the database at ${this.where()} (${this.project.urlSource}): it is ${e.server}, and Reylo type-checks MySQL statements against MySQL. Point the type check's URL at a MySQL server, 8.4 or later, with the same schema.`;
+  public notMysql(refusal: NotMysql): string {
+    return `Cannot type-check against the database at ${this.where()} (${this.project.urlSource}): it is ${refusal.server}, and Reylo type-checks MySQL statements against MySQL. Point the type check's URL at a MySQL server, 8.4 or later, with the same schema.`;
   }
 
   /**
@@ -391,10 +418,11 @@ export class Session {
    * @returns {string} The database identifier, or an empty string when the session has no URL.
    */
   #server(): string {
-    const { dialect, url, root } = this.project;
-    if (!url) {return "";}
+    const { dialect, root } = this.project;
+    const url = nonemptyText(this.project.url);
+    if (matchesUndefined(url)) {return "";}
     const source = hclPath(url, root);
-    if (source) {return `hcl:${source}`;}
+    if (!matchesUndefined(source)) {return `hcl:${source}`;}
     if (dialect === "sqlite") {return sqlitePath(url, root);}
     if (dialect === "duckdb") {return duckdbPath(url, root);}
     try {
@@ -413,12 +441,7 @@ export class Session {
     const { dialect, url, root } = this.project;
     if (dialect === "sqlite") {return sqlitePath(url ?? "", root);}
     if (dialect === "duckdb") {return duckdbPath(url ?? "", root);}
-    try {
-      const currentUrl = new URL(url ?? "");
-      return `${currentUrl.hostname || currentUrl.searchParams.get("host") || "localhost"}${currentUrl.port ? `:${currentUrl.port}` : ""}${currentUrl.pathname}`;
-    } catch {
-      return "the database";
-    }
+    return remoteDatabaseLocation(url);
   }
 
   public async close(): Promise<void> {
@@ -506,11 +529,11 @@ export class Session {
    * A URL to try instead, when the server refused the login and `direct_url`'s command now prints
    * something else, as when a short-lived password has expired; else undefined, so that nothing
    * is tried twice on the same password.
-   * @param {unknown} e The error from connecting with the current URL.
+   * @param {unknown} cause The error from connecting with the current URL.
    * @returns {string | undefined} The refreshed URL if the configuration produced a different one.
    */
-  #freshUrl(e: unknown): string | undefined {
-    if (!refusedLogin(e)) {return undefined;}
+  #freshUrl(cause: unknown): string | undefined {
+    if (!refusedLogin(cause)) {return undefined;}
     const fresh = this.project.refreshUrl?.();
     if (matchesUndefined(fresh) || fresh === this.#url) {return undefined;}
     this.#url = fresh;
@@ -522,7 +545,7 @@ export class Session {
     // The URL names a database whose engine the project lacks: its error, as the import's.
     if (this.#engine instanceof MissingEngine) {throw this.#engine;}
     const source = hclPath(url, root);
-    if (source) {return (await import("./hcl.ts")).hclCatalog(source, this.#engine);}
+    if (!matchesUndefined(source)) {return (await import("./hcl.ts")).hclCatalog(source, this.#engine);}
     // DuckDB runs inside the app: the engine's needs are answered by the project's own DuckDB
     // (src/duckdb.ts), which opens the file for each analysis and holds nothing between them.
     if (dialect === "duckdb") {
