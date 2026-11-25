@@ -2,6 +2,7 @@
 import { readFileSync } from "node:fs";
 import { NotMysql, reason, Unreachable } from "./connection.ts";
 import type { AnalysisConnection } from "./analysis-connection.ts";
+import type { ConnectionOwner } from "./analysis-connection-owner.ts";
 import { digestPrefix, sha256 } from "./analysis-identity.ts";
 import { cacheTime, errorMessage, liveSchema, offlineSchema } from "./analysis-results.ts";
 import type { SchemaSnapshot } from "./analysis-results.ts";
@@ -15,11 +16,9 @@ const SCHEMA_TTL = 5000;
 const OFFLINE_TTL = 60_000;
 
 interface CatalogContext {
-  connect: () => Promise<AnalysisConnection>;
-  drop: (pending: Promise<AnalysisConnection>) => void;
+  connections: ConnectionOwner;
   project: () => ResolvedProject;
   refused: (error: NotMysql) => string;
-  release: () => Promise<void>;
   root: () => string;
 }
 
@@ -54,7 +53,7 @@ export class SchemaTracker {
       return this.#failedLocalRead(at, source, local.error);
     }
     if (local && (local.hash !== this.#hclHash || matchesNull(this.snapshot?.value))) {
-      await this.#context.release();
+      await this.#context.connections.release();
       this.snapshot = undefined;
       this.#hclHash = local.hash;
     }
@@ -69,19 +68,19 @@ export class SchemaTracker {
   }
 
   async #failedLocalRead(at: number, source: string | undefined, error: unknown): Promise<SchemaSnapshot> {
-    await this.#context.release();
+    await this.#context.connections.release();
     this.snapshot = offlineSchema(at, `Cannot read HCL schema ${source}: ${errorMessage(error)}`, true);
     return this.snapshot;
   }
 
   async #query(request: CatalogRequest): Promise<SchemaSnapshot> {
-    const pending = this.#context.connect();
+    const pending = this.#context.connections.get();
     try {
       const connection = await pending;
       // oxlint-disable-next-line typescript/return-await -- This catch handles connection opening. The fingerprint handles its own query failures.
       return this.#fingerprint(request, pending, connection);
     } catch (error) {
-      this.#context.drop(pending);
+      this.#context.connections.drop(pending);
       this.snapshot = this.#failedConnection(request.at, error);
       return this.snapshot;
     }
@@ -119,11 +118,11 @@ export class SchemaTracker {
 
   #failedFingerprint({ at, source }: CatalogRequest, pending: Promise<AnalysisConnection>, error: unknown): SchemaSnapshot {
     if (!matchesUndefined(source)) {
-      this.#context.drop(pending);
+      this.#context.connections.drop(pending);
       return offlineSchema(at, errorMessage(error), true);
     }
     if (error instanceof Unreachable) {
-      this.#context.drop(pending);
+      this.#context.connections.drop(pending);
       return offlineSchema(at, reason(error));
     }
     return liveSchema(`unverified ${process.pid} ${at}`, at);

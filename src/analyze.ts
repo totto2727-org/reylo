@@ -52,12 +52,9 @@ export class Session {
   #busy = NO_ACTIVE_ANALYSIS;
   #timer: ReturnType<typeof setTimeout> | undefined;
   #catalog = new SchemaTracker({
-    // oxlint-disable-next-line typescript/promise-function-async -- Catalog failure must retain the original connection ticket for an identity check.
-    connect: () => this.#connections.get(),
-    drop: (pending) => {this.#connections.drop(pending);},
+    connections: this.#connections,
     project: () => this.project,
     refused: (error) => this.notMysql(error),
-    release: async () => this.#connections.release(),
     root: () => this.root,
   });
 
@@ -295,4 +292,8 @@ export class Session {
     clearTimeout(this.#timer);
     await this.#connections.release();
   }
+};
+
+export const releaseConnections = async (): Promise<void> => {
+  await Promise.all([...sessions.values()].map(async (session) => session.release()));
 };
