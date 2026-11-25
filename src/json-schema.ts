@@ -1,3 +1,5 @@
+import { checkApplicators } from "./json-schema-applicators.ts";
+import type { Outcome } from "./json-schema-applicators.ts";
 import { checkArray } from "./json-schema-arrays.ts";
 import { basicFailure, pointer } from "./json-schema-constraints.ts";
 import { fillDefaults } from "./json-schema-defaults.ts";
@@ -20,102 +22,92 @@ type Schema = boolean | Readonly<Record<string, unknown>>;
 // oxlint-disable-next-line typescript/consistent-type-definitions -- Keep validation failures assignable to structural Record consumers.
 export type Failure = { path: string; message: string };
 
-const EMPTY_FAILURES = 0;
+type Keywords = Readonly<Record<string, unknown>>;
+const ROOT = "";
 
-const fail = (out: Failure[], path: string, message: string): false => {
-  // oxlint-disable-next-line eslint/sort-keys -- Preserve the field order in serialized validation failures.
-  out.push({ path, message });
-  return false;
-};
-
-/** What a passing check evaluated of an object's keys, for `unevaluatedProperties`. */
-type Evaluated = Set<string>;
-
-/** Checks `value`; on failure records why and returns `false`, on success the keys it evaluated. */
-function check(schema: unknown, value: unknown, path: string, out: Failure[]): Evaluated | false {
-  const evaluated: Evaluated = new Set();
-  if (schema === true) {return evaluated;}
-  if (schema === false) {return fail(out, path, "no value is allowed here");}
-  if (!isRecord(schema)) {return evaluated;}
-  const s = schema;
-
-  const message = basicFailure(s, value);
-  if (!matchesUndefined(message)) {return fail(out, path, message);}
-  if (Array.isArray(value) && !checkArray(s, value, {
-    check: (subschema, item, position) => check(subschema, item, position, out) !== false,
-    fail: (reason) => fail(out, path, reason),
-    path,
-    probe: (subschema, item) => check(subschema, item, path, []) !== false,
-  })) {return false;}
-  if (isRecord(value) && !checkObject(s, value, {
-    check: (subschema, candidate, position) => check(subschema, candidate, position, out),
-    evaluated,
-    fail: (position, reason) => fail(out, position, reason),
-    path,
-    probe: (subschema, candidate, position) => check(subschema, candidate, position, []) !== false,
-    replace: (position, reason) => {
-      out.length = EMPTY_FAILURES;
-      return fail(out, position, reason);
-    },
-  })) {return false;}
-
-  // The applicators: a subschema's evaluated keys count only where it passed.
-  if (Array.isArray(s.allOf)) {
-    for (const sub of s.allOf as Schema[]) {
-      const result = check(sub, value, path, out);
-      if (result === false) {return false;}
-      result.forEach((k) => evaluated.add(k));
-    }
-  }
-  if (Array.isArray(s.anyOf)) {
-    let any = false;
-    Iterator.from(s.anyOf as Schema[]).forEach((sub) => {
-      const result = check(sub, value, path, []);
-      if (result !== false) {
-        any = true;
-        result.forEach((k) => evaluated.add(k));
-      }
-    });
-    if (!any) {return fail(out, path, "must match one of its `anyOf` schemas");}
-  }
-  if (Array.isArray(s.oneOf)) {
-    let matched = 0;
-    Iterator.from(s.oneOf as Schema[]).forEach((sub) => {
-      const result = check(sub, value, path, []);
-      if (result !== false) {
-        matched++;
-        result.forEach((k) => evaluated.add(k));
-      }
-    });
-    if (matched !== 1) {return fail(out, path, matched === 0 ? "must match one of its `oneOf` schemas" : "must match only one of its `oneOf` schemas, and matches more");}
-  }
-  if (!matchesUndefined(s.not) && check(s.not as Schema, value, path, []) !== false) {return fail(out, path, "must not match its `not` schema");}
-  if (!matchesUndefined(s.if)) {
-    const result = check(s.if as Schema, value, path, []);
-    const branch = result === false ? s.else : s.then;
-    if (result !== false) {result.forEach((k) => evaluated.add(k));}
-    if (!matchesUndefined(branch)) {
-      const currentResult = check(branch as Schema, value, path, out);
-      if (currentResult === false) {return false;}
-      currentResult.forEach((k) => evaluated.add(k));
-    }
-  }
-  if (isRecord(value)) {
-    if (s.unevaluatedProperties === false) {
-      for (const key of Object.keys(value)) {if (!evaluated.has(key)) {return fail(out, `${path}/${pointer(key)}`, "is a key the schema does not allow");}}
-    }
-    // `true` evaluates every key left, for an enclosing `unevaluatedProperties: false`.
-    if (s.unevaluatedProperties === true) {Object.keys(value).forEach((key) => {evaluated.add(key);});}
-  }
-  return evaluated;
+interface Location {
+  evaluated: Set<string>;
+  path: string;
 }
 
+class Validator {
+  #failure?: Failure;
 
-const firstFailure = (schema: unknown, value: unknown): Failure | undefined => {
-  const failures: Failure[] = [];
-  check(schema, value, "", failures);
-  return failures[0];
-};
+  public first(schema: unknown, value: unknown): Failure | undefined {
+    this.#check(schema, value, ROOT);
+    return this.#failure;
+  }
+
+  #reject(path: string, message: string, replace = false): false {
+    if (replace || matchesUndefined(this.#failure)) {
+      // oxlint-disable-next-line eslint/sort-keys -- Preserve the field order in serialized validation failures.
+      this.#failure = { path, message };
+    }
+    return false;
+  }
+
+  static #probe(schema: unknown, value: unknown, path: string): Outcome {
+    return new Validator().#check(schema, value, path);
+  }
+
+  #check(schema: unknown, value: unknown, path: string): Outcome {
+    if (schema === false) {return this.#reject(path, "no value is allowed here");}
+    const evaluated = new Set<string>();
+    if (!isRecord(schema)) {return evaluated;}
+    return this.#keywords(schema, value, { evaluated, path }) ? evaluated : false;
+  }
+
+  #array(schema: Keywords, value: unknown[], path: string): boolean {
+    return checkArray(schema, value, {
+      check: (subschema, item, position) => this.#check(subschema, item, position) !== false,
+      fail: (reason) => this.#reject(path, reason),
+      path,
+      probe: (subschema, item) => Validator.#probe(subschema, item, path) !== false,
+    });
+  }
+
+  #object(schema: Keywords, value: Record<string, unknown>, { evaluated, path }: Location): boolean {
+    return checkObject(schema, value, {
+      check: (subschema, candidate, position) => this.#check(subschema, candidate, position),
+      evaluated,
+      fail: (position, reason) => this.#reject(position, reason),
+      path,
+      probe: (subschema, candidate, position) => Validator.#probe(subschema, candidate, position) !== false,
+      replace: (position, reason) => this.#reject(position, reason, true),
+    });
+  }
+
+  #applicators(schema: Keywords, value: unknown, { evaluated, path }: Location): boolean {
+    return checkApplicators(schema, {
+      check: (subschema) => this.#check(subschema, value, path),
+      evaluated,
+      fail: (reason) => this.#reject(path, reason),
+      probe: (subschema) => Validator.#probe(subschema, value, path),
+    });
+  }
+
+  #remaining(schema: Keywords, value: unknown, { evaluated, path }: Location): boolean {
+    if (!isRecord(value)) {return true;}
+    if (schema.unevaluatedProperties === false) {
+      const missing = Object.keys(value).find((key) => !evaluated.has(key));
+      if (!matchesUndefined(missing)) {return this.#reject(`${path}/${pointer(missing)}`, "is a key the schema does not allow");}
+    }
+    if (schema.unevaluatedProperties === true) {
+      Object.keys(value).forEach((key) => {evaluated.add(key);});
+    }
+    return true;
+  }
+
+  #keywords(schema: Keywords, value: unknown, location: Location): boolean {
+    const reason = basicFailure(schema, value);
+    if (!matchesUndefined(reason)) {return this.#reject(location.path, reason);}
+    if (Array.isArray(value) && !this.#array(schema, value, location.path)) {return false;}
+    if (isRecord(value) && !this.#object(schema, value, location)) {return false;}
+    return this.#applicators(schema, value, location) && this.#remaining(schema, value, location);
+  }
+}
+
+const firstFailure = (schema: unknown, value: unknown): Failure | undefined => new Validator().first(schema, value);
 
 /**
  * Checks the value and reports its first failure.
