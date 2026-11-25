@@ -9,11 +9,12 @@
 import type { EngineType } from "./engine-type.ts";
 import { validate, withDefaults } from "./json-schema.ts";
 import { describe, ParameterError } from "./values.ts";
-import { isEmptyArray, isRecord, matchesNull, matchesString, matchesUndefined } from "./native-predicates.ts";
+import { isEmptyArray, isRecord, matchesNull, matchesString, matchesUndefined, nonemptyText } from "./native-predicates.ts";
 
+import { wallClock } from "./row-clock.ts";
 import { bigInteger, integer, INTEGERS, MYSQL_INTEGERS, unsignedRange } from "./row-numeric.ts";
 import type { RejectParameter } from "./row-numeric.ts";
-import { Raw, scalar, SINGLE_TYPE_MODIFIER } from "./row-scalar.ts";
+import { Raw, scalar } from "./row-scalar.ts";
 import type { RowDialect, RowValueContext } from "./row-scalar.ts";
 
 export { describe, zoned } from "./values.ts";
@@ -26,16 +27,16 @@ export type StructuredList = Readonly<{ start: number; end: number; entries: Rea
 /** A structured parameter in insert position and the lists the run time writes again for the keys a call carries. */
 export type Structured = Readonly<{ name: string; lists: Readonly<StructuredList[]> }>;
 
-/** The checked rows as JSON text, a 64-bit integer as its digits. */
-const write = function write(v: unknown): string {
-  if (v instanceof Raw) {return v.text;}
-  if (Array.isArray(v)) {return `[${v.map(write).join(",")}]`;}
-  if (isRecord(v)) {
-    return `{${Object.entries(v)
-      .map(([key, value]) => `${JSON.stringify(key)}:${write(value)}`)
+// Encode checked rows as JSON text, emitting a wide integer directly as its digits.
+const write = function write(value: unknown): string {
+  if (value instanceof Raw) {return value.text;}
+  if (Array.isArray(value)) {return `[${value.map((element) => write(element)).join(",")}]`;}
+  if (isRecord(value)) {
+    return `{${Object.entries(value)
+      .map(([key, element]) => `${JSON.stringify(key)}:${write(element)}`)
       .join(",")}}`;
   }
-  return JSON.stringify(v);
+  return JSON.stringify(value);
 };
 
 const firstRowNumber = 1;
@@ -90,29 +91,42 @@ const check = (type: EngineType, value: unknown, context: RowValueContext): unkn
   return type.kind === "scalar" ? scalar(type.name, value, context) : value;
 };
 
+interface PresentColumn {
+  field: RowField;
+  subject: string;
+  value: unknown;
+}
+
+const checkedColumn = ({ field, subject, value }: PresentColumn, { dialect, fail }: ColumnCheck): unknown => {
+  const checked = check(field.type, value, { dialect, fail: (message) => fail(`${subject} ${message}`), written: field.written });
+  if (matchesUndefined(field.schema)) {return checked;}
+  // A JSON member's schema fills its defaults and checks the value.
+  const filled = withDefaults(field.schema, checked);
+  const failure = validate(field.schema, filled);
+  if (failure) {fail(`${subject}${failure.path ? ` at ${failure.path}` : ""} ${failure.message}.`);}
+  return filled;
+};
+
+const presentColumn = ({ field, subject, value }: PresentColumn, context: ColumnCheck): unknown => {
+  if (matchesNull(value)) {
+    if (!field.nullable) {
+      context.fail(`${subject} is ${field.written} not null, and the row gives null${field.optional ? "; leave the key out for the column's default" : ""}.`);
+    }
+    return value;
+  }
+  return checkedColumn({ field, subject, value }, context);
+};
+
 const checkColumnValue = (field: RowField, value: unknown, context: ColumnCheck): void => {
-  const { dialect, fail, row, where } = context;
+  const { fail, row, where } = context;
   const subject = `${where}"${field.name}"`;
   if (matchesUndefined(value)) {
     if (!field.optional) {fail(`${subject} is ${field.written} not null, and the row leaves it out.`);}
     return;
   }
   row.keys.add(field.name);
-  if (matchesNull(value)) {
-    if (!field.nullable) {fail(`${subject} is ${field.written} not null, and the row gives null${field.optional ? "; leave the key out for the column's default" : ""}.`);}
-    row.values[field.name] = null;
-    return;
-  }
-  const checked = check(field.type, value, { dialect, fail: (message) => fail(`${subject} ${message}`), written: field.written });
-  if (matchesUndefined(field.schema)) {
-    row.values[field.name] = checked;
-    return;
-  }
-  // A JSON member's schema fills its defaults and checks the value (wiki/typed-json-params.md).
-  const filled = withDefaults(field.schema, checked);
-  const failure = validate(field.schema, filled);
-  if (failure) {fail(`${subject}${failure.path ? ` at ${failure.path}` : ""} ${failure.message}.`);}
-  row.values[field.name] = filled;
+  const checked = presentColumn({ field, subject, value }, context);
+  row.values[field.name] = checked;
 };
 
 const checkRow = (value: unknown, where: string, schema: RowSchema): CheckedRow => {
@@ -145,6 +159,34 @@ const verifyInsertColumns = (expected: InsertColumns, actual: InsertColumns, sch
   schema.fail(`row ${actual.rowNumber} ${givesKey ? "gives" : "leaves out"} "${differ.name}", which row ${expected.rowNumber} ${givesKey ? "leaves out" : "gives"}. Every row of one call gives the same keys, since one insert writes them all and a key left out takes its column's default: give "${differ.name}" in every row, or in none.`);
 };
 
+const suppliedRows = (value: unknown, one: boolean, fail: RejectParameter): unknown[] => {
+  if (matchesUndefined(value) || matchesNull(value)) {
+    return fail(one ? "pass one object, whose keys the column list names." : "pass an array of objects, whose keys the column list names; an empty array inserts nothing.");
+  }
+  if (one) {return [value];}
+  return Array.isArray(value) ? value : fail(`pass an array of objects, one per row; got ${describe(value)}.`);
+};
+
+interface CollectedRows {
+  first?: InsertColumns;
+  values: Record<string, unknown>[];
+}
+
+const collectRows = (rows: unknown[], schema: RowSchema, { inserted, type }: { inserted: boolean; type: RowsType }): CollectedRows => {
+  const result: CollectedRows = { values: [] };
+  rows.forEach((row, index) => {
+    const rowNumber = index + firstRowNumber;
+    const checked = checkRow(row, type.one ? "" : `row ${rowNumber}: `, schema);
+    if (inserted) {
+      const columns = { keys: checked.keys, rowNumber };
+      if (matchesUndefined(result.first)) {result.first = columns;}
+      else {verifyInsertColumns(result.first, columns, schema);}
+    }
+    result.values.push(checked.values);
+  });
+  return result;
+};
+
 /**
  * Checks a structured parameter and produces the JSON value or text to bind.
  * @param {string} name - The structured parameter's name.
@@ -154,82 +196,45 @@ const verifyInsertColumns = (expected: InsertColumns, actual: InsertColumns, sch
  * @param {boolean} inserted - Whether every row must supply the same insert columns.
  * @returns {{ value: unknown; present: ReadonlySet<string> }} The bound value and supplied column names.
  */
+// oxlint-disable-next-line eslint/max-params -- Preserve the synchronous structured parameter signature used by generated queries.
 export const prepareRows = function prepareRows(name: string, type: RowsType, value: unknown, dialect: RowDialect, inserted: boolean): { value: unknown; present: ReadonlySet<string> } {
   const fail = (message: string): never => {
     throw new ParameterError(`Parameter "${name}": ${message}`);
   };
-  if (matchesUndefined(value) || matchesNull(value)) {fail(type.one ? "pass one object, whose keys the column list names." : "pass an array of objects, whose keys the column list names; an empty array inserts nothing.");}
-  const rows = type.one ? [value] : (Array.isArray(value) ? value : fail(`pass an array of objects, one per row; got ${describe(value)}.`));
+  const rows = suppliedRows(value, type.one, fail);
   const schema: RowSchema = {
     dialect, fail, fields: type.fields, known: new Map(type.fields.map((field) => [field.name, field])),
   };
-  // oxlint-disable-next-line rules/no-let -- An insert compares later rows with the first row it received.
-  let first: InsertColumns | undefined;
-  const out: Record<string, unknown>[] = [];
-  rows.forEach((row: unknown, index: number) => {
-    const rowNumber = index + firstRowNumber;
-    const checked = checkRow(row, type.one ? "" : `row ${rowNumber}: `, schema);
-    if (inserted) {
-      const columns = { keys: checked.keys, rowNumber };
-      if (matchesUndefined(first)) {first = columns;}
-      else {verifyInsertColumns(first, columns, schema);}
-    }
-    out.push(checked.values);
-  });
+  const { first, values } = collectRows(rows, schema, { inserted, type });
   const keys = first?.keys ?? new Set(type.fields.map((field) => field.name));
   if (inserted && !type.fields.some((field) => keys.has(field.name))) {fail("every key is left out, so the insert would name no column; give one at least.");}
-  const shaped = type.one ? out[0] : out;
+  const shaped = type.one ? values[0] : values;
   // oxlint-disable-next-line eslint/sort-keys -- Preserve the existing field order for serialized preparation results.
   return { value: dialect === "postgres" ? shaped : write(shaped), present: keys };
 };
 
-const CLOCK = /^-?(?<hours>\d{1,3}):(?<minutes>\d{2})(?::(?<seconds>\d{2})(?:\.(?<fraction>\d+))?)?$/u;
-const WALL_DATE = /^(?<year>\d{4})-(?<month>\d{2})-(?<day>\d{2})(?:[T ](?<hours>\d{2}):(?<minutes>\d{2})(?::(?<seconds>\d{2})(?:\.(?<fraction>\d+))?)?)?$/u;
-const NO_FRACTION = 0;
-const DATETIME_FRACTION_DIGITS = 6;
-const MYSQL_TIME_HOUR_LIMIT = 838;
-const HOURS_PER_DAY = 24;
-const MINUTES_PER_HOUR = 60;
-const SECONDS_PER_MINUTE = 60;
-const ZERO_CLOCK_PART = 0;
-const FIRST_MONTH = 1;
-const LAST_MONTH = 12;
-const FIRST_DAY_OF_MONTH = 1;
-const LAST_DAY_OF_PREVIOUS_MONTH = 0;
+const castBase = (written: string): string => written.replace(/\s*\(.*$/u, "");
 
-type ClockFields = Record<string, string | undefined>;
-
-const validClock = (parts: ClockFields, keeps: number): boolean =>
-  Number(parts.minutes ?? ZERO_CLOCK_PART) < MINUTES_PER_HOUR &&
-  Number(parts.seconds ?? ZERO_CLOCK_PART) < SECONDS_PER_MINUTE &&
-  (parts.fraction ?? "").length <= keeps;
-
-const validMysqlTime = (text: string, keeps: number): boolean => {
-  const parts = CLOCK.exec(text)?.groups;
-  return !matchesUndefined(parts) && Number(parts.hours) <= MYSQL_TIME_HOUR_LIMIT && validClock(parts, keeps);
+const castRange = (base: string, dialect: RowDialect): (typeof INTEGERS)[string] | undefined => {
+  if (dialect === "sqlite") {return /[iI][nN][tT]/u.test(base) ? INTEGERS.integer : undefined;}
+  return MYSQL_INTEGERS[nonemptyText(base.replace(/\s*unsigned$/u, "")) ?? "bigint"];
 };
 
-const validMysqlDate = (text: string, base: string, keeps: number): boolean => {
-  const parts = WALL_DATE.exec(text)?.groups;
-  if (matchesUndefined(parts)) {return false;}
-  const month = Number(parts.month);
-  const day = Number(parts.day);
-  const days = new Date(Date.UTC(Number(parts.year), month, LAST_DAY_OF_PREVIOUS_MONTH)).getUTCDate();
-  if (month < FIRST_MONTH || month > LAST_MONTH || day < FIRST_DAY_OF_MONTH || day > days) {return false;}
-  if (base === "date") {return matchesUndefined(parts.hours);}
-  return Number(parts.hours ?? ZERO_CLOCK_PART) < HOURS_PER_DAY && validClock(parts, keeps);
-};
+const isClock = (base: string): boolean => base === "date" || base === "time" || base === "datetime" || base === "timestamp";
 
-/** Check whether MySQL would round or discard any part of a date, time or date-time. */
-const wallClock = (base: string, written: string, value: unknown, fail: RejectParameter): void => {
-  const example = base === "date" ? '"2026-10-12"' : (base === "time" ? '"19:06:48"' : '"2026-10-12 19:06:48.282"');
-  if (!matchesString(value)) {return void fail(`is ${written}, which takes its text (${example}), not ${describe(value)}${value instanceof Date ? ": drivers write a Date's time in different zones" : ""}.`);}
-  const text = value.trim();
-  const digits = SINGLE_TYPE_MODIFIER.exec(written)?.groups?.digits;
-  const keeps = Number(digits ?? (base === "time" ? NO_FRACTION : DATETIME_FRACTION_DIGITS));
-  if (base === "time" ? validMysqlTime(text, keeps) : validMysqlDate(text, base, keeps)) {return;}
-  const precision = keeps > NO_FRACTION && base !== "date" ? ` with at most ${keeps} digits after the second's point` : (base === "time" ? " with no fraction of a second" : "");
-  fail(`is ${written}, as text like ${example}${precision}; got ${describe(value)}, which MySQL's CAST would make NULL or change.`);
+const checkExplicitCast = (type: EngineType, value: unknown, context: RowValueContext): void => {
+  const base = castBase(context.written);
+  const signed = castRange(base, context.dialect);
+  if (signed) {
+    const range = context.dialect === "mysql" && base.endsWith("unsigned") ? unsignedRange(signed) : signed;
+    integer(value, { digits: context.dialect === "mysql" && range[1] >= bigInteger[1], range, truth: true, written: context.written }, context.fail);
+  } else if (base === "uuid") {
+    scalar("uuid", value, context);
+  } else if (context.dialect === "mysql" && isClock(base)) {
+    wallClock(base, value, context);
+  } else {
+    check(type, value, context);
+  }
 };
 
 /**
@@ -238,40 +243,41 @@ const wallClock = (base: string, written: string, value: unknown, fail: RejectPa
  * `CAST('1.9' AS INTEGER)` is 1), against the type as written, before the statement runs; the
  * value is bound as it is. `type` is the engine's type for the parameter. On SQLite every integer
  * is 64 bits, whatever the cast calls it.
+ * @param {string} name The parameter being checked.
+ * @param {string} written The cast type as it appears in SQL.
+ * @param {EngineType} type The engine's type for the parameter.
+ * @param {unknown} value The value supplied by the caller.
+ * @param {RowDialect} dialect The database that consumes the parameter.
  */
-export const checkCast = function checkCast(name: string, written: string, type: EngineType, v: unknown, dialect: RowDialect): void {
-  if (matchesNull(v) || matchesUndefined(v)) {return;}
+// oxlint-disable-next-line eslint/max-params -- Preserve the parameter validation signature used by synchronous query execution.
+export const checkCast = function checkCast(name: string, written: string, type: EngineType, value: unknown, dialect: RowDialect): void {
+  if (matchesNull(value) || matchesUndefined(value)) {return;}
   const fail = (message: string): never => {
     throw new ParameterError(`Parameter "${name}" ${message}`);
   };
-  const base = written.replace(/\s*\(.*$/, "");
-  const signed = dialect === "sqlite" ? (/int/i.test(base) ? INTEGERS.integer : undefined) : MYSQL_INTEGERS[base.replace(/\s*unsigned$/u, "") || "bigint"];
-  if (signed) {
-    const range = dialect === "mysql" && base.endsWith("unsigned") ? unsignedRange(signed) : signed;
-    integer(v, { digits: dialect === "mysql" && range[1] >= bigInteger[1], range, truth: true, written }, fail);
-    return;
-  }
-  if (base === "uuid") {
-    scalar("uuid", v, { dialect, fail, written });
-    return;
-  }
-  if (dialect === "mysql" && (base === "date" || base === "time" || base === "datetime" || base === "timestamp")) {
-    wallClock(base, written, v, fail);
-    return;
-  }
-  check(type, v, { dialect, fail, written });
+  checkExplicitCast(type, value, { dialect, fail, written });
 };
 
-/** The statement with each list of a structured parameter written again for the keys present (MySQL): an entry stays when its key is required or present. */
+const SQL_START = 0;
+
+/**
+ * Rewrites a MySQL statement's insert lists for the columns supplied by the caller.
+ * @param {string} text The original SQL.
+ * @param {Structured} structured The list spans stored in the generated query.
+ * @param {Readonly<RowField[]>} fields The original columns in SQL order.
+ * @param {ReadonlySet<string>} present The columns supplied by this call.
+ * @returns {string} SQL containing every required and supplied optional column.
+ */
+// oxlint-disable-next-line eslint/max-params -- Preserve the existing structured query rewriting signature.
 export const variant = function variant(text: string, structured: Structured, fields: Readonly<RowField[]>, present: ReadonlySet<string>): string {
-  const lists = [...structured.lists].sort((left, right) => right.start - left.start);
-  let out = text;
+  const lists = [...structured.lists].toSorted((left, right) => right.start - left.start);
+  const output = { text };
   Iterator.from(lists).forEach((list) => {
-    const kept = list.entries.filter((entry, index) => {
-      const f = fields[index];
-      return matchesUndefined(f) || !f.optional || present.has(f.name);
+    const kept = list.entries.filter((_entry, index) => {
+      const field = fields[index];
+      return matchesUndefined(field) || !field.optional || present.has(field.name);
     });
-    out = out.slice(0, list.start) + kept.join(", ") + out.slice(list.end);
+    output.text = output.text.slice(SQL_START, list.start) + kept.join(", ") + output.text.slice(list.end);
   });
-  return out;
+  return output.text;
 };
