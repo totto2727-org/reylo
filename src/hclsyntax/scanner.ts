@@ -7,386 +7,105 @@
 // 00057cf06d7b38a3f89e6e54d622eee98322b314. Generated action numbers are retained.
 import type { Token, Pos, Diagnostic } from './types.ts';
 import * as tables from './scanner-tables.ts';
+import { checkInvalidTokens } from './scanner-diagnostics.ts';
 import * as stringTables from './string-literal-tables.ts';
 import { RagelState, runRagel } from './scanner-ragel.ts';
-import { graphemeClusters } from './scanner-grapheme.ts';
-import { matchesWhitespace } from './whitespace.ts';
+import { scannerActions } from './scanner-actions.ts';
+import { tokenCollector } from './scanner-position.ts';
 // oxlint-disable-next-line import/no-relative-parent-imports -- Reuse the package's native guards without loading Effect.
-import { matchesString, matchesUndefined } from "../native-predicates.ts";
+import { isEmptyArray, matchesString } from "../native-predicates.ts";
 
+export { checkInvalidTokens } from './scanner-diagnostics.ts';
 export { graphemeClusters } from './scanner-grapheme.ts';
 
-const selfTokens: Record<number, string> = {
-  123: 'TokenOBrace', 125: 'TokenCBrace', 91: 'TokenOBrack', 93: 'TokenCBrack',
-  40: 'TokenOParen', 41: 'TokenCParen', 42: 'TokenStar', 47: 'TokenSlash',
-  43: 'TokenPlus', 45: 'TokenMinus', 37: 'TokenPercent', 61: 'TokenEqual',
-  60: 'TokenLessThan', 62: 'TokenGreaterThan', 33: 'TokenBang', 46: 'TokenDot',
-  44: 'TokenComma', 63: 'TokenQuestion', 58: 'TokenColon', 10: 'TokenNewline',
-  38: 'TokenBitwiseAnd', 124: 'TokenBitwiseOr', 126: 'TokenBitwiseNot',
-  94: 'TokenBitwiseXor', 39: 'TokenApostrophe', 96: 'TokenBacktick', 59: 'TokenSemicolon',
+type ScanMode = "normal" | "template" | "ident";
+
+const MODE_START: Record<ScanMode, number> = {
+  ident: tables.en_identOnly,
+  normal: tables.en_main,
+  template: tables.en_bareTemplate,
 };
 
 const utf8Bom = new TextEncoder().encode("\uFEFF");
 const noBom = 0;
-const lineFeed = 10;
-const carriageReturn = 13;
-const lfLength = 1;
-const crlfLength = 2;
-
-const equalBytes = function equalBytes(leftBytes: Uint8Array, rightBytes: Uint8Array): boolean {
-  return leftBytes.length === rightBytes.length && leftBytes.every((v, index) => v === rightBytes[index]);
-};
 const sourceStart = 0;
 const firstLine = 1;
 const firstColumn = 1;
-const positionStep = 1;
-const braceStep = 1;
 const identifierTokenCount = 2;
-const maxAscii = 0x7F;
-const maxTwoByte = 0x7_FF;
-const maxThreeByte = 0xFF_FF;
-const oneByte = 1;
-const twoBytes = 2;
-const threeBytes = 3;
-const fourBytes = 4;
-const heredocDecoder = new TextDecoder(undefined, { ignoreBOM: true });
+const firstToken = 0;
+const secondToken = 1;
 
-const utf8Width = (character: string): number => {
-  const codePoint = character.codePointAt(sourceStart) ?? sourceStart;
-  if (codePoint <= maxAscii) {return oneByte;}
-  if (codePoint <= maxTwoByte) {return twoBytes;}
-  if (codePoint <= maxThreeByte) {return threeBytes;}
-  return fourBytes;
+const runScanner = (data: Uint8Array, mode: ScanMode, emit: (type: string, from: number, to: number) => void): void => {
+  const state = new RagelState(MODE_START[mode]);
+  const { run, stack } = scannerActions(state, data, emit);
+  runRagel(data, tables, state, run);
+  if (state.cs < tables.first_final) {
+    emit(mode === "template" && isEmptyArray(stack) ? "TokenStringLit" : "TokenInvalid", state.ts, data.length);
+  }
+  emit("TokenEOF", data.length, data.length);
 };
 
-// The heredoc candidate is already UTF-8 tokenized. Trim its original bytes using the decoded widths.
-const trimSpace = (data: Uint8Array): Uint8Array => {
-  const bounds = { leading: sourceStart, seenContent: false, trailing: sourceStart };
-  Iterator.from(heredocDecoder.decode(data)).forEach((character) => {
-    if (!matchesWhitespace(character)) {
-      bounds.seenContent = true;
-      bounds.trailing = sourceStart;
-      return;
-    }
-    const width = utf8Width(character);
-    if (bounds.seenContent) {bounds.trailing += width;}
-    else {bounds.leading += width;}
-  });
-  return data.subarray(bounds.leading, data.length - bounds.trailing);
-};
-
-// Token accumulation deliberately segments each token separately, as token.go does.
-// Whitespace between tokens is ASCII, so the skipped byte count is a column count.
-const scanTokens = function (input: Uint8Array, filename: string, start: Pos, mode: 'normal' | 'template' | 'ident'): Token[] {
+// Accumulate grapheme columns per token, as the upstream token scanner does.
+const scanTokens = (input: Uint8Array, source: { filename: string; start: Pos }, mode: ScanMode): Token[] => {
+  const { filename, start } = source;
   const bom = utf8Bom.every((byte, index) => input[index] === byte) ? utf8Bom.length : noBom;
   const data = input.subarray(bom);
   const startByte = start.byte + bom;
-  let pos = { ...start, byte: startByte };
-  const tokens: Token[] = [];
-  const emit = (type: string, from: number, to: number): void => {
-    const begin: Pos = { ...pos, column: pos.column + from + startByte - pos.byte, byte: from + startByte };
-    const end: Pos = { ...begin, byte: to + startByte };
-    const bytes = data.subarray(from, to);
-    Iterator.from(graphemeClusters(bytes)).forEach((cluster) => {
-      if ((cluster.length === lfLength && cluster[0] === lineFeed) || (cluster.length === crlfLength && cluster[0] === carriageReturn && cluster[1] === lineFeed)) {
-        end.line += positionStep;
-        end.column = firstColumn;
-      } else {end.column += positionStep;}
-    });
-    pos = end;
-    tokens.push({ type, bytes, range: { filename, start: begin, end } });
-  };
-  const s = new RagelState(mode === 'normal' ? tables.en_main : (mode === 'template' ? tables.en_bareTemplate : tables.en_identOnly));
-  const stack: number[] = [];
-  const retBraces: number[] = [];
-  const heredocs: { marker: Uint8Array; startOfLine: boolean }[] = [];
-  let braces = 0;
-  const token = (type: string): void => emit(type, s.ts, s.te);
-  const selfToken = (): void => {
-    if (s.te - s.ts !== oneByte) {throw new Error('selfToken only works for single-character tokens');}
-    const type = selfTokens[data[s.ts]!];
-    if (!type) {throw new Error('Unrecognized scanner self token');}
-    token(type);
-  };
-  const call = (cs: number): boolean => { stack.push(s.cs); s.cs = cs; return true; };
-  const ret = (): boolean => {
-    const cs = stack.pop();
-    if (matchesUndefined(cs)) {throw new Error('HCL scanner return stack underflow');}
-    s.cs = cs;
-    return true;
-  };
-  const end = (kind: 'next' | 'hold' | 'rewind'): void => {
-    if (kind === 'next') {s.te = s.p + oneByte;}
-    else if (kind === 'hold') { s.te = s.p; s.p -= oneByte; }
-    else {s.p = s.te - oneByte;}
-  };
-  const lit = (type: string, kind: 'next' | 'hold' | 'rewind'): void => { end(kind); token(type); };
-  const interp = (type: string, kind: 'next' | 'hold'): boolean => {
-    lit(type, kind);
-    braces += braceStep;
-    retBraces.push(braces);
-    if (heredocs.length) {heredocs.at(-1)!.startOfLine = false;}
-    return call(tables.en_main);
-  };
-  const midline = (kind: 'hold' | 'rewind'): void => {
-    end(kind);
-    heredocs.at(-1)!.startOfLine = false;
-    token('TokenStringLit');
-  };
-  runRagel(data, tables, s, id => {
-    /* oxlint-disable eslint/no-magic-numbers -- These numeric actions and cursor offsets mirror the upstream Ragel tables. */
-    switch (id) {
-      case 0: { s.p -= oneByte; break; }
-      case 1: { s.ts = 0; break; }
-      case 2: { s.act = 0; break; }
-      case 3: { s.ts = s.p; break; }
-      case 4: { s.te = s.p + 1; break; }
-      case 5: { s.act = 4; break; }
-      case 6: { s.act = 6; break; }
-      case 7: case 23: case 35: { return interp('TokenTemplateInterp', 'next'); }
-      case 8: case 24: case 36: { return interp('TokenTemplateControl', 'next'); }
-      case 9: { lit('TokenCQuote', 'next'); return ret(); }
-      case 10: { lit('TokenQuotedLit', 'next'); break; }
-      case 11: case 26: case 38: case 47: case 73: { lit('TokenBadUTF8', 'next'); break; }
-      case 12: case 27: case 39: { return interp('TokenTemplateInterp', 'hold'); }
-      case 13: case 28: case 40: { return interp('TokenTemplateControl', 'hold'); }
-      case 14: { lit('TokenQuotedLit', 'hold'); break; }
-      case 15: { lit('TokenQuotedNewline', 'hold'); break; }
-      case 16: case 81: { lit('TokenInvalid', 'hold'); break; }
-      case 17: case 30: case 42: case 50: case 80: { lit('TokenBadUTF8', 'hold'); break; }
-      case 18: { lit('TokenQuotedLit', 'rewind'); break; }
-      case 19: case 52: case 85: { lit('TokenBadUTF8', 'rewind'); break; }
-      case 20: {
-        if (s.act === 4) {lit('TokenQuotedLit', 'rewind');}
-        else if (s.act === 6) {lit('TokenInvalid', 'rewind');}
-        break;
-      }
-      case 21: { s.act = 11; break; }
-      case 22: { s.act = 12; break; }
-      case 25: {
-        s.te = s.p + 1;
-        const doc = heredocs.at(-1)!;
-        if (doc.startOfLine && equalBytes(trimSpace(data.subarray(s.ts, s.te)), doc.marker)) {
-          let nls = s.te - 1;
-          const nle = s.te;
-          s.te -= oneByte;
-          if (data[s.te - oneByte] === carriageReturn) { nls -= oneByte; s.te -= oneByte; }
-          token('TokenCHeredoc');
-          s.ts = nls;
-          s.te = nle;
-          token('TokenNewline');
-          heredocs.pop();
-          return ret();
-        }
-        doc.startOfLine = true;
-        token('TokenStringLit');
-        break;
-      }
-      case 29: { midline('hold'); break; }
-      case 31: { midline('rewind'); break; }
-      case 32: {
-        if (s.act === 0) { s.cs = 0; return true; }
-        if (s.act === 11) {midline('rewind');}
-        else if (s.act === 12) {lit('TokenBadUTF8', 'rewind');}
-        break;
-      }
-      case 33: { s.act = 15; break; }
-      case 34: { s.act = 16; break; }
-      case 37: { lit('TokenStringLit', 'next'); break; }
-      case 41: { lit('TokenStringLit', 'hold'); break; }
-      case 43: { lit('TokenStringLit', 'rewind'); break; }
-      case 44: {
-        if (s.act === 0) { s.cs = 0; return true; }
-        if (s.act === 15) {lit('TokenStringLit', 'rewind');}
-        else if (s.act === 16) {lit('TokenBadUTF8', 'rewind');}
-        break;
-      }
-      case 45: { s.act = 17; break; }
-      case 46: { s.act = 18; break; }
-      case 48: case 74: { lit('TokenInvalid', 'next'); break; }
-      case 49: case 77: { lit('TokenIdent', 'hold'); break; }
-      case 51: case 83: { lit('TokenIdent', 'rewind'); break; }
-      case 53: {
-        if (s.act === 17) {lit('TokenIdent', 'rewind');}
-        else if (s.act === 18) {lit('TokenBadUTF8', 'rewind');}
-        break;
-      }
-      case 54: { s.act = 22; break; }
-      case 55: { s.act = 40; break; }
-      case 56: { lit('TokenComment', 'next'); break; }
-      case 57: { lit('TokenNewline', 'next'); break; }
-      case 58: { lit('TokenEqualOp', 'next'); break; }
-      case 59: { lit('TokenNotEqual', 'next'); break; }
-      case 60: { lit('TokenGreaterThanEq', 'next'); break; }
-      case 61: { lit('TokenLessThanEq', 'next'); break; }
-      case 62: { lit('TokenAnd', 'next'); break; }
-      case 63: { lit('TokenOr', 'next'); break; }
-      case 64: { lit('TokenDoubleColon', 'next'); break; }
-      case 65: { lit('TokenEllipsis', 'next'); break; }
-      case 66: { lit('TokenFatArrow', 'next'); break; }
-      case 67: { end('next'); selfToken(); break; }
-      case 68: { lit('TokenOBrace', 'next'); braces += braceStep; break; }
-      case 69: case 70: {
-        s.te = s.p + 1;
-        if (retBraces.length && retBraces.at(-1) === braces) {
-          token('TokenTemplateSeqEnd');
-          braces -= braceStep;
-          retBraces.pop();
-          return ret();
-        }
-        token(id === 69 ? 'TokenCBrace' : 'TokenTemplateSeqEnd');
-        braces -= braceStep;
-        break;
-      }
-      case 71: {
-        lit('TokenOQuote', 'next');
-        return call(tables.en_stringTemplate);
-      }
-      case 72: {
-        lit('TokenOHeredoc', 'next');
-        let marker = data.subarray(s.ts + 2, s.te - 1);
-        if (marker[0] === 45) {marker = marker.subarray(1);}
-        if (marker.at(-1) === 13) {marker = marker.subarray(0, - 1);}
-        heredocs.push({ marker, startOfLine: true });
-        return call(tables.en_heredocTemplate);
-      }
-      case 75: { end('hold'); break; }
-      case 76: { lit('TokenNumberLit', 'hold'); break; }
-      case 78: { lit('TokenComment', 'hold'); break; }
-      case 79: { end('hold'); selfToken(); break; }
-      case 82: { lit('TokenNumberLit', 'rewind'); break; }
-      case 84: { end('rewind'); selfToken(); break; }
-      case 86: {
-        if (s.act === 22) {lit('TokenIdent', 'rewind');}
-        else if (s.act === 40) {lit('TokenBadUTF8', 'rewind');}
-        break;
-      }
-      default: { throw new Error(`Unknown HCL scanner action ${id}`); }
-    }
-    /* oxlint-enable eslint/no-magic-numbers */
-  });
-  if (s.cs < tables.first_final) {emit(mode === 'template' && stack.length === 0 ? 'TokenStringLit' : 'TokenInvalid', s.ts, data.length);}
-  emit('TokenEOF', data.length, data.length);
+  const { emit, tokens } = tokenCollector(data, { filename, start, startByte });
+  runScanner(data, mode, emit);
   return tokens;
 };
 
+// oxlint-disable-next-line eslint/sort-keys -- Match the original public default source position order.
 const beginningOfFile = { line: firstLine, column: firstColumn, byte: sourceStart };
 
 export const lexConfig = function lexConfig(input: Uint8Array, filename: string, start: Pos = beginningOfFile): { tokens: Token[]; diagnostics: Diagnostic[] } {
-  const tokens = scanTokens(input, filename, start, 'normal');
+  const tokens = scanTokens(input, { filename, start }, 'normal');
+  // oxlint-disable-next-line eslint/sort-keys -- Preserve the public lexer result order.
   return { tokens, diagnostics: checkInvalidTokens(tokens) };
 };
-export const lexExpression = lexConfig;
+// oxlint-disable-next-line rules/no-local-export-list -- Both public HCL lexer names refer to the same function.
+export { lexConfig as lexExpression };
 export const lexTemplate = function lexTemplate(input: Uint8Array, filename: string, start: Pos = beginningOfFile): { tokens: Token[]; diagnostics: Diagnostic[] } {
-  const tokens = scanTokens(input, filename, start, 'template');
+  const tokens = scanTokens(input, { filename, start }, 'template');
+  // oxlint-disable-next-line eslint/sort-keys -- Preserve the public lexer result order.
   return { tokens, diagnostics: checkInvalidTokens(tokens) };
 };
+const beginningOfIdentifier = { byte: sourceStart, column: sourceStart, line: sourceStart };
+const identifierSource = { filename: "", start: beginningOfIdentifier };
+
 export const validIdentifier = function validIdentifier(value: string | Uint8Array): boolean {
-  const tokens = scanTokens(matchesString(value) ? new TextEncoder().encode(value) : value, '', { line: 0, column: 0, byte: 0 }, 'ident');
-  return tokens.length === identifierTokenCount && tokens[0]?.type === 'TokenIdent' && tokens[1]?.type === 'TokenEOF';
+  const tokens = scanTokens(matchesString(value) ? new TextEncoder().encode(value) : value, identifierSource, "ident");
+  return tokens.length === identifierTokenCount && tokens[firstToken]?.type === "TokenIdent" && tokens[secondToken]?.type === "TokenEOF";
 };
 
-// Exact escape/literal segmentation from scan_string_lit.go, not string decoding.
+// The action operands are shared with the generated string-literal transition tables.
+const BEGIN_SPAN_ACTION = 0;
+const FINISH_SPAN_ACTION = 1;
+
+// Exact escape/literal segmentation from scan_string_lit.go.
 export const scanStringLit = function scanStringLit(data: Uint8Array, quoted: boolean): Uint8Array[] {
-  const s = new RagelState(quoted ? stringTables.en_quoted : stringTables.en_unquoted);
-  const ret: Uint8Array[] = [];
-  runRagel(data, stringTables, s, id => {
-    /* oxlint-disable eslint/no-magic-numbers -- These numeric actions and cursor offsets mirror the upstream Ragel tables. */
+  const state = new RagelState(quoted ? stringTables.en_quoted : stringTables.en_unquoted);
+  const spans: Uint8Array[] = [];
+  runRagel(data, stringTables, state, (id) => {
     switch (id) {
-      case 0: {
-        if (s.te < s.p) {ret.push(data.subarray(s.te, s.p));}
-        s.ts = s.p;
+      case BEGIN_SPAN_ACTION: {
+        if (state.te < state.p) {spans.push(data.subarray(state.te, state.p));}
+        state.ts = state.p;
         break;
       }
-      case 1: {
-        s.te = s.p;
-        ret.push(data.subarray(s.ts, s.te));
+      case FINISH_SPAN_ACTION: {
+        state.te = state.p;
+        spans.push(data.subarray(state.ts, state.te));
         break;
       }
-      default: { throw new Error(`Unknown string literal scanner action ${id}`); }
+      default: {
+        // oxlint-disable-next-line rules/require-tagged-error -- Preserve the native error if generated string-literal actions are out of sync.
+        throw new Error(`Unknown string literal scanner action ${id}`);
+      }
     }
-    /* oxlint-enable eslint/no-magic-numbers */
   });
-  if (s.te < s.p) {ret.push(data.subarray(s.te, s.p));}
-  if (s.cs < stringTables.first_final) {ret.push(data.subarray(s.p));}
-  return ret;
+  if (state.te < state.p) {spans.push(data.subarray(state.te, state.p));}
+  if (state.cs < stringTables.first_final) {spans.push(data.subarray(state.p));}
+  return spans;
 };
-
-export function checkInvalidTokens(tokens: Token[]): Diagnostic[] {
-  const diagnostics: Diagnostic[] = [];
-  const bitwiseReportLimit = 4;
-  const reportStep = 1;
-  const pairedQuotePeriod = 2;
-  const firstQuoteInPair = 0;
-  const lastTrackedQuote = 2;
-  const reported = {
-    apostrophe: 0,
-    backtick: 0,
-    badUtf8: false,
-    bitwise: 0,
-    exponent: false,
-    semicolon: false,
-    tabs: false,
-  };
-  for (const tok of tokens) {
-    const add = (summary: string, detail: string): number => diagnostics.push({ severity: 'error', summary, detail, subject: { ...tok.range, start: { ...tok.range.start }, end: { ...tok.range.end } } });
-    switch (tok.type) {
-      case 'TokenBitwiseAnd': case 'TokenBitwiseOr': case 'TokenBitwiseXor': case 'TokenBitwiseNot': {
-        if (reported.bitwise < bitwiseReportLimit) {
-          const suggestion = tok.type === 'TokenBitwiseAnd' ? ' Did you mean boolean AND ("&&")?' : tok.type === 'TokenBitwiseOr' ? ' Did you mean boolean OR ("||")?' : tok.type === 'TokenBitwiseNot' ? ' Did you mean boolean NOT ("!")?' : '';
-          add('Unsupported operator', `Bitwise operators are not supported.${suggestion}`);
-          reported.bitwise += reportStep;
-        }
-        break;
-      }
-      case 'TokenStarStar': {
-        if (!reported.exponent) {
-          add('Unsupported operator', '"**" is not a supported operator. Exponentiation is not supported as an operator.');
-          reported.exponent = true;
-        }
-        break;
-      }
-      case 'TokenBacktick': {
-        if (reported.backtick % pairedQuotePeriod === firstQuoteInPair) {add('Invalid character', 'The "`" character is not valid. To create a multi-line string, use the "heredoc" syntax, like "<<EOT".');}
-        if (reported.backtick <= lastTrackedQuote) {reported.backtick += reportStep;}
-        break;
-      }
-      case 'TokenApostrophe': {
-        if (reported.apostrophe % pairedQuotePeriod === firstQuoteInPair) {add('Invalid character', 'Single quotes are not valid. Use double quotes (") to enclose strings.');}
-        if (reported.apostrophe <= lastTrackedQuote) {reported.apostrophe += reportStep;}
-        break;
-      }
-      case 'TokenSemicolon': {
-        if (!reported.semicolon) {
-          add('Invalid character', 'The ";" character is not valid. Use newlines to separate arguments and blocks, and commas to separate items in collection values.');
-          reported.semicolon = true;
-        }
-        break;
-      }
-      case 'TokenTabs': {
-        if (!reported.tabs) {
-          add('Invalid character', 'Tab characters may not be used. The recommended indentation style is two spaces per indent.');
-          reported.tabs = true;
-        }
-        break;
-      }
-      case 'TokenBadUTF8': {
-        if (!reported.badUtf8) {
-          add('Invalid character encoding', 'All input files must be UTF-8 encoded. Ensure that UTF-8 encoding is selected in your editor.');
-          reported.badUtf8 = true;
-        }
-        break;
-      }
-      case 'TokenQuotedNewline': {
-        add('Invalid multi-line string', String.raw`Quoted strings may not be split over multiple lines. To produce a multi-line string, either use the \n escape to represent a newline character or use the "heredoc" multi-line template syntax.`);
-        break;
-      }
-      case 'TokenInvalid': {
-        const chars = new TextDecoder('utf-8', { ignoreBOM: true }).decode(tok.bytes);
-        add('Invalid character', chars === '“' || chars === '”' ? '"Curly quotes" are not valid here. These can sometimes be inadvertently introduced when sharing code via documents or discussion forums. It might help to replace the character with a "straight quote".' : 'This character is not used within the language.');
-        break;
-      }
-    }
-  }
-  return diagnostics;
-}
