@@ -8,12 +8,14 @@
 // The AST is data-only. cty evaluation is outside this port's boundary.
 import { lexConfig, lexExpression, lexTemplate } from './scanner.ts';
 import { Peeker } from './peeker.ts';
+import { TemplateParser } from './parser-template.ts';
+import { dynamic, error, literal } from './parser-values.ts';
 import { flushHeredocTemplateParts, meldConsecutiveStringLiterals } from './parser-template-tokens.ts';
 import type { TemplateParts, TemplateToken } from './parser-template-tokens.ts';
 import { parseStringLiteralToken } from './string-literal.ts';
 import { trimLeadingWhitespace as trimLeft, trimTrailingWhitespace as trimRight } from './whitespace.ts';
 import { rangeBetween as between, emptyRangeAt, rangeString, isStringLiteral } from './types.ts';
-import type { Attribute, Block, Body, Diagnostic, Expression, ForExpression, Literal, ObjectKey, Pos, Range, Token, TraversalStep } from './types.ts';
+import type { Attribute, Block, Body, Diagnostic, Expression, Literal, ObjectKey, Pos, Range, Token, TraversalStep } from './types.ts';
 // oxlint-disable-next-line import/no-relative-parent-imports -- Reuse the package's native guards without loading Effect.
 import { matchesNumber, matchesString } from "../native-predicates.ts";
 
@@ -24,9 +26,6 @@ const decoder = new TextDecoder();
 const encoder = new TextEncoder();
 const text = (token: Token): string => decoder.decode(token.bytes);
 const keyword = (token: Token, word: string): boolean => token.type === 'TokenIdent' && text(token) === word;
-const error = (summary: string, detail: string, subject: Range, context?: Range): Diagnostic => ({ severity: 'error', summary, detail, subject, ...(context ? { context } : {}) });
-const dynamic = (range: Range, diagnostics?: Diagnostic[]): Expression => ({ kind: 'dynamic', range, ...(diagnostics ? { diagnostics } : {}) });
-const literal = (value: Literal['value'], range: Range): Literal => ({ kind: 'literal', value: matchesString(value) ? value.normalize('NFC') : value, range });
 const pairs: Record<string, string> = { TokenOBrace: 'TokenCBrace', TokenOBrack: 'TokenCBrack', TokenOParen: 'TokenCParen', TokenOQuote: 'TokenCQuote', TokenOHeredoc: 'TokenCHeredoc', TokenCBrace: 'TokenOBrace', TokenCBrack: 'TokenOBrack', TokenCParen: 'TokenOParen', TokenCQuote: 'TokenOQuote', TokenCHeredoc: 'TokenOHeredoc', TokenTemplateInterp: 'TokenTemplateSeqEnd', TokenTemplateControl: 'TokenTemplateSeqEnd', TokenTemplateSeqEnd: 'TokenTemplateInterp' };
 const opposite = (type: string): string => pairs[type] ?? 'TokenNil';
 const binaryOps: Record<string, string>[] = [
@@ -755,83 +754,3 @@ export class Parser extends Peeker {
 // Unicode White_Space as used by Go unicode.IsSpace. JavaScript's \s differs
 // For FEFF and NEL, so do not use String.trim() here.
 const cloneRange = (range: Range): Range => ({ filename: range.filename, start: { ...range.start }, end: { ...range.end } });
-
-class TemplateParser {
-  private pos = 0;
-  private readonly tokens: TemplateToken[];
-  private readonly diagnostics: Diagnostic[];
-  public constructor(tokens: TemplateToken[], diagnostics: Diagnostic[]) { this.tokens = tokens; this.diagnostics = diagnostics }
-  private peek(): TemplateToken { return this.tokens[this.pos]! }
-  private read(): TemplateToken { const token = this.peek(); if (token.kind !== 'end') {this.pos++;} return token }
-  public parseRoot(): Expression[] {
-    const expressions: Expression[] = [];
-    while (this.peek().kind !== 'end') {expressions.push(this.parseExpr());}
-    return expressions;
-  }
-  private parseExpr(): Expression {
-    const token = this.peek();
-    switch (token.kind) {
-      case 'literal': { this.read(); return literal(token.value, token.range); }
-      case 'interpolation': { this.read(); return token.expression; }
-      case 'if': { return this.parseIf(); }
-      case 'for': { return this.parseFor(); }
-      case 'end': {
-        this.read(); this.diagnostics.push(error('Unexpected end of template', 'The control directives within this template are unbalanced.', token.range)); return dynamic(token.range);
-      }
-      default: {
-        this.read(); this.diagnostics.push(error(`Unexpected ${token.kind} directive`, 'The control directives within this template are unbalanced.', token.range)); return dynamic(token.range);
-      }
-    }
-  }
-  private parseIf(): Expression {
-    const open = this.read();
-    if (open.kind !== 'if') {throw new Error('parseIf called with peeker not pointing at if token');}
-    const ifExpressions: Expression[] = []; const elseExpressions: Expression[] = [];
-    let current = ifExpressions; let endRange: Range;
-    for (;;) {
-      const next = this.peek();
-      if (next.kind === 'end') {
-        this.diagnostics.push(error('Unexpected end of template', `The if directive at ${rangeString(open.range)} is missing its corresponding endif directive.`, next.range)); return dynamic(next.range);
-      }
-      if (next.kind === 'else' || next.kind === 'endif' || next.kind === 'endfor') {
-        this.read();
-        if (next.kind === 'else') {
-          if (current === ifExpressions) { current = elseExpressions; continue }
-          this.diagnostics.push(error('Unexpected else directive', `Already in the else clause for the if started at ${rangeString(open.range)}.`, next.range));
-        } else if (next.kind === 'endif') { endRange = next.range; break }
-        else {this.diagnostics.push(error(`Unexpected ${next.kind} directive`, `Expecting an endif directive for the if started at ${rangeString(open.range)}.`, next.range));}
-        return dynamic(next.range);
-      }
-      current.push(this.parseExpr());
-    }
-    if (!ifExpressions.length) {ifExpressions.push(literal('', emptyRangeAt(open.range)));}
-    if (!elseExpressions.length) {elseExpressions.push(literal('', emptyRangeAt(endRange, 'start')));}
-    const trueResult: Expression = { kind: 'template', parts: ifExpressions, range: between(ifExpressions[0]!.range, ifExpressions.at(-1)!.range) };
-    const falseResult: Expression = { kind: 'template', parts: elseExpressions, range: between(elseExpressions[0]!.range, elseExpressions.at(-1)!.range) };
-    return { kind: 'conditional', condition: open.condition, trueResult, falseResult, range: between(open.range, endRange) };
-  }
-  private parseFor(): Expression {
-    const open = this.read();
-    if (open.kind !== 'for') {throw new Error('parseFor called with peeker not pointing at for token');}
-    const expressions: Expression[] = [];
-    let endRange: Range;
-    for (;;) {
-      const next = this.peek();
-      if (next.kind === 'end') {
-        this.diagnostics.push(error('Unexpected end of template', `The for directive at ${rangeString(open.range)} is missing its corresponding endfor directive.`, next.range)); return dynamic(next.range);
-      }
-      if (next.kind === 'else' || next.kind === 'endif' || next.kind === 'endfor') {
-        this.read();
-        if (next.kind === 'else') {this.diagnostics.push(error('Unexpected else directive', 'An else clause is not expected for a for directive.', next.range));}
-        else if (next.kind === 'endfor') { endRange = next.range; break }
-        else {this.diagnostics.push(error(`Unexpected ${next.kind} directive`, `Expecting an endfor directive corresponding to the for directive at ${rangeString(open.range)}.`, next.range));}
-        return dynamic(next.range);
-      }
-      expressions.push(this.parseExpr());
-    }
-    if (!expressions.length) {expressions.push(literal('', emptyRangeAt(open.range)));}
-    const value: Expression = { kind: 'template', parts: expressions, range: between(expressions[0]!.range, expressions.at(-1)!.range) };
-    const tuple: ForExpression = { kind: 'for', keyVar: open.keyVar, valueVar: open.valueVar, collection: open.collection, key: null, value, condition: null, group: false, range: between(open.range, endRange), openRange: open.range, closeRange: endRange };
-    return { kind: 'templateJoin', tuple, range: tuple.range };
-  }
-}
