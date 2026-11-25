@@ -11,21 +11,23 @@
 // `reylo generate`, once, and by the error a project with no connection gets; never by an error of
 // Its own, since TypeScript makes every content mapper diagnostic one. With no URL, this fork
 // Defaults to SQLite for cached analysis.
-// oxlint-disable-next-line rules/no-node-imports -- This server-side entry point uses this built-in to inspect or write files through the host filesystem.
-import { existsSync, readFileSync } from "node:fs";
 // oxlint-disable-next-line rules/no-node-imports -- This server-side entry point uses this built-in to resolve paths using the host platform's filesystem conventions.
-import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import nodePath from "node:path";
 import { MissingEngine } from './engine.ts';
 import type { Engine } from './engine.ts';
 import { matchesUndefined } from "./native-predicates.ts";
 
 import { commandOutput } from "./project-command.ts";
+import { findProjectFile, hasProjectPath, hostEnvironment, packageDir, PROJECT_FILE, PROJECT_FILES, readEnvFile, readProjectText } from "./project-files.ts";
 import { inUserinfo, urlParts } from "./project-url-template.ts";
 import { dialectOf, hclPath } from "./project-address.ts";
 import type { Dialect } from "./project-address.ts";
 
 export { dialectOf, duckdbPath, hclPath, sqlitePath } from "./project-address.ts";
 export type { Dialect } from "./project-address.ts";
+export { findProjectFile, packageDir, PROJECT_FILE, PROJECT_FILES, readEnvFile, sourceName } from "./project-files.ts";
+
+const { dirname, isAbsolute, join, relative, resolve, sep } = nodePath;
 
 /** What the engine reads out of `.reylo.yaml`: the keys the library looks at. */
 export type ProjectFile = {
@@ -75,51 +77,10 @@ export type ResolvedProject = {
   missingUrl: string;
 };
 
-export const PROJECT_FILE = ".reylo.yaml";
-/** The names the project file may take; the first is the one messages name. */
-export const PROJECT_FILES = [PROJECT_FILE, ".reylo.yml"] as const;
 const DEFAULT_ENV_FILES = [".env.local", ".env"];
 const FIRST_FILE_BYTE = 0;
 const FIRST_COLUMN = 1;
 const FINAL_LINE = -1;
-
-/** The package directory: the nearest one at or above `from` that holds a `package.json`, else `from`. */
-export const packageDir = function packageDir(from: string): string {
-  for (let dir = resolve(from); ; dir = dirname(dir)) {
-    if (existsSync(join(dir, "package.json"))) {return dir;}
-    if (dirname(dir) === dir) {return resolve(from);}
-  }
-};
-
-/**
- * A `.sql` file's path from the root of its own project (the project file's directory, else its
- * package's), written with `/`: the query's `source`, and the file its sqlcommenter comment names.
- */
-export const sourceName = function sourceName(path: string, env: Record<string, string | undefined> = process.env): string {
-  const dir = dirname(path);
-  const file = findProjectFile(dir, env);
-  return relative(file ? dirname(file) : packageDir(dir), path).split(sep).join("/");
-};
-
-/** The project file for a project directory: `REYLO_CONFIG`, or `.reylo.yaml` (else `.reylo.yml`) beside the package's `package.json`. */
-export function findProjectFile(from: string, env: Record<string, string | undefined> = process.env): string | undefined {
-  if (env.REYLO_CONFIG) {return resolve(env.REYLO_CONFIG);}
-  const dir = packageDir(from);
-  return PROJECT_FILES.map((name) => join(dir, name)).find((path) => existsSync(path));
-}
-
-export const readEnvFile = function readEnvFile(path: string): Record<string, string> {
-  if (!existsSync(path)) {return {};}
-  const out: Record<string, string> = {};
-  Iterator.from(readFileSync(path, "utf8").split("\n")).forEach((line) => {
-    const assignment = /^\s*(?:export\s+)?(?<name>[A-Za-z_][A-Za-z0-9_]*)\s*=\s*(?<value>.*?)\s*$/u.exec(line)?.groups;
-    const name = assignment?.name;
-    if (!matchesUndefined(name)) {
-      out[name] = (assignment?.value ?? "").replace(/^(?<quote>["'])(?<text>.*)\k<quote>$/u, "$<text>");
-    }
-  });
-  return out;
-};
 
 /** 1-based line and column of a byte offset, for a message that names the place in the file. */
 const place = function (text: string, offset: number): string {
@@ -139,7 +100,7 @@ const TYPES_KEY = /^types[ \t]*:/mu;
  * The project `projectDir` belongs to. `engine` reads the project file: any database's engine does
  * (src/engine.ts, `anyEngine`), and where none is installed a project file is the project's error.
  */
-export const resolveProject = function resolveProject(engine: Engine | MissingEngine, projectDir: string, env: Record<string, string | undefined> = process.env): ResolvedProject {
+export const resolveProject = function resolveProject(engine: Engine | MissingEngine, projectDir: string, env: Record<string, string | undefined> = hostEnvironment()): ResolvedProject {
   const file = findProjectFile(projectDir, env);
   const root = file ? dirname(file) : packageDir(projectDir);
   const shown = (path: string): string => (isAbsolute(path) ? relative(projectDir, path).split(sep).join("/") || path : path);
@@ -148,7 +109,7 @@ export const resolveProject = function resolveProject(engine: Engine | MissingEn
   if (file) {
     let text: string | undefined;
     try {
-      text = readFileSync(file, "utf8");
+      text = readProjectText(file);
     } catch (error_) {
       error = `Cannot read ${shown(file)}: ${(error_ as Error).message}`;
     }
@@ -167,7 +128,7 @@ export const resolveProject = function resolveProject(engine: Engine | MissingEn
   }
   // Both names beside one package.json: whichever were read, edits to the other would do nothing.
   const both = PROJECT_FILES.map((name) => join(root, name));
-  if (!env.REYLO_CONFIG && both.every((path) => existsSync(path))) {error = `${both.map(shown).join(" and ")} are both project files; keep one.`;}
+  if (!env.REYLO_CONFIG && both.every((path) => hasProjectPath(path))) {error = `${both.map(shown).join(" and ")} are both project files; keep one.`;}
   const envFiles = (config.env ?? DEFAULT_ENV_FILES).map((f) => resolve(root, f));
   // The process environment wins; among the files, the first that sets a variable does.
   const lookup = (name: string): { value: string; source: string } | undefined => {
@@ -219,7 +180,7 @@ export const resolveProject = function resolveProject(engine: Engine | MissingEn
       } else if (parts.some((part) => "command" in part)) {
         const shellEnv: Record<string, string> = {};
         Iterator.from([...envFiles].reverse()).forEach((path) => {Object.assign(shellEnv, readEnvFile(path));});
-        Object.entries({ ...process.env, ...env }).forEach(([name, value]) => {if (!matchesUndefined(value)) {shellEnv[name] = value;}});
+        Object.entries({ ...hostEnvironment(), ...env }).forEach(([name, value]) => {if (!matchesUndefined(value)) {shellEnv[name] = value;}});
         const encoded = inUserinfo(parts);
         const build = (fresh: boolean): { url: string } | { error: string } => {
           let built = "";

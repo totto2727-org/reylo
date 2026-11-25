@@ -69,8 +69,7 @@ export const serverKey = (project: ResolvedProject): string => digestPrefix(cach
 export const statementKey = (fingerprint: string, dialect: ResolvedProject["dialect"], sql: string): string =>
   digestPrefix(JSON.stringify([CACHE_ENTRY_VERSION, fingerprint, dialect, sql]), STATEMENT_DIGEST_LENGTH);
 
-// oxlint-disable-next-line node/no-process-env -- The public Session factories default to the current host environment when the caller supplies none.
-export const hostEnvironment = (): NodeJS.ProcessEnv => process.env;
+export { hostEnvironment } from "./project-files.ts";
 
 /**
  * The project a directory belongs to, its file read by the engine's core, and the engine of its own
