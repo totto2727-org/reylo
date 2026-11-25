@@ -16,9 +16,9 @@ import type { TemplateParts, TemplateToken } from './parser-template-tokens.ts';
 import { parseStringLiteralToken } from './string-literal.ts';
 import { trimLeadingWhitespace as trimLeft, trimTrailingWhitespace as trimRight } from './whitespace.ts';
 import { rangeBetween as between, emptyRangeAt, rangeString, isStringLiteral } from './types.ts';
-import type { Attribute, Block, Body, Diagnostic, Expression, Literal, ObjectKey, Pos, Range, Token, TraversalStep } from './types.ts';
+import type { Attribute, Block, Body, Diagnostic, Expression, ObjectKey, Pos, Range, Token, TraversalStep } from './types.ts';
 // oxlint-disable-next-line import/no-relative-parent-imports -- Reuse the package's native guards without loading Effect.
-import { matchesNumber, matchesString } from "../native-predicates.ts";
+import { isEmptyString, matchesNumber, matchesString, matchesUndefined } from "../native-predicates.ts";
 
 export * from './types.ts';
 export { parseStringLiteralToken } from './string-literal.ts';
@@ -30,6 +30,19 @@ const keyword = (token: Token, word: string): boolean => token.type === 'TokenId
 // oxlint-disable-next-line eslint/sort-keys -- Keep the bracket pairs grouped by opening and closing grammar tokens.
 const pairs: Record<string, string> = { TokenOBrace: 'TokenCBrace', TokenOBrack: 'TokenCBrack', TokenOParen: 'TokenCParen', TokenOQuote: 'TokenCQuote', TokenOHeredoc: 'TokenCHeredoc', TokenCBrace: 'TokenOBrace', TokenCBrack: 'TokenOBrack', TokenCParen: 'TokenOParen', TokenCQuote: 'TokenOQuote', TokenCHeredoc: 'TokenOHeredoc', TokenTemplateInterp: 'TokenTemplateSeqEnd', TokenTemplateControl: 'TokenTemplateSeqEnd', TokenTemplateSeqEnd: 'TokenTemplateInterp' };
 const opposite = (type: string): string => pairs[type] ?? 'TokenNil';
+const FIRST_PRECEDENCE = 0;
+const PRECEDENCE_STEP = 1;
+const HEREDOC_INDENT_MARKER_POSITION = 2;
+const DASH_BYTE = 45;
+const FIRST_EXPRESSION = 0;
+// oxlint-disable-next-line unicorn/no-null -- HCL's null keyword and absent optional AST clauses use a native null value.
+const HCL_NULL = null;
+
+interface ParsedExpression {
+  expression: Expression;
+  failed: boolean;
+}
+
 const binaryOps: Record<string, string>[] = [
   { TokenOr: '||' }, { TokenAnd: '&&' }, { TokenEqualOp: '==', TokenNotEqual: '!=' },
   { TokenGreaterThan: '>', TokenGreaterThanEq: '>=', TokenLessThan: '<', TokenLessThanEq: '<=' },
@@ -326,94 +339,163 @@ export class Parser extends Peeker {
     return blockAst(ident, header, { body: body ?? emptyBody(between(open.range, closeRange), closeRange), closeRange, openRange: open.range });
   }
 
-  public parseExpression(): Expression { return this.parseTernaryConditional() }
-  private parseTernaryConditional(): Expression {
-    const start = this.nextRange(); const before = this.diagnostics.length;
-    const condition = this.parseBinaryOps(0);
-    if (this.failedSince(before) || this.peek().type !== 'TokenQuestion') {return condition;}
-    this.read();
-    const trueBefore = this.diagnostics.length;
-    const trueResult = this.parseExpression();
-    if (this.failedSince(trueBefore)) {return condition;}
-    const colon = this.peek();
-    if (colon.type !== 'TokenColon') {
-      this.diag('Missing false expression in conditional', 'The conditional operator (...?...:...) requires a false expression, delimited by a colon.', colon.range, between(start, colon.range));
-      return condition;
-    }
-    this.read();
-    const falseBefore = this.diagnostics.length;
-    const falseResult = this.parseExpression();
-    if (this.failedSince(falseBefore)) {return condition;}
-    return { kind: 'conditional', condition, trueResult, falseResult, range: between(start, falseResult.range) };
+  public parseExpression(): Expression {
+    return this.parseTernaryConditional();
   }
-  private parseBinaryOps(level: number): Expression {
-    if (level === binaryOps.length) {return this.parseExpressionWithTraversals();}
-    const before = this.diagnostics.length;
-    let left = this.parseBinaryOps(level + 1);
-    if (this.failedSince(before)) {return left;}
-    for (;;) {
-      const operator = binaryOps[level]![this.peek().type];
-      if (!operator) {return left;}
-      this.read();
-      const rightBefore = this.diagnostics.length;
-      const right = this.parseBinaryOps(level + 1);
-      if (this.failedSince(rightBefore)) {return left;}
-      left = { kind: 'binary', operator, left, right, range: between(left.range, right.range) };
-    }
-  }
-  private parseExpressionWithTraversals(): Expression { return this.parseExpressionTraversals(this.parseExpressionTerm()) }
 
-  private numberLiteral(token: Token): Literal | Expression {
+  private expressionAttempt(parse: () => Expression): ParsedExpression {
+    const before = this.diagnostics.length;
+    const expression = parse();
+    return { expression, failed: this.failedSince(before) };
+  }
+
+  private readConditionalColon(start: Range): boolean {
+    const colon = this.peek();
+    if (colon.type === "TokenColon") {
+      this.read();
+      return true;
+    }
+    this.diag("Missing false expression in conditional", "The conditional operator (...?...:...) requires a false expression, delimited by a colon.", colon.range, between(start, colon.range));
+    return false;
+  }
+
+  private parseConditionalBranches(condition: Expression, start: Range): Expression {
+    this.read();
+    const truth = this.expressionAttempt(() => this.parseExpression());
+    if (truth.failed || !this.readConditionalColon(start)) {return condition;}
+    const falsity = this.expressionAttempt(() => this.parseExpression());
+    if (falsity.failed) {return condition;}
+    // oxlint-disable-next-line eslint/sort-keys -- Preserve the public conditional AST key order.
+    return { kind: "conditional", condition, trueResult: truth.expression, falseResult: falsity.expression, range: between(start, falsity.expression.range) };
+  }
+
+  private parseTernaryConditional(): Expression {
+    const start = this.nextRange();
+    const { expression, failed } = this.expressionAttempt(() => this.parseBinaryOps(FIRST_PRECEDENCE));
+    if (failed || this.peek().type !== "TokenQuestion") {return expression;}
+    return this.parseConditionalBranches(expression, start);
+  }
+
+  private binaryTail(left: Expression, operators: Record<string, string>, operandLevel: number): Expression {
+    const chain = { left };
+    // oxlint-disable-next-line rules/no-for-loops -- Advance left-associative operators until the grammar or recovery stops this precedence level.
+    for (;;) {
+      const operator = operators[this.peek().type];
+      if (matchesUndefined(operator) || isEmptyString(operator)) {return chain.left;}
+      this.read();
+      const right = this.expressionAttempt(() => this.parseBinaryOps(operandLevel));
+      if (right.failed) {return chain.left;}
+      // oxlint-disable-next-line eslint/sort-keys -- Preserve the public binary AST key order.
+      chain.left = { kind: "binary", operator, left: chain.left, right: right.expression, range: between(chain.left.range, right.expression.range) };
+    }
+  }
+
+  private parseBinaryOps(level: number): Expression {
+    const operators = binaryOps[level];
+    if (!operators) {return this.parseExpressionWithTraversals();}
+    const operandLevel = level + PRECEDENCE_STEP;
+    const { expression, failed } = this.expressionAttempt(() => this.parseBinaryOps(operandLevel));
+    return failed ? expression : this.binaryTail(expression, operators, operandLevel);
+  }
+
+  private parseExpressionWithTraversals(): Expression {
+    return this.parseExpressionTraversals(this.parseExpressionTerm());
+  }
+
+  private numberLiteral(token: Token): Expression {
     const numberText = text(token);
     if (!/^[0-9]+(?:\.[0-9]+)?(?:[eE][+-]?[0-9]+)?$/u.test(numberText)) {
-      this.diag('Invalid number literal', 'Failed to recognize the value of this number literal.', token.range);
+      this.diag("Invalid number literal", "Failed to recognize the value of this number literal.", token.range);
       return dynamic(token.range);
     }
-    // NumberText is the authoritative, lossless decimal representation. The
-    // Numeric convenience field is not used for semantic equality or folding.
-    return { kind: 'literal', value: Number(numberText), numberText, range: token.range };
+    // NumberText is the authoritative, lossless decimal representation.
+    // oxlint-disable-next-line eslint/sort-keys -- Preserve the public numeric literal AST key order.
+    return { kind: "literal", value: Number(numberText), numberText, range: token.range };
   }
+
+  private consumeClosingParen(start: Range): Token {
+    const close = this.peek();
+    if (close.type !== "TokenCParen") {
+      this.diag("Unbalanced parentheses", "Expected a closing parenthesis to terminate the expression.", close.range, between(start, close.range));
+      this.recovery = true;
+    }
+    return this.read();
+  }
+
+  private recoverParentheses(expression: Expression): Expression {
+    this.recover("TokenCParen");
+    this.popIncludeNewlines();
+    return expression;
+  }
+
+  private parseParentheses(start: Token): Expression {
+    const open = this.read();
+    this.pushIncludeNewlines(false);
+    const before = this.diagnostics.length;
+    const expression = this.parseExpression();
+    if (this.errorsSince(before)) {return this.recoverParentheses(expression);}
+    const close = this.consumeClosingParen(start.range);
+    this.popIncludeNewlines();
+    // oxlint-disable-next-line eslint/sort-keys -- Preserve the public parentheses AST key order.
+    return { kind: "parentheses", expression, range: between(open.range, close.range) };
+  }
+
+  private parseIdentifier(): Expression {
+    const token = this.read();
+    if (this.peek().type === "TokenOParen" || this.peek().type === "TokenDoubleColon") {
+      return this.finishParsingFunctionCall(token);
+    }
+    const name = text(token);
+    if (name === "true" || name === "false" || name === "null") {
+      return literal(name === "null" ? HCL_NULL : name === "true", token.range);
+    }
+    // oxlint-disable-next-line eslint/sort-keys -- Preserve the public root traversal step order.
+    const step: TraversalStep = { kind: "root", value: name, range: token.range };
+    // oxlint-disable-next-line eslint/sort-keys -- Preserve the public root traversal AST order.
+    return { kind: "traversal", parts: [name], steps: [step], range: token.range };
+  }
+
+  private parseTemplateTerm(): Expression {
+    const open = this.read();
+    const inner = this.parseTemplateInner(opposite(open.type), open.type === "TokenOHeredoc" && open.bytes[HEREDOC_INDENT_MARKER_POSITION] === DASH_BYTE);
+    const range = between(open.range, this.prevRange());
+    if (inner.passthru) {
+      // oxlint-disable-next-line eslint/sort-keys, typescript/no-non-null-assertion -- Passthrough templates have one expression in their established AST field order.
+      return { kind: "templateWrap", wrapped: inner.expressions[FIRST_EXPRESSION]!, range };
+    }
+    return { kind: "template", parts: inner.expressions, range };
+  }
+
+  private parseUnary(): Expression {
+    const token = this.read();
+    const operand = this.parseExpressionWithTraversals();
+    // oxlint-disable-next-line eslint/sort-keys -- Preserve the public unary AST key order.
+    return { kind: "unary", operator: token.type === "TokenMinus" ? "-" : "!", operand, range: between(token.range, operand.range), symbolRange: token.range };
+  }
+
+  private invalidTerm(start: Token): Expression {
+    if (!this.recovery) {
+      if (start.type === "TokenEOF") {
+        this.diag("Missing expression", "Expected the start of an expression, but found the end of the file.", start.range);
+      } else {
+        this.diag("Invalid expression", "Expected the start of an expression, but found an invalid expression token.", start.range);
+      }
+    }
+    this.recovery = true;
+    return dynamic(start.range);
+  }
+
   private parseExpressionTerm(): Expression {
     const start = this.peek();
     switch (start.type) {
-      case 'TokenOParen': {
-        const open = this.read(); this.pushIncludeNewlines(false);
-        const before = this.diagnostics.length;
-        const expression = this.parseExpression();
-        if (this.errorsSince(before)) { this.recover('TokenCParen'); this.popIncludeNewlines(); return expression }
-        const close = this.peek();
-        if (close.type !== 'TokenCParen') { this.diag('Unbalanced parentheses', 'Expected a closing parenthesis to terminate the expression.', close.range, between(start.range, close.range)); this.recovery = true }
-        const consumed = this.read(); this.popIncludeNewlines();
-        return { kind: 'parentheses', expression, range: between(open.range, consumed.range) };
-      }
-      case 'TokenNumberLit': { return this.numberLiteral(this.read()); }
-      case 'TokenIdent': {
-        const token = this.read();
-        if (this.peek().type === 'TokenOParen' || this.peek().type === 'TokenDoubleColon') {return this.finishParsingFunctionCall(token);}
-        const name = text(token);
-        if (name === 'true' || name === 'false' || name === 'null') {return literal(name === 'null' ? null : name === 'true', token.range);}
-        return { kind: 'traversal', parts: [name], steps: [{ kind: 'root', value: name, range: token.range }], range: token.range };
-      }
-      case 'TokenOQuote': case 'TokenOHeredoc': {
-        const open = this.read();
-        const inner = this.parseTemplateInner(opposite(open.type), open.type === 'TokenOHeredoc' && open.bytes[2] === 45);
-        const range = between(open.range, this.prevRange());
-        return inner.passthru ? { kind: 'templateWrap', wrapped: inner.expressions[0]!, range } : { kind: 'template', parts: inner.expressions, range };
-      }
-      case 'TokenMinus': case 'TokenBang': {
-        const token = this.read(); const operand = this.parseExpressionWithTraversals();
-        return { kind: 'unary', operator: token.type === 'TokenMinus' ? '-' : '!', operand, range: between(token.range, operand.range), symbolRange: token.range };
-      }
-      case 'TokenOBrack': { return this.parseTupleCons(); }
-      case 'TokenOBrace': { return this.parseObjectCons(); }
-      default: {
-        if (!this.recovery) {
-          if (start.type === 'TokenEOF') {this.diag('Missing expression', 'Expected the start of an expression, but found the end of the file.', start.range);}
-          else {this.diag('Invalid expression', 'Expected the start of an expression, but found an invalid expression token.', start.range);}
-        }
-        this.recovery = true;
-        return dynamic(start.range);
-      }
+      case "TokenOParen": {return this.parseParentheses(start);}
+      case "TokenNumberLit": {return this.numberLiteral(this.read());}
+      case "TokenIdent": {return this.parseIdentifier();}
+      case "TokenOQuote": case "TokenOHeredoc": {return this.parseTemplateTerm();}
+      case "TokenMinus": case "TokenBang": {return this.parseUnary();}
+      case "TokenOBrack": {return this.parseTupleCons();}
+      case "TokenOBrace": {return this.parseObjectCons();}
+      default: {return this.invalidTerm(start);}
     }
   }
 
