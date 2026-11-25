@@ -28,19 +28,27 @@ export type ModuleTypes = {
  * code, narrowed to the names each code's fields may hold (upstream engine/core/src/errors.rs), a SQLite
  * unique key's columns written as SQLite's message lists them, `a, b`; the dialect's whole error
  * type otherwise.
+ * @param {Dialect} dialect - The database dialect.
+ * @param {Analysis["errors"]} errors - The codes and fields from the analysis.
+ * @returns {string} The TypeScript type for a query error.
  */
 export const queryErrorType = function queryErrorType(dialect: Dialect, errors: Analysis["errors"]): string {
   if (!errors) {return `import("@totto2727/reylo").QueryError<${JSON.stringify(dialect)}>`;}
   const name = { postgres: "PostgresQueryError", mysql: "MysqlQueryError", sqlite: "SqliteQueryError", duckdb: "DuckdbQueryError" }[dialect];
-  const names = (field: string, list: string[]): string => list.map((n) => (field === "columns" ? `readonly [${n.split(", ").map((part) => JSON.stringify(part)).join(", ")}]` : JSON.stringify(n))).join(" | ");
+  const names = (field: string, list: string[]): string => list.map((fieldValue) => (field === "columns" ? `readonly [${fieldValue.split(", ").map((part) => JSON.stringify(part)).join(", ")}]` : JSON.stringify(fieldValue))).join(" | ");
   const codes = Object.entries(errors).map(([code, fields]) => `  ${JSON.stringify(code)}: { ${Object.entries(fields).map(([field, list]) => `${field}: ${names(field, list)}`).join("; ")} };`);
   return codes.length ? `import("@totto2727/reylo").${name}<{\n${codes.join("\n")}\n}>` : `import("@totto2727/reylo").${name}<{}>`;
 };
 
-/** A parameter's TypeScript type: `unknown` when nothing in the statement types it (a CAST does), with `| null` where the statement lets the caller pass null. */
-const paramType = function (q: Analysis["params"][number], rendered: string): string {
-  if (q.type.kind === "unknown") {return "unknown";}
-  return q.nullable ? orNull(rendered) : rendered;
+/**
+ * A parameter's TypeScript type: `unknown` when nothing in the statement types it (a CAST does), with `| null` where the statement lets the caller pass null.
+ * @param {Analysis["params"][number]} parameter - The parameter from the analysis.
+ * @param {string} rendered - The base TypeScript type.
+ * @returns {string} The parameter type for the module.
+ */
+const paramType = function (parameter: Analysis["params"][number], rendered: string): string {
+  if (parameter.type.kind === "unknown") {return "unknown";}
+  return parameter.nullable ? orNull(rendered) : rendered;
 };
 
 /**
@@ -49,9 +57,11 @@ const paramType = function (q: Analysis["params"][number], rendered: string): st
  * imports a name it does not use. Strings and comments are read in one pass, from the left, so a
  * comment's delimiter inside a quoted name (`"/*"`) starts no comment, nor a quote inside a comment
  * a string.
+ * @param {...string} types - The TypeScript types in the module.
+ * @returns {string} The TypeScript import declaration.
  */
 export const reyloImport = function reyloImport(...types: string[]): string {
-  const text = types.join("\n").replaceAll(/"(?:[^"\\]|\\.)*"|\/\*[\s\S]*?\*\//g, (m) => (m.startsWith('"') ? '""' : ""));
+  const text = types.join("\n").replaceAll(/"(?:[^"\\]|\\.)*"|\/\*[\s\S]*?\*\//gu, (part) => (part.startsWith('"') ? '""' : ""));
   return `import type { ${/(?<![\w$])Json(?![\w$]|\s*\??:)/u.test(text) ? "Json, " : ""}Query } from "@totto2727/reylo";`;
 };
 
@@ -59,6 +69,9 @@ export const reyloImport = function reyloImport(...types: string[]): string {
  * A column's comment as the doc comment of the field that reads it, for an editor's hover: on one
  * line where the comment has one, else a block of lines after `indent` (src/doc-comment.ts), and
  * nothing where there is none.
+ * @param {string | undefined} comment - The column comment from the database.
+ * @param {string} [indent] - The prefix for each comment line.
+ * @returns {string} The JSDoc comment or an empty string.
  */
 export const fieldComment = function fieldComment(comment: string | undefined, indent = ""): string {
   const text = (comment ?? "").replaceAll(/\r\n?/gu, "\n").replaceAll(/[ \t]+$/gmu, "").trim();
@@ -71,6 +84,8 @@ export const fieldComment = function fieldComment(comment: string | undefined, i
  * An object type of `fields`, each a field's text and its column's comment: on one line, or a field
  * per line, each after its doc comment, where any has one. TypeScript reads a doc comment only where
  * a line starts with it.
+ * @param {Array<Readonly<[string, string | undefined]>>} fields - Pairs of field text and column comments.
+ * @returns {string} The TypeScript object type.
  */
 const objectType = function (fields: (Readonly<[text: string, comment: string | undefined]>)[]): string {
   const docs = fields.map(([, comment]) => fieldComment(comment, "  "));
@@ -80,15 +95,23 @@ const objectType = function (fields: (Readonly<[text: string, comment: string | 
 
 const utf8 = new TextEncoder();
 const fromUtf8 = new TextDecoder();
+const FIRST_UTF8_BYTE = 0;
+const SINGLE_BYTE_RANGE = 1;
+const UNTYPED_PARAMETER = 12;
+const INVALID_STATEMENT = 6;
 
 /**
  * A diagnostic's range kept inside a text of `size` UTF-8 bytes. TypeScript refuses a content
  * mapper's whole transform when a diagnostic runs past the end of the file ("returned an invalid
  * transform response"), and the module becomes `any`; a range that does is cut at the end.
+ * @param {number} start - The UTF-8 byte offset.
+ * @param {number} length - The range length in bytes.
+ * @param {number} size - The file size in bytes.
+ * @returns {{ start: number, length: number }} The range inside the file.
  */
 export const withinFile = function withinFile(start: number, length: number, size: number): { start: number; length: number } {
-  const from = Math.max(0, Math.min(start, size));
-  return { start: from, length: Math.max(0, Math.min(length, size - from)) };
+  const from = Math.max(FIRST_UTF8_BYTE, Math.min(start, size));
+  return { start: from, length: Math.max(FIRST_UTF8_BYTE, Math.min(length, size - from)) };
 };
 
 /**
@@ -96,16 +119,22 @@ export const withinFile = function withinFile(start: number, length: number, siz
  * the statement, which names the parameters (absent where the lexer refused it); `strictParams` is
  * the project file's `strict_params`, and `projectFile` the file the error about it names: the
  * project's own file, which may be `.reylo.yml` or another path REYLO_CONFIG names.
+ * @param {string} sql - The SQL file's source.
+ * @param {Analysis} analysis - The engine's result for the statement.
+ * @param {Dialect} dialect - The database dialect.
+ * @param {Pick<Lexed, "params" | "placeholders"> | undefined} lexed - The parameter names and ranges from the lexer.
+ * @param {boolean} strictParams - Whether an untyped parameter is an error.
+ * @param {string} [projectFile] - The file name in the diagnostic.
+ * @returns {ModuleTypes} The types and diagnostics for the query module.
  */
 export const moduleTypes = function moduleTypes(sql: string, analysis: Analysis, dialect: Dialect, lexed: Pick<Lexed, "params" | "placeholders"> | undefined, strictParams: boolean, projectFile = ".reylo.yaml"): ModuleTypes {
-  let names = lexed?.params ?? [];
-  let placeholders = lexed?.placeholders ?? [];
   // A MySQL session reads its strings by its sql_mode, which the analysis asked for and the
   // Lexer alone does not know: the placeholders are the ones the analysis read.
-  if (dialect === "mysql") {
-    names = analysis.params.map((parameter) => parameter.name);
-    placeholders = analysis.rewritten.spans.map(([start, end], index) => ({ name: analysis.rewritten.order[index]!, start, end }));
-  }
+  const mysql = dialect === "mysql";
+  const names = mysql ? analysis.params.map((parameter) => parameter.name) : (lexed?.params ?? []);
+  const placeholders = mysql
+    ? analysis.rewritten.spans.map(([start, end], index) => ({ name: analysis.rewritten.order[index], start, end }))
+    : (lexed?.placeholders ?? []);
   const diagnostics: FileDiagnostic[] = analysis.diagnostics.map((diagnostic) => ({ message: diagnostic.message, start: diagnostic.start, length: diagnostic.length, code: diagnostic.code }));
   // A parameter nothing in the statement types is an error at its first use, unless the project
   // File says `strict_params: false` (the default is true since 2026-10-20). A statement the engine
@@ -115,19 +144,19 @@ export const moduleTypes = function moduleTypes(sql: string, analysis: Analysis,
     const bytes = utf8.encode(sql);
     Iterator.from(analysis.params).forEach((parameter) => {
       if (parameter.type.kind !== "unknown") {return;}
-      const at = placeholders.find((h) => h.name === parameter.name);
+      const at = placeholders.find((placeholder) => placeholder.name === parameter.name);
       // The engine's offsets are UTF-8 bytes, as the diagnostics' are. A MySQL placeholder's span
       // Takes in the `::type` the engine rewrote, which is no part of its name.
       const span = at ? fromUtf8.decode(bytes.subarray(at.start, at.end)) : `:${parameter.name}`;
-      const written = span.replace(/\s*::[\s\S]*$/, "");
-      const length = at ? utf8.encode(written).length : 1;
+      const written = span.replace(/\s*::[\s\S]*$/u, "");
+      const length = at ? utf8.encode(written).length : SINGLE_BYTE_RANGE;
       const message = `Nothing in the statement gives the parameter ${written} a type; cast it, as in ${written}::text, or set strict_params: false in ${projectFile}.`;
-      diagnostics.push({ message, start: at?.start ?? 0, length, code: 12 });
+      diagnostics.push({ message, start: at?.start ?? FIRST_UTF8_BYTE, length, code: UNTYPED_PARAMETER });
     });
   }
   const {cardinality} = analysis;
-  if (analysis.diagnostics.some((diagnostic) => diagnostic.code === 6) || (dialect === "postgres" && analysis.kind === "")) {return { diagnostics, params: "unknown", row: "unknown", cardinality, names, queryError: queryErrorType(dialect, undefined) };}
-  const columns = lastOfEachName(analysis.columns).map((c) => [`${ident(c.name)}: ${c.nullable ? orNull(renderType(c.type, false, dialect)) : renderType(c.type, false, dialect)}`, c.comment] as const);
+  if (analysis.diagnostics.some((diagnostic) => diagnostic.code === INVALID_STATEMENT) || (dialect === "postgres" && analysis.kind === "")) {return { diagnostics, params: "unknown", row: "unknown", cardinality, names, queryError: queryErrorType(dialect, undefined) };}
+  const columns = lastOfEachName(analysis.columns).map((column) => [`${ident(column.name)}: ${column.nullable ? orNull(renderType(column.type, false, dialect)) : renderType(column.type, false, dialect)}`, column.comment] as const);
   // A parameter is typed from its context (a column it is compared with or written to, a CAST);
   // One no context types is `unknown`.
   const typed = analysis.params.map((parameter) => [parameter.name, paramType(parameter, declaredType(parameter.type, parameter.schema) ?? renderParamType(parameter.type, dialect)), parameter.comment] as const);
