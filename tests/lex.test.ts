@@ -7,6 +7,7 @@ import { defineQuery } from "#reylo-source/index.ts";
 import { engine as load } from '#reylo-source/engine.ts';
 import type { Dialect } from '#reylo-source/engine.ts';
 import { promiseDriverStub } from "./helpers.ts";
+import type { EmptyParameters } from "./helpers.ts";
 
 const names = (sql: string, dialect: "postgres" | "mysql" | "sqlite" = "postgres"): string[] => lexPlaceholders(sql, dialect).params;
 
@@ -81,8 +82,6 @@ test("the runtime's lexer agrees with the engine's", async () => {
 
 // Without the engine's rewritten statement (a query defined by hand) the runtime rewrites it itself.
 type EmptyRow = Record<string, never>;
-// oxlint-disable-next-line typescript/no-generated-empty-object-type -- The query deliberately has no parameter keys, so calls may omit the parameter object.
-type EmptyParameters = Record<never, never>;
 
 interface CapturedCall {
   text: string;

@@ -13,6 +13,9 @@ import { languageServerResponse, RpcFixture } from "./rpc-fixture.ts";
 
 const EMPTY = 0;
 
+// oxlint-disable-next-line typescript/no-generated-empty-object-type -- A query with no parameter keys may omit the entire parameter object.
+export type EmptyParameters = Record<never, never>;
+
 export const ROOT = path.join(import.meta.dirname, "..");
 export const DRIVERS = path.join(ROOT, "lab", "drivers", "node_modules");
 export const MAPPER = path.join(ROOT, "src", "mapper.ts");
