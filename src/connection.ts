@@ -1,64 +1,35 @@
-// The ways a describer fails before it describes anything, which the analysis tells apart from a
-// Statement's own error. The build-time half is loaded apart from the run time (src/tooling-loader.ts),
-// And a bundler may copy either, so each copy may have these classes of its own, and `instanceof`
-// Reads a mark from the global symbol registry instead of comparing classes.
+// A build can distinguish a failure to reach the server from a statement's own error.
+import { connectionField } from "./connection-unreachable.ts";
+import { matchesString } from "./native-predicates.ts";
 
-const UNREACHABLE = Symbol.for("reylo.unreachable");
-const NOT_MYSQL = Symbol.for("reylo.not-mysql");
+export { NotMysql } from "./connection-mysql.ts";
+export { reason, Unreachable } from "./connection-unreachable.ts";
 
-/**
- * The database cannot be reached, as opposed to the server answering a statement with an error.
- * It ends the analysis at once instead of becoming an answer: asking again cannot succeed, and a
- * driver that backs off between attempts (postgres.js waits up to 20 s) would hold the transform
- * for minutes.
- */
-export class Unreachable extends Error {
-  public readonly [UNREACHABLE] = true;
-  public constructor(cause: unknown) {
-    super(reason(cause), { cause });
-  }
-  public static [Symbol.hasInstance](value: unknown): boolean {
-    return (value as { [UNREACHABLE]?: unknown } | null)?.[UNREACHABLE] === true;
-  }
-}
+const MYSQL_ACCESS_DENIED = 1045;
+const LOGIN_FAILURES = ["28P01", "28000", "ER_ACCESS_DENIED_ERROR"];
+const MARIADB_VERSION = /^(?:5\.5\.5-)?(?<release>\d+(?:\.\d+)*).*mariadb/iu;
+const MARIADB_NAME = /mariadb/iu;
 
 /**
- * Whether the server refused the login itself: a wrong or expired password, as against a server
- * that cannot be reached. Postgres answers with class 28 (`28P01` for a password, `28000` for the
- * rest, IAM authentication included), MySQL with error 1045.
+ * Check whether the server rejected authentication before it described the statement.
+ * @param {unknown} failure - A driver error, optionally wrapped with a cause.
+ * @returns {boolean} Whether Postgres or MySQL reported a login failure.
  */
-export const refusedLogin = function refusedLogin(e: unknown): boolean {
-  const err = ((e as { cause?: unknown } | null)?.cause ?? e) as { code?: string; errno?: number } | null;
-  return err?.code === "28P01" || err?.code === "28000" || err?.code === "ER_ACCESS_DENIED_ERROR" || err?.errno === 1045;
+export const refusedLogin = function refusedLogin(failure: unknown): boolean {
+  const source = connectionField(failure, "cause") ?? failure;
+  return LOGIN_FAILURES.some((code) => connectionField(source, "code") === code) ||
+    connectionField(source, "errno") === MYSQL_ACCESS_DENIED;
 };
 
-/** A driver error as one line: a refused connection is an AggregateError with no message of its own. */
-export function reason(e: unknown): string {
-  const err = e as { message?: string; code?: string; errors?: { message?: string }[] } | undefined;
-  return err?.message || err?.errors?.map((error) => error.message).filter(Boolean).join("; ") || err?.code || String(e);
-}
-
 /**
- * The server the type check was pointed at is not MySQL. MariaDB answers a prepare with every
- * parameter typed NULL and a JSON column as LONGTEXT, so its statements would be typed wrongly
- * (wiki/dialects.md): the type check refuses it before any statement is analyzed.
+ * Recognize MariaDB from the response to the version query.
+ * @param {unknown} version - The raw driver value.
+ * @returns {string | undefined} MariaDB and its release when present.
  */
-export class NotMysql extends Error {
-  public readonly [NOT_MYSQL] = true;
-  public readonly server: string;
-  public constructor(server: string) {
-    super(`the server is ${server}, not MySQL`);
-    this.server = server;
-  }
-  public static [Symbol.hasInstance](value: unknown): boolean {
-    return (value as { [NOT_MYSQL]?: unknown } | null)?.[NOT_MYSQL] === true;
-  }
-}
-
-/** The server's name and version, when it is not MySQL: from version(), "11.8.2-MariaDB-ubu2404" on MariaDB. */
 export const notMysql = function notMysql(version: unknown): string | undefined {
-  const v = String(version ?? "");
-  const regexMatch = /^(?:5\.5\.5-)?(\d+(?:\.\d+)*).*mariadb/i.exec(v);
-  if (regexMatch) {return `MariaDB ${regexMatch[1]}`;}
-  return /mariadb/i.test(v) ? "MariaDB" : undefined;
+  // oxlint-disable-next-line typescript/no-base-to-string -- Preserve how the version query coerces untyped native driver values.
+  const text = String(version ?? "");
+  const release = MARIADB_VERSION.exec(text)?.groups?.release;
+  if (matchesString(release)) {return `MariaDB ${release}`;}
+  return MARIADB_NAME.test(text) ? "MariaDB" : undefined;
 };
