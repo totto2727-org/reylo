@@ -1,83 +1,211 @@
 // Copyright IBM Corp. 2014, 2025
 // SPDX-License-Identifier: MPL-2.0
 // Shape adapter only. Every expected value comes from the pinned Go oracle.
-// oxlint-disable-next-line rules/no-node-imports -- Nub's Node suite uses native assertions for driver, CLI, and protocol results.
-import assert from 'node:assert/strict';
-import type { Diagnostic, Pos, Range } from '#reylo-source/hclsyntax/types.ts';
-import { hasObjectType, matchesNull, matchesString, matchesUndefined } from "#reylo-source/native-predicates.ts";
+// oxlint-disable-next-line rules/no-node-imports -- Fail the native conformance runner when the oracle input is malformed.
+import assert from "node:assert/strict";
+import type { Diagnostic, Pos, Range, Token } from "#reylo-source/hclsyntax/types.ts";
+import { isRecord, matchesNull, matchesNumber, matchesString, matchesUndefined } from "#reylo-source/native-predicates.ts";
 
 type RecordValue = Record<string, unknown>;
-export interface Fixture {
-  api: 'parseConfig' | 'parseExpression' | 'parseTemplate' | 'lexConfig' | 'lexExpression' | 'lexTemplate' | 'scanStringLit' | 'validIdentifier';
-  name: string;
-  source: string;
-  filename: string;
-  start: { Line: number; Column: number; Byte: number };
-  result: unknown;
-  diagnostics: unknown[];
-  extra: unknown;
+
+const object = (value: unknown): RecordValue => {
+  assert.ok(isRecord(value));
+  return value;
+};
+
+const array = (value: unknown): unknown[] => {
+  assert.ok(Array.isArray(value));
+  return value;
+};
+
+const text = (value: unknown): string => {
+  assert.ok(matchesString(value));
+  return value;
+};
+
+const number = (value: unknown): number => {
+  assert.ok(matchesNumber(value));
+  return value;
+};
+
+// oxlint-disable-next-line unicorn/no-null -- The Go oracle encodes absent AST nodes and diagnostic ranges as JSON null.
+const ABSENT = null;
+const GO_ERROR = 1;
+
+export const position = (value: unknown): Pos => {
+  const { Byte, Column, Line } = object(value);
+  return { byte: number(Byte), column: number(Column), line: number(Line) };
+};
+
+const range = (value: unknown): Range => {
+  const { End, Filename, Start } = object(value);
+  return { end: position(End), filename: text(Filename), start: position(Start) };
+};
+
+const diagnostic = (value: unknown): Diagnostic => {
+  const node = object(value);
+  return {
+    context: matchesNull(node.Context) ? ABSENT : range(node.Context),
+    detail: text(node.Detail),
+    severity: node.Severity === GO_ERROR ? "error" : "warning",
+    subject: matchesNull(node.Subject) ? ABSENT : range(node.Subject),
+    summary: text(node.Summary),
+  };
+};
+
+export const diagnostics = (value: unknown): Diagnostic[] => array(value).map((entry) => diagnostic(entry));
+
+const dynamicLiteral = Symbol("upstream dynamic literal");
+const literal = (value: unknown): unknown => {
+  const node = object(value);
+  switch (node.cty) {
+    case "string": case "bool": {return node.value;}
+    case "number": {return Number(node.value);}
+    case "null": {return ABSENT;}
+    case "unknown": {return dynamicLiteral;}
+    default: {return assert.fail(`Unsupported oracle literal ${JSON.stringify(node)}`);}
+  }
+};
+
+const operators: Record<string, string> = {
+  add: "+",
+  and: "&&",
+  divide: "/",
+  equal: "==",
+  greater: ">",
+  greaterEqual: ">=",
+  less: "<",
+  lessEqual: "<=",
+  modulo: "%",
+  multiply: "*",
+  negate: "-",
+  not: "!",
+  notEqual: "!=",
+  or: "||",
+  subtract: "-",
+};
+
+const step = (entry: unknown): unknown => {
+  const node = object(entry);
+  const location = range(node.SrcRange);
+  if (node.goType === "TraverseIndex") {
+    const value = literal(node.Key);
+    return value === dynamicLiteral
+      ? { dynamic: true, kind: "index", range: location, value: ABSENT }
+      : { kind: "index", range: location, value };
+  }
+  return { kind: node.goType === "TraverseRoot" ? "root" : "attribute", range: location, value: node.Name };
+};
+
+const steps = (value: unknown): unknown[] => array(value).map((entry) => step(entry));
+
+interface OracleNode {
+  expression: (key: string) => unknown;
+  list: (key: string) => unknown[];
+  location: () => Range;
+  node: RecordValue;
+  read: (value: unknown) => unknown;
 }
-const object = function (value: unknown): RecordValue { assert.ok(!matchesNull(value) && hasObjectType(value) && !Array.isArray(value)); return value as RecordValue };
-const array = function (value: unknown): unknown[] { assert.ok(Array.isArray(value)); return value };
-export const position = function position(value: unknown): Pos { const v = object(value); return { line: v.Line as number, column: v.Column as number, byte: v.Byte as number } };
-export const range = function range(value: unknown): Range { const v = object(value); return { filename: v.Filename as string, start: position(v.Start), end: position(v.End) } };
-export const diagnostics = function diagnostics(value: unknown): Diagnostic[] {
-  return array(value).map(item => { const d = object(item); return { severity: d.Severity === 1 ? 'error' : 'warning', summary: d.Summary as string, detail: d.Detail as string, subject: matchesNull(d.Subject) ? null : range(d.Subject), context: matchesNull(d.Context) ? null : range(d.Context) } });
+
+const objectItem = (entry: unknown, read: OracleNode["read"]): unknown => {
+  const item = object(entry);
+  return { key: read(item.KeyExpr), value: read(item.ValueExpr) };
 };
-const dynamicLiteral = Symbol('upstream dynamic literal');
-const literal = function (value: unknown): unknown {
-  const v = object(value);
-  switch (v.cty) {
-    case 'string': case 'bool': { return v.value; }
-    case 'number': { return Number(v.value); }
-    case 'null': { return null; }
-    case 'unknown': { return dynamicLiteral; }
-    default: { throw new Error(`Unsupported oracle literal ${JSON.stringify(v)}`); }
-  }
+
+const readers: Record<string, (entry: OracleNode) => unknown> = {
+  AnonSymbolExpr: ({ location }) => ({ kind: "anonymous", range: location() }),
+  Attribute: ({ expression, location, node }) => ({
+    equalsRange: range(node.EqualsRange), expression: expression("Expr"), kind: "attribute",
+    name: node.Name, nameRange: range(node.NameRange), range: location(),
+  }),
+  BinaryOpExpr: ({ expression, location, node }) => ({
+    kind: "binary", left: expression("LHS"), operator: operators[text(node.Op)], range: location(), right: expression("RHS"),
+  }),
+  Block: ({ expression, location, node }) => ({
+    body: expression("Body"), closeBraceRange: range(node.CloseBraceRange), kind: "block",
+    labelRanges: array(node.LabelRanges).map((entry) => range(entry)), labels: node.Labels,
+    openBraceRange: range(node.OpenBraceRange), range: location(), type: node.Type, typeRange: range(node.TypeRange),
+  }),
+  Body: ({ list, location, node, read }) => ({
+    attributes: Object.fromEntries(Object.entries(object(node.Attributes)).map(([name, item]) => [name, read(item)])),
+    blocks: list("Blocks"), endRange: range(node.EndRange), kind: "body", range: location(),
+  }),
+  ConditionalExpr: ({ expression, location }) => ({
+    condition: expression("Condition"), falseResult: expression("FalseResult"), kind: "conditional", range: location(), trueResult: expression("TrueResult"),
+  }),
+  ExprSyntaxError: ({ location, node }) => ({ diagnostics: diagnostics(node.ParseDiags), kind: "dynamic", range: location() }),
+  ForExpr: ({ expression, location, node }) => ({
+    closeRange: range(node.CloseRange), collection: expression("CollExpr"), condition: expression("CondExpr"),
+    group: node.Group, key: expression("KeyExpr"), keyVar: node.KeyVar, kind: "for", openRange: range(node.OpenRange),
+    range: location(), value: expression("ValExpr"), valueVar: node.ValVar,
+  }),
+  FunctionCallExpr: ({ list, location, node }) => ({
+    args: list("Args"), closeParenRange: range(node.CloseParenRange), expandFinal: node.ExpandFinal,
+    kind: "call", name: node.Name, nameRange: range(node.NameRange), openParenRange: range(node.OpenParenRange), range: location(),
+  }),
+  IndexExpr: ({ expression, location, node }) => ({
+    bracketRange: range(node.BracketRange), collection: expression("Collection"), key: expression("Key"),
+    kind: "index", openRange: range(node.OpenRange), range: location(),
+  }),
+  LiteralValueExpr: ({ location, node }) => {
+    const value = literal(node.Val);
+    return value === dynamicLiteral ? { kind: "dynamic", range: location() } : { kind: "literal", range: location(), value };
+  },
+  ObjectConsExpr: ({ location, node, read }) => ({
+    items: array(node.Items).map((entry) => objectItem(entry, read)), kind: "object", openRange: range(node.OpenRange), range: location(),
+  }),
+  ObjectConsKeyExpr: ({ expression, location, node }) => ({
+    forceNonLiteral: node.ForceNonLiteral, kind: "objectKey", range: location(), wrapped: expression("Wrapped"),
+  }),
+  ParenthesesExpr: ({ expression, location }) => ({ expression: expression("Expression"), kind: "parentheses", range: location() }),
+  RelativeTraversalExpr: ({ expression, location, node }) => ({
+    kind: "relativeTraversal", range: location(), source: expression("Source"), steps: steps(node.Traversal),
+  }),
+  ScopeTraversalExpr: ({ location, node }) => ({ kind: "traversal", range: location(), steps: steps(node.Traversal) }),
+  SplatExpr: ({ expression, location, node }) => ({
+    each: expression("Each"), item: expression("Item"), kind: "splat", markerRange: range(node.MarkerRange), range: location(), source: expression("Source"),
+  }),
+  TemplateExpr: ({ list, location }) => ({ kind: "template", parts: list("Parts"), range: location() }),
+  TemplateJoinExpr: ({ expression, location }) => ({ kind: "templateJoin", range: location(), tuple: expression("Tuple") }),
+  TemplateWrapExpr: ({ expression, location }) => ({ kind: "templateWrap", range: location(), wrapped: expression("Wrapped") }),
+  TupleConsExpr: ({ list, location, node }) => ({
+    expressions: list("Exprs"), kind: "tuple", openRange: range(node.OpenRange), range: location(),
+  }),
+  UnaryOpExpr: ({ expression, location, node }) => ({
+    kind: "unary", operand: expression("Val"), operator: operators[text(node.Op)], range: location(), symbolRange: range(node.SymbolRange),
+  }),
 };
-const operators: Record<string, string> = { or: '||', and: '&&', not: '!', equal: '==', notEqual: '!=', greater: '>', greaterEqual: '>=', less: '<', lessEqual: '<=', add: '+', subtract: '-', multiply: '*', divide: '/', modulo: '%', negate: '-' };
-const steps = function (value: unknown): unknown[] {
-  return array(value).map(item => { const v = object(item); return v.goType === 'TraverseIndex' ? { kind: 'index', value: literal(v.Key) === dynamicLiteral ? null : literal(v.Key), range: range(v.SrcRange), ...(literal(v.Key) === dynamicLiteral ? { dynamic: true } : {}) } : { kind: v.goType === 'TraverseRoot' ? 'root' : 'attribute', value: v.Name, range: range(v.SrcRange) } });
+
+export const oracleAST = (value: unknown): unknown => {
+  if (matchesNull(value)) {return ABSENT;}
+  const node = object(value);
+  const kind = text(node.goType);
+  const read = Object.hasOwn(readers, kind) ? readers[kind] : undefined;
+  assert.ok(!matchesUndefined(read), `Unhandled Go AST kind ${kind}`);
+  return read({
+    expression: (key) => oracleAST(node[key]),
+    list: (key) => array(node[key]).map((entry) => oracleAST(entry)),
+    location: () => range(node.ComputedRange ?? node.SrcRange),
+    node,
+    read: oracleAST,
+  });
 };
-export const oracleAST = function oracleAST(value: unknown): unknown {
-  if (matchesNull(value)) {return null;}
-  const v = object(value);
-  const r = (): Range => range(v.ComputedRange ?? v.SrcRange);
-  const e = (key: string): unknown => oracleAST(v[key]);
-  const es = (key: string): unknown[] => array(v[key]).map(oracleAST);
-  switch (v.goType) {
-    case 'Body': { return { kind: 'body', attributes: Object.fromEntries(Object.entries(object(v.Attributes)).map(([name, item]) => [name, oracleAST(item)])), blocks: es('Blocks'), range: r(), endRange: range(v.EndRange) }; }
-    case 'Attribute': { return { kind: 'attribute', name: v.Name, expression: e('Expr'), range: r(), nameRange: range(v.NameRange), equalsRange: range(v.EqualsRange) }; }
-    case 'Block': { return { kind: 'block', type: v.Type, labels: v.Labels, body: e('Body'), range: r(), typeRange: range(v.TypeRange), labelRanges: array(v.LabelRanges).map(range), openBraceRange: range(v.OpenBraceRange), closeBraceRange: range(v.CloseBraceRange) }; }
-    case 'LiteralValueExpr': { return literal(v.Val) === dynamicLiteral ? { kind: 'dynamic', range: r() } : { kind: 'literal', value: literal(v.Val), range: r() }; }
-    case 'ExprSyntaxError': { return { kind: 'dynamic', range: r(), diagnostics: diagnostics(v.ParseDiags) }; }
-    case 'ScopeTraversalExpr': { return { kind: 'traversal', steps: steps(v.Traversal), range: r() }; }
-    case 'RelativeTraversalExpr': { return { kind: 'relativeTraversal', source: e('Source'), steps: steps(v.Traversal), range: r() }; }
-    case 'FunctionCallExpr': { return { kind: 'call', name: v.Name, args: es('Args'), expandFinal: v.ExpandFinal, nameRange: range(v.NameRange), openParenRange: range(v.OpenParenRange), closeParenRange: range(v.CloseParenRange), range: r() }; }
-    case 'TupleConsExpr': { return { kind: 'tuple', expressions: es('Exprs'), openRange: range(v.OpenRange), range: r() }; }
-    case 'ObjectConsExpr': { return { kind: 'object', items: array(v.Items).map(item => { const i = object(item); return { key: oracleAST(i.KeyExpr), value: oracleAST(i.ValueExpr) } }), openRange: range(v.OpenRange), range: r() }; }
-    case 'ObjectConsKeyExpr': { return { kind: 'objectKey', wrapped: e('Wrapped'), forceNonLiteral: v.ForceNonLiteral, range: r() }; }
-    case 'UnaryOpExpr': { return { kind: 'unary', operator: operators[v.Op as string], operand: e('Val'), symbolRange: range(v.SymbolRange), range: r() }; }
-    case 'BinaryOpExpr': { return { kind: 'binary', operator: operators[v.Op as string], left: e('LHS'), right: e('RHS'), range: r() }; }
-    case 'ConditionalExpr': { return { kind: 'conditional', condition: e('Condition'), trueResult: e('TrueResult'), falseResult: e('FalseResult'), range: r() }; }
-    case 'ForExpr': { return { kind: 'for', keyVar: v.KeyVar, valueVar: v.ValVar, collection: e('CollExpr'), key: e('KeyExpr'), value: e('ValExpr'), condition: e('CondExpr'), group: v.Group, openRange: range(v.OpenRange), closeRange: range(v.CloseRange), range: r() }; }
-    case 'SplatExpr': { return { kind: 'splat', source: e('Source'), each: e('Each'), item: e('Item'), markerRange: range(v.MarkerRange), range: r() }; }
-    case 'AnonSymbolExpr': { return { kind: 'anonymous', range: r() }; }
-    case 'IndexExpr': { return { kind: 'index', collection: e('Collection'), key: e('Key'), openRange: range(v.OpenRange), bracketRange: range(v.BracketRange), range: r() }; }
-    case 'ParenthesesExpr': { return { kind: 'parentheses', expression: e('Expression'), range: r() }; }
-    case 'TemplateExpr': { return { kind: 'template', parts: es('Parts'), range: r() }; }
-    case 'TemplateWrapExpr': { return { kind: 'templateWrap', wrapped: e('Wrapped'), range: r() }; }
-    case 'TemplateJoinExpr': { return { kind: 'templateJoin', tuple: e('Tuple'), range: r() }; }
-    default: { throw new Error(`Unhandled Go AST kind ${String(v.goType)}`); }
-  }
+
+// Keep every parser field exposed by the Go AST and remove the native convenience fields.
+export const actualAST = (value: unknown): unknown => {
+  if (Array.isArray(value)) {return value.map((entry) => actualAST(entry));}
+  if (!isRecord(value)) {return value;}
+  if (matchesString(value.severity) && matchesString(value.summary)) {return { ...value, context: value.context ?? ABSENT };}
+  const entries = Object.entries(value).filter(([key, item]) =>
+    !matchesUndefined(item) && key !== "numberText" && key !== "attributeOnly" && !(value.kind === "traversal" && key === "parts"),
+  );
+  return Object.fromEntries(entries.map(([key, item]) => [key, actualAST(item)]));
 };
-/** Remove only TS convenience fields absent from the Go AST, not parser data. */
-export const actualAST = function actualAST(value: unknown): unknown {
-  if (matchesNull(value) || !hasObjectType(value)) {return value;}
-  if (Array.isArray(value)) {return value.map(actualAST);}
-  const v = value as RecordValue;
-  if (matchesString(v.severity) && matchesString(v.summary)) {return { ...v, context: v.context ?? null };}
-  return Object.fromEntries(Object.entries(v).filter(([key, item]) => !matchesUndefined(item) && key !== 'numberText' && key !== 'attributeOnly' && !(v.kind === 'traversal' && key === 'parts')).map(([key, item]) => [key, actualAST(item)]));
-};
-export const actualDiagnostics = function actualDiagnostics(value: Readonly<Diagnostic[]>): Diagnostic[] { return value.map(diagnostic => ({ ...diagnostic, context: diagnostic.context ?? null })) };
-export const oracleTokens = function oracleTokens(value: unknown): unknown[] { return array(value).map(item => { const t = object(item); const r = t.range as { Filename: string; Start: Pos; End: Pos }; return { type: t.type, bytes: Buffer.from(t.bytes as string, 'base64'), range: { filename: r.Filename, start: position(r.Start), end: position(r.End) } } }) };
+
+export const actualDiagnostics = (value: Readonly<Diagnostic[]>): Diagnostic[] =>
+  value.map((entry) => ({ ...entry, context: entry.context ?? ABSENT }));
+
+export const oracleTokens = (value: unknown): Token[] => array(value).map((entry) => {
+  const node = object(entry);
+  return { bytes: Buffer.from(text(node.bytes), "base64"), range: range(node.range), type: text(node.type) };
+});

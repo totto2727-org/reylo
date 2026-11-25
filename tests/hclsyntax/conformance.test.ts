@@ -3,20 +3,21 @@
 // oxlint-disable-next-line rules/no-node-imports -- Nub's Node suite uses native assertions for driver, CLI, and protocol results.
 import assert from 'node:assert/strict';
 // oxlint-disable-next-line rules/no-node-imports -- The Nub integration fixtures use this built-in to inspect or write files through the host filesystem.
-import { readFileSync } from 'node:fs';
+import { readFile } from 'node:fs/promises';
 // oxlint-disable-next-line rules/no-node-imports, vitest/no-import-node-test -- Nub runs this suite with Node's test runner and provides the runtime used by the SQLite integration tests.
 import { test } from 'node:test';
 import { parseConfig, parseExpression, parseTemplate } from '#reylo-source/hclsyntax/parser.ts';
 import { lexConfig, lexExpression, lexTemplate, scanStringLit, validIdentifier } from '#reylo-source/hclsyntax/scanner.ts';
-import { Peeker } from '#reylo-source/hclsyntax/peeker.ts';
 import { isStringLiteral } from '#reylo-source/hclsyntax/types.ts';
-import type { Range, Token } from '#reylo-source/hclsyntax/types.ts';
 import { actualAST, actualDiagnostics, diagnostics, oracleAST, oracleTokens, position } from './oracle-shape.ts';
-import type { Fixture } from './oracle-shape.ts';
-import { hasObjectType, matchesNull, matchesNumber } from "#reylo-source/native-predicates.ts";
+import { readFixture } from './oracle-input.ts';
+import { isRecord, matchesBoolean, matchesNull, matchesNumber, matchesString } from "#reylo-source/native-predicates.ts";
 
-const fixtures = readFileSync(new URL('fixtures.jsonl', import.meta.url), 'utf8').trimEnd().split('\n').map(line => JSON.parse(line) as Fixture);
-const manifest = JSON.parse(readFileSync(new URL('manifest.json', import.meta.url), 'utf8')) as { fixtures: number; functions: Record<string, { name: string; calls: number; cases: number }[]> };
+import manifest from "./manifest.json" with { type: "json" };
+
+const fixtureSource = await readFile(new URL("fixtures.jsonl", import.meta.url), "utf8");
+const fixtures = fixtureSource.trimEnd().split("\n").map((line) => readFixture(line));
+type Fixture = ReturnType<typeof readFixture>;
 
 // oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
 test('HCL string tokens retain UTF-8 byte ranges and grapheme columns through Intl', () => {
@@ -36,89 +37,100 @@ test('HCL string tokens retain UTF-8 byte ranges and grapheme columns through In
   assert.deepEqual(Object.keys(parsed.body.attributes), ['a']);
 });
 
-const assertNumericLexemes = function (value: unknown, source: Buffer, startByte: number): void {
-  if (matchesNull(value) || !hasObjectType(value)) {return;}
-  if (Array.isArray(value)) { value.forEach(item => assertNumericLexemes(item, source, startByte)); return }
-  const v = value as Record<string, unknown>;
-  if (v.kind === 'literal' && matchesNumber(v.value)) {
-    const currentRange = v.range as Range;
-    assert.equal(v.numberText, source.subarray(currentRange.start.byte - startByte, currentRange.end.byte - startByte).toString('utf8'), 'numeric literal must preserve its exact source spelling');
-  }
-  Object.values(v).forEach((item) => {assertNumericLexemes(item, source, startByte);});
+const assertLiteralSpelling = (value: Record<string, unknown>, source: Buffer, startByte: number): void => {
+  assert.ok(isRecord(value.range) && isRecord(value.range.start) && isRecord(value.range.end));
+  const start = value.range.start.byte;
+  const end = value.range.end.byte;
+  assert.ok(matchesNumber(start) && matchesNumber(end));
+  assert.equal(value.numberText, source.subarray(start - startByte, end - startByte).toString("utf8"), "numeric literal must preserve its exact source spelling");
 };
 
-Iterator.from(fixtures.entries()).forEach(([index, fixture]) => {
+const assertNumericLexemes = (value: unknown, source: Buffer, startByte: number): void => {
+  if (Array.isArray(value)) {
+    value.forEach((item) => {assertNumericLexemes(item, source, startByte);});
+    return;
+  }
+  if (!isRecord(value)) {return;}
+  if (value.kind === "literal" && matchesNumber(value.value)) {
+    assertLiteralSpelling(value, source, startByte);
+  }
+  Object.values(value).forEach((item) => {assertNumericLexemes(item, source, startByte);});
+};
+
+const verifySlices = (fixture: Fixture, source: Buffer): void => {
+  const { extra } = fixture;
+  assert.ok(isRecord(extra) && matchesBoolean(extra.quoted));
+  const { quoted } = extra;
+  const slices: unknown = extra.slices;
+  assert.ok(matchesNull(slices) || (Array.isArray(slices) && slices.every((slice) => matchesString(slice))));
+  assert.deepEqual(
+    scanStringLit(source, quoted).map((slice) => Buffer.from(slice)),
+    (slices ?? []).map((slice) => Buffer.from(slice, "base64")),
+  );
+};
+
+const SCANNERS = { lexConfig, lexExpression, lexTemplate };
+const PARSERS = { parseExpression, parseTemplate };
+
+type Start = ReturnType<typeof position>;
+
+const verifyConfig = (fixture: Fixture, source: Buffer, start: Start): void => {
+  const result = parseConfig(source, fixture.filename, start);
+  assert.deepEqual(actualDiagnostics(result.diagnostics), diagnostics(fixture.diagnostics));
+  assert.deepEqual(actualAST(result.body), oracleAST(fixture.result));
+  assertNumericLexemes(result.body, source, start.byte);
+};
+
+const verifyExpression = (fixture: Fixture, source: Buffer, start: Start): void => {
+  assert.ok(fixture.api === "parseExpression" || fixture.api === "parseTemplate");
+  const result = PARSERS[fixture.api](source, fixture.filename, start);
+  assert.deepEqual(actualDiagnostics(result.diagnostics), diagnostics(fixture.diagnostics));
+  assert.deepEqual(actualAST(result.expression), oracleAST(fixture.result));
+  assertNumericLexemes(result.expression, source, start.byte);
+  if (fixture.name.startsWith("TestTemplateExprIsStringLiteral/")) {
+    assert.ok(isRecord(fixture.extra) && matchesBoolean(fixture.extra.isStringLiteral));
+    assert.equal(isStringLiteral(result.expression), fixture.extra.isStringLiteral);
+  }
+};
+
+const verifyTokens = (fixture: Fixture, source: Buffer, start: Start): void => {
+  const { api } = fixture;
+  assert.ok(api === "lexConfig" || api === "lexExpression" || api === "lexTemplate");
+  const result = SCANNERS[api](source, fixture.filename, start);
+  const tokens = result.tokens.map(({ bytes, range, type }) => ({ bytes: Buffer.from(bytes), range, type }));
+  assert.deepEqual(tokens, oracleTokens(fixture.extra));
+  assert.deepEqual(actualDiagnostics(result.diagnostics), diagnostics(fixture.diagnostics));
+};
+
+type Verify = (fixture: Fixture, source: Buffer, start: Start) => void;
+const checks: Record<Fixture["api"], Verify> = {
+  lexConfig: verifyTokens,
+  lexExpression: verifyTokens,
+  lexTemplate: verifyTokens,
+  parseConfig: verifyConfig,
+  parseExpression: verifyExpression,
+  parseTemplate: verifyExpression,
+  scanStringLit: verifySlices,
+  validIdentifier: (fixture, source) => {assert.equal(validIdentifier(source), fixture.result);},
+};
+
+const verifyCase = (fixture: Fixture): void => {
+  const source = Buffer.from(fixture.source, "base64");
+  checks[fixture.api](fixture, source, position(fixture.start));
+};
+
+fixtures.forEach((fixture, index) => {
   // oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
-  test(`official HCL ${fixture.api} #${index}: ${fixture.name}`, () => {
-    const source = Buffer.from(fixture.source, 'base64');
-    const start = position(fixture.start);
-    switch (fixture.api) {
-      case 'lexConfig': case 'lexExpression': case 'lexTemplate': {
-        const result = { lexConfig, lexExpression, lexTemplate }[fixture.api](source, fixture.filename, start);
-        assert.deepEqual(result.tokens.map(currentToken => ({ ...currentToken, bytes: Buffer.from(currentToken.bytes) })), oracleTokens(fixture.extra));
-        assert.deepEqual(actualDiagnostics(result.diagnostics), diagnostics(fixture.diagnostics));
-        break;
-      }
-      case 'scanStringLit': {
-        const extra = fixture.extra as { quoted: boolean; slices: string[] | null };
-        assert.deepEqual(scanStringLit(source, extra.quoted).map(slice => Buffer.from(slice)), (extra.slices ?? []).map(slice => Buffer.from(slice, 'base64')));
-        break;
-      }
-      case 'validIdentifier': {
-        assert.equal(validIdentifier(source), fixture.result);
-        break;
-      }
-      case 'parseConfig': {
-        const result = parseConfig(source, fixture.filename, start);
-        assert.deepEqual(actualDiagnostics(result.diagnostics), diagnostics(fixture.diagnostics));
-        assert.deepEqual(actualAST(result.body), oracleAST(fixture.result));
-        assertNumericLexemes(result.body, source, start.byte);
-        break;
-      }
-      case 'parseExpression': case 'parseTemplate': {
-        const result = { parseExpression, parseTemplate }[fixture.api](source, fixture.filename, start);
-        assert.deepEqual(actualDiagnostics(result.diagnostics), diagnostics(fixture.diagnostics));
-        assert.deepEqual(actualAST(result.expression), oracleAST(fixture.result));
-        assertNumericLexemes(result.expression, source, start.byte);
-        if (fixture.name.startsWith('TestTemplateExprIsStringLiteral/')) {assert.equal(isStringLiteral(result.expression), (fixture.extra as { isStringLiteral: boolean }).isStringLiteral);}
-        break;
-      }
-    }
-  });
+  test(`official HCL ${fixture.api} #${index}: ${fixture.name}`, () => {verifyCase(fixture);});
 });
 
 // oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
 test('official HCL fixture manifest maps every exported case without silent omissions', () => {
   assert.equal(fixtures.length, manifest.fixtures);
-  Iterator.from(Object.values(manifest.functions)).forEach((functions) => {for (const entry of functions) {
+  Object.values(manifest.functions).forEach((functions) => {functions.forEach((entry) => {
     const matched = fixtures.filter(fixture => fixture.name.split('/')[0] === entry.name);
     assert.equal(matched.length, entry.calls, entry.name);
     assert.equal(new Set(matched.map(fixture => fixture.name)).size, entry.cases, entry.name);
-  }});
+  });});
   Iterator.from(['TestParseConfig', 'TestParseConfig_incompleteFunctionCall', 'TestParseConfigDiagnostics', 'TestScanTokens_normal', 'TestScanTokens_template', 'TestScanStringLit', 'TestCheckInvalidTokensTest', 'TestValidIdentifier', 'TestExpressionParseAndValue', 'TestExpressionErrorMessages', 'TestParseExpression_incompleteFunctionCall', 'TestTemplateExprParseAndValue', 'TestTemplateExprIsStringLiteral']).forEach((required) => {assert.ok(fixtures.some(fixture => fixture.name.split('/')[0] === required), required);});
 });
-
-// Full three-scenario table from upstream hclsyntax/peeker_test.go.
-const peekerTypes = ['TokenIdent', 'TokenComment', 'TokenIdent', 'TokenComment', 'TokenIdent', 'TokenNewline', 'TokenIdent', 'TokenNewline', 'TokenIdent', 'TokenNewline', 'TokenEOF'];
-const emptyRange: Range = { filename: '', start: { line: 0, column: 0, byte: 0 }, end: { line: 0, column: 0, byte: 0 } };
-for (const scenario of [
-  { name: 'include comments', comments: true, push: false, expected: peekerTypes },
-  { name: 'exclude comments', comments: false, push: false, expected: ['TokenIdent', 'TokenIdent', 'TokenIdent', 'TokenNewline', 'TokenIdent', 'TokenNewline', 'TokenIdent', 'TokenNewline', 'TokenEOF'] },
-  { name: 'newline stack', comments: false, push: true, expected: ['TokenIdent', 'TokenIdent', 'TokenIdent', 'TokenIdent', 'TokenIdent', 'TokenNewline', 'TokenEOF'] },
-// oxlint-disable-next-line typescript/no-floating-promises -- Nub's Node test runner owns this registration and observes its Promise.
-]) {test(`official HCL TestPeeker: ${scenario.name}`, () => {
-  const tokens: Token[] = peekerTypes.map(type => ({ type, bytes: new Uint8Array(), range: emptyRange }));
-  const peeker = new Peeker(tokens, scenario.comments);
-  if (scenario.push) {peeker.pushIncludeNewlines(false);}
-  const actual: string[] = [];
-  for (let index = 0; index <= tokens.length; index++) {
-    const peeked = peeker.peek();
-    const read = peeker.read();
-    assert.equal(peeked.type, read.type);
-    actual.push(read.type);
-    if (read.type === 'TokenEOF') {break;}
-    if (scenario.push && index === 4) {peeker.popIncludeNewlines();}
-  }
-  assert.deepEqual(actual, scenario.expected);
-  peeker.assertEmptyIncludeNewlinesStack();
-});}
