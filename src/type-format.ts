@@ -1,152 +1,123 @@
-import { matchesUndefined } from "./native-predicates.ts";
+// Lay out the plain type from the module renderer for the playground and documentation cards.
+import { isEmptyArray, isEmptyString, matchesUndefined } from "./native-predicates.ts";
+import { parseType } from "./type-syntax.ts";
+import type { Member, TypeNode } from "./type-syntax.ts";
 
-// A TypeScript type as the docs' Inference cards (site/lib/remark-mapper.ts) and `reylo play` show
-// It: the one-line type a statement's module declares (src/render.ts's form: object literals,
-// Unions, arrays, string literals and names, and a column's comment as the doc comment before its
-// Field, src/module-types.ts), broken over lines where it is wider than the column.
+export { parseType } from "./type-syntax.ts";
 
-type Node =
-  | { kind: "name"; text: string }
-  | { kind: "object"; members: { key: string; type: Node; doc?: string }[] }
-  | { kind: "union"; of: Node[] }
-  | { kind: "array"; of: Node };
+const ZERO_COLUMNS = 0;
+const INDENT_STEP = 2;
+const FIELD_SEPARATOR = ": ";
+const UNION_SEPARATOR = " | ";
+const ARRAY_SUFFIX = "[]";
+const MEMBER_SUFFIX = ";";
+const OPEN_GROUP = "(";
+const CLOSE_GROUP = ")";
+const NEXT_MEMBER = 1;
 
-/** The type's text as a tree. Throws on text outside the forms src/render.ts writes. */
-export const parseType = function parseType(text: string): Node {
-  // A doc comment is one token, the field's that follows it.
-  const tokens = text.match(/\/\*\*[\s\S]*?\*\/|"(?:[^"\\]|\\.)*"|[A-Za-z_$][\w$]*(?:<[^<>]*>)?|\[\]|[{}()[\]|;:?,]/g) ?? [];
-  let at = 0;
-  const peek = (): string | undefined => tokens[at];
-  const take = (expected?: string): string => {
-    const token = tokens[at++];
-    if (matchesUndefined(token) || (!matchesUndefined(expected) && token !== expected)) {throw new Error(`type-format: expected ${expected ?? "a token"} at ${at - 1} in ${text}`);}
-    return token;
-  };
-  const union = (): Node => {
-    const of = [postfix()];
-    while (peek() === "|") {
-      take("|");
-      of.push(postfix());
-    }
-    return of.length === 1 ? of[0]! : { kind: "union", of };
-  };
-  const postfix = (): Node => {
-    let node = primary();
-    while (peek() === "[]") {
-      take("[]");
-      node = { kind: "array", of: node };
-    }
-    return node;
-  };
-  const primary = (): Node => {
-    const token = peek();
-    if (token === "(") {
-      take("(");
-      const inner = union();
-      take(")");
-      return inner;
-    }
-    if (token === "{") {return object();}
-    return { kind: "name", text: take() };
-  };
-  const object = (): Node => {
-    take("{");
-    const members: { key: string; type: Node }[] = [];
-    while (peek() !== "}") {
-      // Its text, one line per line of the comment, without the comment's own indentation.
-      const doc = peek()?.startsWith("/**") ? take().split("\n").map((line, index) => (index ? ` ${line.trim()}` : line.trim())).join("\n") : undefined;
-      let key: string;
-      if (peek() === "[") {
-        // An index signature, `[key: string]: unknown`.
-        take("[");
-        const name = take();
-        take(":");
-        const of = take();
-        take("]");
-        key = `[${name}: ${of}]`;
-      } else {key = take();}
-      if (peek() === "?") {key += take("?");}
-      take(":");
-      members.push({ key, type: union(), ...(doc ? { doc } : {}) });
-      if (peek() === ";") {take(";");}
-    }
-    take("}");
-    return { kind: "object", members };
-  };
-  const node = union();
-  if (at !== tokens.length) {throw new Error(`type-format: unread text after ${tokens.slice(0, at).join(" ")} in ${text}`);}
-  return node;
-};
-
-/** A doc comment on one line: `/** line one line two *\/`. */
 const oneLineDoc = (doc: string): string => doc.replace(/\n\s*\*\/$/u, " */").replaceAll(/(?:\n[ \t]*\*[ \t]*)+/gu, " ").replace(/^\/\*\*\s*/u, "/** ");
 
-/** Whether an object in the type has a field with a doc comment. */
-const hasDoc = (node: Node): boolean =>
-  node.kind === "object" ? node.members.some((m) => m.doc || hasDoc(m.type)) : node.kind === "union" ? node.of.some(hasDoc) : node.kind === "array" ? hasDoc(node.of) : false;
+const nonemptyDoc = (doc: string | undefined): boolean => !matchesUndefined(doc) && !isEmptyString(doc);
 
-const flat = (node: Node): string => {
-  switch (node.kind) {
-    case "name": {
-      return node.text;
-    }
-    case "object": {
-      return node.members.length ? `{ ${node.members.map((m) => `${m.doc ? `${oneLineDoc(m.doc)} ` : ""}${m.key}: ${flat(m.type)}`).join("; ")} }` : "{}";
-    }
-    case "union": {
-      return node.of.map(flat).join(" | ");
-    }
-    case "array": {
-      return node.of.kind === "union" ? `(${flat(node.of)})[]` : `${flat(node.of)}[]`;
-    }
+const hasDoc = (node: TypeNode): boolean => {
+  if (node.kind === "name") {return false;}
+  if (node.kind === "object") {return node.members.some(({ doc, type }) => nonemptyDoc(doc) || hasDoc(type));}
+  if (node.kind === "union") {return node.of.some((member) => hasDoc(member));}
+  return hasDoc(node.of);
+};
+
+const flat = (node: TypeNode): string => {
+  if (node.kind === "name") {return node.text;}
+  if (node.kind === "object") {
+    const fields = node.members.map(({ key, type, doc }) => {
+      const comment = matchesUndefined(doc) ? "" : `${oneLineDoc(doc)} `;
+      return `${comment}${key}${FIELD_SEPARATOR}${flat(type)}`;
+    });
+    return isEmptyArray(fields) ? "{}" : `{ ${fields.join("; ")} }`;
   }
+  if (node.kind === "union") {return node.of.map((member) => flat(member)).join(UNION_SEPARATOR);}
+  const item = flat(node.of);
+  return node.of.kind === "union" ? `${OPEN_GROUP}${item}${CLOSE_GROUP}${ARRAY_SUFFIX}` : `${item}${ARRAY_SUFFIX}`;
+};
+
+interface Layout { indent: number; lead: number; reserve: number; width: number }
+
+const indentedDoc = (doc: string | undefined, indent: string): string => {
+  if (matchesUndefined(doc) || isEmptyString(doc)) {return "";}
+  return `${doc.split("\n").map((line) => indent + line).join("\n")}\n`;
+};
+
+const remainingUnionColumns = (members: TypeNode[], index: number, reserve: number): number => {
+  const following = members.slice(index + NEXT_MEMBER);
+  if (isEmptyArray(following)) {return reserve;}
+  const tail = flat({ kind: "union", of: following });
+  return reserve + UNION_SEPARATOR.length + tail.length;
+};
+
+const afterPrint = (text: string, lead: number): number => {
+  const lines = text.split("\n");
+  const last = lines.at(-NEXT_MEMBER) ?? "";
+  return (text.includes("\n") ? last.length : lead + last.length) + UNION_SEPARATOR.length;
+};
+
+type Printer = (node: TypeNode, layout: Layout) => string;
+
+const multilineField = ({ doc, key, type }: Member, layout: Layout, print: Printer): string => {
+  const { indent, width } = layout;
+  const depth = indent + INDENT_STEP;
+  const inner = " ".repeat(depth);
+  const value = print(type, { indent: depth, lead: depth + key.length + FIELD_SEPARATOR.length, reserve: MEMBER_SUFFIX.length, width });
+  return `${indentedDoc(doc, inner)}${inner}${key}${FIELD_SEPARATOR}${value}${MEMBER_SUFFIX}`;
+};
+
+const multilineUnion = (members: TypeNode[], layout: Layout, print: Printer): string => {
+  const line = { length: layout.lead };
+  return members.map((member, index) => {
+    const reserve = remainingUnionColumns(members, index, layout.reserve);
+    const text = print(member, { ...layout, lead: line.length, reserve });
+    line.length = afterPrint(text, line.length);
+    return text;
+  }).join(UNION_SEPARATOR);
+};
+
+const multilineArray = (item: TypeNode, layout: Layout, print: Printer): string => {
+  const { lead, reserve } = layout;
+  if (item.kind === "union") {
+    const inner = print(item, { ...layout, lead: lead + OPEN_GROUP.length, reserve: reserve + CLOSE_GROUP.length + ARRAY_SUFFIX.length });
+    return `${OPEN_GROUP}${inner}${CLOSE_GROUP}${ARRAY_SUFFIX}`;
+  }
+  return `${print(item, { ...layout, reserve: reserve + ARRAY_SUFFIX.length })}${ARRAY_SUFFIX}`;
+};
+
+const print = (node: TypeNode, layout: Layout): string => {
+  const { indent, lead, reserve, width } = layout;
+  const one = flat(node);
+  // At finite widths, place a field's documentation on the lines above it.
+  if (lead + one.length + reserve <= width && (width === Infinity || !hasDoc(node))) {return one;}
+  if (node.kind === "name") {return one;}
+  if (node.kind === "object") {return `{\n${node.members.map((item) => multilineField(item, layout, print)).join("\n")}\n${" ".repeat(indent)}}`;}
+  return node.kind === "union" ? multilineUnion(node.of, layout, print) : multilineArray(node.of, layout, print);
 };
 
 /**
- * The type on one line where it fits `width` columns after the `lead` columns already on its line
- * and before the `reserve` columns that must follow it there, else with each object's members on
- * lines of their own, indented two spaces past `indent`, the indentation of the line it starts on.
+ * Format one generated TypeScript type at the requested display width.
+ * @param {string} text - Generated type text to format.
+ * @param {number} width - Available UTF-16 columns.
+ * @returns {string} The formatted type.
  */
-const print = function (node: Node, indent: number, lead: number, width: number, reserve = 0): string {
-  const one = flat(node);
-  // A type with a doc comment is broken over lines at any finite width, each comment on the lines before its field, as TypeScript reads one.
-  if (lead + one.length + reserve <= width && (width === Infinity || !hasDoc(node))) {return one;}
-  switch (node.kind) {
-    case "name": {
-      return one;
-    }
-    case "object": {
-      const inner = " ".repeat(indent + 2);
-      const doc = (text: string | undefined): string => (text ? `${text.split("\n").map((line) => inner + line).join("\n")}\n` : "");
-      return `{\n${node.members.map((m) => `${doc(m.doc)}${inner}${m.key}: ${print(m.type, indent + 2, indent + 2 + m.key.length + 2, width, 1)};`).join("\n")}\n${" ".repeat(indent)}}`;
-    }
-    case "union": {
-      let line = lead;
-      return node.of
-        .map((n, index) => {
-          const tail = index < node.of.length - 1 ? 3 + flat({ kind: "union", of: node.of.slice(index + 1) }).length + reserve : reserve;
-          const text = print(n, indent, line, width, tail);
-          const last = text.split("\n").at(-1)!;
-          line = (text.includes("\n") ? last.length : line + last.length) + 3;
-          return text;
-        })
-        .join(" | ");
-    }
-    case "array": {
-      return node.of.kind === "union" ? `(${print(node.of, indent, lead + 1, width, reserve + 3)})[]` : `${print(node.of, indent, lead, width, reserve + 2)}[]`;
-    }
-  }
-};
-
-/** The type's text, its objects broken over lines where it is wider than `width`. */
 export const formatType = function formatType(text: string, width: number): string {
-  return print(parseType(text), 0, 0, width);
+  return print(parseType(text), { indent: ZERO_COLUMNS, lead: ZERO_COLUMNS, reserve: ZERO_COLUMNS, width });
 };
 
-/** What `.run()` resolves to for a statement's row type and cardinality, as the module's `Query` reads them. */
+/**
+ * Render the return type for the driver's query cardinality.
+ * @param {string} row - The generated type of one row.
+ * @param {string} cardinality - The query's result cardinality.
+ * @returns {string} The return type of the query.
+ */
 export const resultType = function resultType(row: string, cardinality: string): string {
   if (cardinality === "none" || row === "never") {return "void";}
-  const wrapped = /\|/u.test(row.replaceAll(/\{[^{}]*\}/g, "")) ? `(${row})` : row;
+  const wrapped = /\|/u.test(row.replaceAll(/\{[^{}]*\}/gu, "")) ? `(${row})` : row;
   if (cardinality === "one") {return row;}
   if (cardinality === "maybeOne") {return `${row} | null`;}
   return `${wrapped}[]`;
