@@ -23,13 +23,17 @@ import { hasFunctionType, hasObjectType, matchesBigInt, matchesBoolean, matchesN
 
 export type Dialect = "postgres" | "mysql" | "sqlite" | "duckdb";
 
+// oxlint-disable-next-line typescript/method-signature-style -- Preserve native driver parameter compatibility, including narrower tuples, under strictFunctionTypes.
+type NativeDriverMethod<Args extends unknown[], Result> = { call(...args: Args): Result }["call"];
+
 /**
  * Pg's Pool, Client and PoolClient; PGlite and its transactions; Neon's Pool and Client;
  * pg-promise's database, tasks and transactions; @vercel/postgres: query(text, values) → { rows }
  * (pg-promise resolves to the rows themselves, and its types say any).
  */
+// oxlint-disable-next-line typescript/consistent-type-definitions -- Keep this exported client alias closed and assignable to structural record consumers.
 export type PgQueryClient = {
-  query(text: string, values?: DriverValue[]): PromiseLike<{ rows: unknown[] }>;
+  query: NativeDriverMethod<[text: string, values?: DriverValue[]], PromiseLike<{ rows: unknown[] }>>;
   /** Mariadb's query() resolves to any as well; its escapeId() tells it apart. */
   escapeId?: never;
 };
@@ -37,67 +41,87 @@ export type PgQueryClient = {
  * Neon's neon() function from 1.0: query(text, values) → rows. Its transaction() tells it from
  * mysql2/promise, whose query(text, values) resolves to a [rows, fields] array as well.
  */
+// oxlint-disable-next-line typescript/consistent-type-definitions -- Keep this exported client alias closed and assignable to structural record consumers.
 export type NeonHttpClient = {
-  query(text: string, values?: DriverValue[]): PromiseLike<Record<string, unknown>[]>;
-  transaction(...args: DriverValue[]): unknown;
+  query: NativeDriverMethod<[text: string, values?: DriverValue[]], PromiseLike<Record<string, unknown>[]>>;
+  transaction: NativeDriverMethod<[...args: DriverValue[]], unknown>;
 };
 /** Postgres.js `sql`, its begin and savepoint transactions and reserved connections; Bun.sql, likewise: unsafe(text, params) → rows. */
+// oxlint-disable-next-line typescript/consistent-type-definitions -- Keep this exported client alias closed and assignable to structural record consumers.
 export type UnsafeClient = {
-  unsafe(text: string, params?: DriverValue[]): PromiseLike<unknown[]>;
+  unsafe: NativeDriverMethod<[text: string, params?: DriverValue[]], PromiseLike<unknown[]>>;
 };
 /** Bun.sql on MySQL or SQLite; commitDistributed() tells it from postgres.js, which has unsafe() too. */
-export type BunSqlClient = UnsafeClient & { commitDistributed(name: string): Promise<unknown> };
+export type BunSqlClient = UnsafeClient & { commitDistributed: NativeDriverMethod<[name: string], Promise<unknown>> };
 /** Neon's neon() function before 1.0, which is called with (text, params). */
 export type CallableClient = (text: string, params?: DriverValue[]) => PromiseLike<unknown[] | { rows: unknown[] }>;
 /** Slonik's pool, connections, transactions and savepoints, whose query() takes only its sql tag's queries. */
-export type SlonikClient = { query(sql: DriverValue): PromiseLike<unknown>; maybeOneFirst(...args: DriverValue[]): unknown; anyFirst(...args: DriverValue[]): unknown };
+// oxlint-disable-next-line typescript/consistent-type-definitions -- Keep this exported client alias closed and assignable to structural record consumers.
+export type SlonikClient = {
+  query: NativeDriverMethod<[sql: DriverValue], PromiseLike<unknown>>;
+  maybeOneFirst: NativeDriverMethod<[...args: DriverValue[]], unknown>;
+  anyFirst: NativeDriverMethod<[...args: DriverValue[]], unknown>;
+};
 /**
  * Mysql2/promise Pool, Connection and PoolConnection (→ [rows, fields]); PlanetScale's Connection,
  * Client and transaction from 1.x (→ { rows }). PlanetScale 2.0 binds no parameters, so its
  * execute(query, options) is not one of these.
  */
+// oxlint-disable-next-line typescript/consistent-type-definitions -- Keep this exported client alias closed and assignable to structural record consumers.
 export type MysqlExecuteClient = {
-  execute(text: string, values?: DriverValue[]): PromiseLike<[unknown, unknown] | { rows: unknown[]; statement: string }>;
+  execute: NativeDriverMethod<[text: string, values?: DriverValue[]], PromiseLike<[unknown, unknown] | { rows: unknown[]; statement: string }>>;
 };
 /** Mysql2's callback Pool, Connection and PoolConnection, run through their promise() wrapper. */
+// oxlint-disable-next-line typescript/consistent-type-definitions -- Keep this exported client alias closed and assignable to structural record consumers.
 export type Mysql2CallbackClient = { promise: () => MysqlExecuteClient };
 /** Mariadb's Pool, Connection and PoolConnection: query(text, values) → rows, or an OK packet for a write. */
+// oxlint-disable-next-line typescript/consistent-type-definitions -- Keep this exported client alias closed and assignable to structural record consumers.
 export type MariadbClient = {
-  query(text: string, values?: DriverValue): Promise<unknown>;
-  batch(text: string, values?: DriverValue): Promise<unknown>;
+  query: NativeDriverMethod<[text: string, values?: DriverValue], Promise<unknown>>;
+  batch: NativeDriverMethod<[text: string, values?: DriverValue], Promise<unknown>>;
 };
 /** The same from mariadb's callback API (`mariadb/callback`): query(text, values, callback). */
+// oxlint-disable-next-line typescript/consistent-type-definitions -- Keep this exported client alias closed and assignable to structural record consumers.
 export type MariadbCallbackClient = {
-  query(text: string, values: DriverValue, callback: (error: Error | null, rows?: DriverValue) => void): void;
-  batch(text: string, values: DriverValue, callback: (error: Error | null, result?: DriverValue) => void): void;
+  query: NativeDriverMethod<[text: string, values: DriverValue, callback: (error: Error | null, rows?: DriverValue) => void], void>;
+  batch: NativeDriverMethod<[text: string, values: DriverValue, callback: (error: Error | null, result?: DriverValue) => void], void>;
 };
 /**
  * Better-sqlite3, node:sqlite's DatabaseSync, bun:sqlite's Database and the Database of Turso's
  * `@tursodatabase/database/compat`, which answer at once: `runSync` takes them and returns the
  * result itself, so it works inside their `db.transaction(fn)`, whose function must not await.
  */
+// oxlint-disable-next-line typescript/consistent-type-definitions -- Keep this exported client alias closed and assignable to structural record consumers.
 export type SyncSqliteClient = {
-  prepare(sql: string): { all(...params: DriverValue[]): unknown[] };
+  prepare: NativeDriverMethod<[sql: string], { all: NativeDriverMethod<[...params: DriverValue[]], unknown[]> }>;
 };
 /**
  * A SQLite-backed Durable Object's SQL storage, `ctx.storage.sql`: exec(sql, ...values) answers at
  * once with a cursor, so `runSync` takes it, inside `ctx.storage.transactionSync(fn)` too.
  */
+// oxlint-disable-next-line typescript/consistent-type-definitions -- Keep this exported client alias closed and assignable to structural record consumers.
 export type DurableObjectSql = {
-  exec(query: string, ...bindings: DriverValue[]): { toArray: () => unknown[] };
+  exec: NativeDriverMethod<[query: string, ...bindings: DriverValue[]], { toArray: () => unknown[] }>;
+  // oxlint-disable-next-line rules/no-readonly -- Cloudflare exposes this size as a read-only property on its native SQL storage interface.
   readonly databaseSize: number;
 };
 /** A Durable Object's storage, `ctx.storage`, which `drizzle-orm/durable-sqlite` keeps: `run` takes its `sql`. */
 export type DurableObjectStorage = Readonly<{ sql: DurableObjectSql }>;
 /** Cloudflare D1's database and sessions: prepare(sql).bind(...values).all() → { results }. */
+// oxlint-disable-next-line typescript/consistent-type-definitions -- Keep this exported client alias closed and assignable to structural record consumers.
 export type D1Client = {
-  prepare(sql: string): { bind(...values: DriverValue[]): { all: () => Promise<{ results: unknown[] }> } };
+  prepare: NativeDriverMethod<[sql: string], {
+    bind: NativeDriverMethod<[...values: DriverValue[]], {
+      all: () => Promise<{ results: unknown[] }>;
+    }>;
+  }>;
 };
 /** @libsql/client's Client and Transaction: execute({ sql, args }) → { rows }. */
+// oxlint-disable-next-line typescript/consistent-type-definitions -- Keep this exported client alias closed and assignable to structural record consumers.
 export type LibsqlClient = {
-  execute(statement: { sql: string; args: DriverValue[] }): Promise<{ rows: unknown[] }>;
+  execute: NativeDriverMethod<[statement: { sql: string; args: DriverValue[] }], Promise<{ rows: unknown[] }>>;
   /** Mariadb's execute() takes an object with sql and resolves to any; executeMultiple() tells libSQL apart. */
-  executeMultiple(sql: string): Promise<unknown>;
+  executeMultiple: NativeDriverMethod<[sql: string], Promise<unknown>>;
 };
 /**
  * Turso's new engine, `@tursodatabase/database`: the Database `connect()` resolves to and the
@@ -105,19 +129,22 @@ export type LibsqlClient = {
  * prepare(sql).all(...values) → rows. Its types say prepare() returns a promise of the statement
  * from 0.6, and the statement itself before; it returns the statement itself in every release.
  */
+// oxlint-disable-next-line typescript/consistent-type-definitions -- Keep this exported client alias closed and assignable to structural record consumers.
 export type TursoClient = {
-  prepare(sql: string): TursoStatement | PromiseLike<TursoStatement>;
+  prepare: NativeDriverMethod<[sql: string], TursoStatement | PromiseLike<TursoStatement>>;
   /** Postgres.js's transaction has a prepare(name) of any type too; exec() tells Turso's apart. */
-  exec(sql: string): Promise<unknown>;
+  exec: NativeDriverMethod<[sql: string], Promise<unknown>>;
 };
-interface TursoStatement { all(...params: DriverValue[]): Promise<unknown[]> }
+interface TursoStatement { all: NativeDriverMethod<[...params: DriverValue[]], Promise<unknown[]>> }
 /** The sqlite3 package's callback Database: all(sql, params, callback). */
+// oxlint-disable-next-line typescript/consistent-type-definitions -- Keep this exported client alias closed and assignable to structural record consumers.
 export type Sqlite3Client = {
-  all(sql: string, params: DriverValue[], callback: (error: Error | null, rows: DriverValue[]) => void): unknown;
+  all: NativeDriverMethod<[sql: string, params: DriverValue[], callback: (error: Error | null, rows: DriverValue[]) => void], unknown>;
 };
 /** The sqlite package's promise Database: all(sql, params) → rows. */
+// oxlint-disable-next-line typescript/consistent-type-definitions -- Keep this exported client alias closed and assignable to structural record consumers.
 export type SqlitePromiseClient = {
-  all(sql: string, params?: DriverValue): Promise<unknown[]>;
+  all: NativeDriverMethod<[sql: string, params?: DriverValue], Promise<unknown[]>>;
   getDatabaseInstance: () => unknown;
 };
 
@@ -131,11 +158,15 @@ export type DrizzleDatabase<C> = Readonly<{ $client: C }>;
  * which `run` runs on through the transaction's own connection. Each dialect's is known by what
  * only it has: `setTransaction()` on Postgres, `get()` and `all()` on SQLite, neither on MySQL.
  */
-export type DrizzlePgTransaction = { rollback: () => never; setTransaction(config: DriverValue): Promise<void> };
-export type DrizzleMysqlTransaction = { rollback: () => never; execute(query: DriverValue): unknown; setTransaction?: never; get?: never };
-export type DrizzleSqliteTransaction = { rollback: () => never; get(query: DriverValue): unknown; all(query: DriverValue): unknown };
+// oxlint-disable-next-line typescript/consistent-type-definitions -- Keep this exported client alias closed and assignable to structural record consumers.
+export type DrizzlePgTransaction = { rollback: () => never; setTransaction: NativeDriverMethod<[config: DriverValue], Promise<void>> };
+// oxlint-disable-next-line typescript/consistent-type-definitions -- Keep this exported client alias closed and assignable to structural record consumers.
+export type DrizzleMysqlTransaction = { rollback: () => never; execute: NativeDriverMethod<[query: DriverValue], unknown>; setTransaction?: never; get?: never };
+// oxlint-disable-next-line typescript/consistent-type-definitions -- Keep this exported client alias closed and assignable to structural record consumers.
+export type DrizzleSqliteTransaction = { rollback: () => never; get: NativeDriverMethod<[query: DriverValue], unknown>; all: NativeDriverMethod<[query: DriverValue], unknown> };
 /** A transaction of a synchronous SQLite driver's Drizzle database, whose `all()` returns the rows themselves. */
-export type DrizzleSyncSqliteTransaction = { rollback: () => never; get(query: DriverValue): unknown; all(query: DriverValue): unknown[] };
+// oxlint-disable-next-line typescript/consistent-type-definitions -- Keep this exported client alias closed and assignable to structural record consumers.
+export type DrizzleSyncSqliteTransaction = { rollback: () => never; get: NativeDriverMethod<[query: DriverValue], unknown>; all: NativeDriverMethod<[query: DriverValue], unknown[]> };
 /** Every Postgres client `run` takes, or a transaction, savepoint or connection taken from one. */
 export type PostgresClient = PgQueryClient | NeonHttpClient | UnsafeClient | CallableClient | SlonikClient | DrizzleDatabase<PgQueryClient | NeonHttpClient | UnsafeClient | CallableClient> | DrizzlePgTransaction;
 /** Every MySQL client `run` takes, or a transaction or connection taken from one. */
@@ -363,7 +394,7 @@ const value = function value(params: Record<string, unknown>, name: string): unk
 // Gets Postgres's hex form, `\x0102ff`, which 0.10 and later send for a Buffer themselves.
 const asBuffer = function asBuffer(binaryValue: unknown): unknown {
   // Named structurally, so that a project without Node's types can type-check the module.
-  const NodeBuffer = (globalThis as { Buffer?: { isBuffer(candidate: unknown): boolean; from(buffer: ArrayBufferLike, offset: number, length: number): Uint8Array } }).Buffer;
+  const NodeBuffer = (globalThis as { Buffer?: { isBuffer: (candidate: unknown) => boolean; from: (buffer: ArrayBufferLike, offset: number, length: number) => Uint8Array } }).Buffer;
   return binaryValue instanceof Uint8Array && !matchesUndefined(NodeBuffer) && !NodeBuffer.isBuffer(binaryValue) ? NodeBuffer.from(binaryValue.buffer, binaryValue.byteOffset, binaryValue.byteLength) : binaryValue;
 };
 
