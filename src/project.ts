@@ -21,6 +21,7 @@ import { MissingEngine } from './engine.ts';
 import type { Engine } from './engine.ts';
 import { matchesNull, matchesUndefined } from "./native-predicates.ts";
 
+import { inUserinfo, urlParts } from "./project-url-template.ts";
 import { dialectOf, hclPath } from "./project-address.ts";
 import type { Dialect } from "./project-address.ts";
 
@@ -139,71 +140,6 @@ const TYPES_KEY = /^types[ \t]*:/mu;
 const COMMAND_TIMEOUT_MS = 120_000;
 /** How long a command's failure stands before the command is run again. */
 const FAILED_COMMAND_TTL = 60_000;
-
-/** A part of `direct_url`: text as written, or a `$(command)` whose output takes its place. */
-type UrlPart = { text: string } | { command: string };
-
-/**
- * `direct_url` cut into its text and its `$(command)`s. A command ends at the `)` that balances
- * its `$(`, outside quotes, as in a shell. A `$(` left open is the offset it opens at.
- */
-const urlParts = function (written: string): UrlPart[] | { open: number } {
-  const parts: UrlPart[] = [];
-  let text = "";
-  for (let i = 0; i < written.length; ) {
-    if (written[i] !== "$" || written[i + 1] !== "(") {
-      text += written[i++];
-      continue;
-    }
-    let depth = 1;
-    let quote: string | undefined;
-    let j = i + 2;
-    for (; j < written.length && depth > 0; j++) {
-      const c = written[j];
-      if (quote) {
-        if (c === quote) {quote = undefined;}
-        else if (c === "\\" && quote === '"') {j++;}
-      } else if (c === "'" || c === '"') {quote = c;}
-      else if (c === "\\") {j++;}
-      else if (c === "(") {depth++;}
-      else if (c === ")") {depth--;}
-    }
-    if (depth > 0) {return { open: i };}
-    if (text) {parts.push({ text });}
-    text = "";
-    parts.push({ command: written.slice(i + 2, j - 1) });
-    i = j;
-  }
-  if (text) {parts.push({ text });}
-  return parts;
-};
-
-/**
- * The commands whose output lands in the URL's user or password: between `://` and the `@` that
- * ends them. Their output is percent-encoded there, as a password with `/`, `@` or `?` in it, such
- * as a cloud's database token, would otherwise end the user part early; the drivers decode it. A
- * command elsewhere, such as one that prints the whole URL, is taken as printed.
- */
-const inUserinfo = function (parts: UrlPart[]): Set<UrlPart> {
-  let skeleton = "";
-  const placed = new Map<number, UrlPart>();
-  Iterator.from(parts).forEach((part) => {
-    if ("text" in part) {skeleton += part.text;}
-    else {
-      placed.set(skeleton.length, part);
-      skeleton += "\0";
-    }
-  });
-  const inside = new Set<UrlPart>();
-  const scheme = skeleton.indexOf("://");
-  if (scheme === -1) {return inside;}
-  const start = scheme + 3;
-  const ends = ["/", "?", "#"].map((d) => skeleton.indexOf(d, start)).filter((k) => k >= 0);
-  const authorityEnd = Math.min(skeleton.length, ...ends);
-  const userinfoEnd = skeleton.lastIndexOf("@", authorityEnd - 1);
-  Iterator.from(placed).forEach(([at, part]) => {if (at >= start && at < userinfoEnd) {inside.add(part);}});
-  return inside;
-};
 
 /** What each command printed, by directory and command: run once per process, and again on a refused login or after a failure has stood a minute. */
 const commandOutputs = new Map<string, { value: string } | { error: string; at: number }>();
