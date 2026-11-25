@@ -9,7 +9,10 @@
 import type { EngineType } from "./engine-type.ts";
 import { validate, withDefaults } from "./json-schema.ts";
 import { describe, hstoreText, ParameterError, postgresInterval, postgresYear, zoned } from "./values.ts";
-import { hasObjectType, isRecord, matchesBigInt, matchesBoolean, matchesNull, matchesNumber, matchesString, matchesUndefined } from "./native-predicates.ts";
+import { hasObjectType, isRecord, matchesBoolean, matchesNull, matchesNumber, matchesString, matchesUndefined } from "./native-predicates.ts";
+
+import { bigInteger, decimal, integer, INTEGERS, MYSQL_INTEGERS, unsignedRange } from "./row-numeric.ts";
+import type { RejectParameter } from "./row-numeric.ts";
 
 export { describe, zoned } from "./values.ts";
 
@@ -22,38 +25,6 @@ export type StructuredList = Readonly<{ start: number; end: number; entries: Rea
 /** A structured parameter in insert position and the lists the run time writes again for the keys a call carries. */
 export type Structured = Readonly<{ name: string; lists: Readonly<StructuredList[]> }>;
 
-// BigInt calls, not literals: a project that type-checks these sources for a target below ES2020
-// Refuses a literal (TS2737), as lab/nextjs's ES2017 does.
-const zero = BigInt(0);
-const one = BigInt(1);
-const two = BigInt(2);
-const signBits = 1;
-const tinyIntegerBits = 8;
-const smallIntegerBits = 16;
-const mediumIntegerBits = 24;
-const integerBits = 32;
-const bigIntegerBits = 64;
-
-type IntegerRange = Readonly<[minimum: bigint, maximum: bigint]>;
-
-const signedRange = (bits: number): IntegerRange => {
-  const ceiling = two ** BigInt(bits - signBits);
-  return [-ceiling, ceiling - one];
-};
-
-const tinyInteger = signedRange(tinyIntegerBits);
-const smallInteger = signedRange(smallIntegerBits);
-const mediumInteger = signedRange(mediumIntegerBits);
-const standardInteger = signedRange(integerBits);
-const bigInteger = signedRange(bigIntegerBits);
-
-const INTEGERS: Record<string, IntegerRange> = {
-  int2: smallInteger,
-  int4: standardInteger,
-  int8: bigInteger,
-  // SQLite's INTEGER is also a signed 64-bit integer.
-  integer: bigInteger,
-};
 const WIDE = new Set(["int8", "integer"]);
 
 /** Raw JSON text for a value the writer puts in as it is. */
@@ -78,8 +49,6 @@ const write = function write(v: unknown): string {
 
 const firstRowNumber = 1;
 
-type RejectParameter = (message: string) => never;
-
 interface RowSchema {
   dialect: Dialect;
   fail: RejectParameter;
@@ -99,70 +68,8 @@ interface ColumnCheck {
   where: string;
 }
 
-/** An integer in `range`, as a number, a BigInt or, where `digits`, a string of its digits. */
-/**
- * `truth`: MySQL and SQLite, where a truth value is an integer, and a TINYINT(1), BIT(1) or BOOLEAN
- * column returns a boolean, which goes back in as 1 or 0 (the round-trip rule, src/render.ts).
- */
-function integer(range: Readonly<[bigint, bigint]>, digits: boolean, written: string, v: unknown, fail: (message: string) => never, truth = false): bigint {
-  let n: bigint;
-  if (matchesBigInt(v)) {n = v;}
-  else if (matchesBoolean(v) && truth) {n = BigInt(v ? 1 : 0);}
-  else if (matchesNumber(v) && Number.isInteger(v)) {
-    if (!Number.isSafeInteger(v)) {fail(`is ${written}; ${v} is past 2^53 - 1, where a number stops being exact, so pass it as a BigInt${digits ? " or a string of digits" : ""}.`);}
-    n = BigInt(v);
-  } else if (matchesString(v) && /^[+-]?\d+$/u.test(v.trim()) && digits) {n = BigInt(v.trim());}
-  else {return fail(`is ${written}, an integer; got ${describe(v)}.`);}
-  if (n < range[0] || n > range[1]) {fail(`is ${written}, from ${range[0]} to ${range[1]}; got ${n}.`);}
-  return n;
-}
-
-const DECIMAL_VALUE = /^[+-]?(?<whole>\d*)(?:\.(?<fraction>\d*))?(?:[eE](?<exponent>[+-]?\d+))?$/u;
-const DECIMAL_MODIFIER = /\(\s*(?<precision>\d+)\s*(?:,\s*(?<scale>-?\d+)\s*)?\)/u;
 const SINGLE_TYPE_MODIFIER = /\(\s*(?<digits>\d+)\s*\)/u;
-const DEFAULT_SCALE = 0;
-const NO_EXPONENT = 0;
-const SINGLE_DIGIT = 1;
-const FIRST_DIGIT_OFFSET = 0;
 const HEX_RADIX = 16;
-
-/**
- * A decimal, as a number or as its digits. `numeric(p,s)` keeps `s` digits after the point and
- * `p` in all: a value with more decimals would be rounded, so it is refused, and so is one with
- * more digits before the point than the column holds.
- */
-function decimal(written: string, v: unknown, fail: (message: string) => never): unknown {
-  let text: string;
-  if (matchesNumber(v)) {
-    if (!Number.isFinite(v)) {return fail(`is ${written}, a finite decimal; got ${v}.`);}
-    text = String(v);
-  } else if (matchesString(v)) {text = v.trim();}
-  else if (matchesBigInt(v)) {text = v.toString();}
-  else {return fail(`is ${written}, a decimal: a number or a string of its digits; got ${describe(v)}.`);}
-  const digits = DECIMAL_VALUE.exec(text)?.groups;
-  if (matchesUndefined(digits) || (digits.whole === "" && (digits.fraction ?? "") === "")) {return fail(`is ${written}, a decimal: a number or a string of its digits; got ${describe(v)}.`);}
-  const modifier = DECIMAL_MODIFIER.exec(written)?.groups;
-  if (!matchesUndefined(modifier)) {
-    const precision = Number(modifier.precision);
-    const scale = Number(modifier.scale ?? DEFAULT_SCALE);
-    const exponent = Number(digits.exponent ?? NO_EXPONENT);
-    let whole = (digits.whole ?? "").replace(/^0+/u, "");
-    let fraction = (digits.fraction ?? "").replace(/0+$/u, "");
-    // Shift the point by the exponent.
-    if (exponent > NO_EXPONENT) {
-      const moved = fraction.slice(FIRST_DIGIT_OFFSET, exponent).padEnd(exponent, "0");
-      whole = (whole + moved).replace(/^0+/u, "");
-      fraction = fraction.slice(exponent);
-    } else if (exponent < NO_EXPONENT) {
-      const exponentDigits = whole.padStart(-exponent, "0");
-      fraction = (exponentDigits.slice(exponentDigits.length + exponent) + fraction).replace(/0+$/u, "");
-      whole = exponentDigits.slice(FIRST_DIGIT_OFFSET, exponentDigits.length + exponent).replace(/^0+/u, "");
-    }
-    if (fraction.length > scale) {fail(`is ${written}, which keeps ${scale} digit${scale === SINGLE_DIGIT ? "" : "s"} after the point, so ${text} would be rounded.`);}
-    if (whole.length > precision - scale) {fail(`is ${written}, which holds at most ${precision - scale} digit${precision - scale === SINGLE_DIGIT ? "" : "s"} before the point; got ${text}.`);}
-  }
-  return matchesBigInt(v) ? v.toString() : v;
-}
 
 function scalar(name: string, written: string, v: unknown, dialect: Dialect, fail: (message: string) => never): unknown {
   // `a|b` is either, where the database decides by the value.
@@ -178,9 +85,9 @@ function scalar(name: string, written: string, v: unknown, dialect: Dialect, fai
   }
   const range = INTEGERS[name];
   if (range) {
-    const n = integer(range, name === "int8", written, v, fail, dialect !== "postgres");
-    if (!WIDE.has(name)) {return Number(n);}
-    return dialect === "postgres" ? n.toString() : new Raw(n.toString());
+    const checked = integer(v, { digits: name === "int8", range, truth: dialect !== "postgres", written }, fail);
+    if (!WIDE.has(name)) {return Number(checked);}
+    return dialect === "postgres" ? checked.toString() : new Raw(checked.toString());
   }
   switch (name) {
     case "float4":
@@ -385,20 +292,6 @@ export const prepareRows = function prepareRows(name: string, type: RowsType, va
   return { value: dialect === "postgres" ? shaped : write(shaped), present: keys };
 };
 
-/** MySQL's integer types as a `::` cast names them, each with its range; `unsigned` doubles it from 0. */
-const MYSQL_INTEGERS: Record<string, IntegerRange> = {
-  bigint: bigInteger,
-  int: standardInteger,
-  int2: smallInteger,
-  int4: standardInteger,
-  int8: bigInteger,
-  integer: standardInteger,
-  mediumint: mediumInteger,
-  signed: bigInteger,
-  smallint: smallInteger,
-  tinyint: tinyInteger,
-};
-
 const CLOCK = /^-?(?<hours>\d{1,3}):(?<minutes>\d{2})(?::(?<seconds>\d{2})(?:\.(?<fraction>\d+))?)?$/u;
 const WALL_DATE = /^(?<year>\d{4})-(?<month>\d{2})-(?<day>\d{2})(?:[T ](?<hours>\d{2}):(?<minutes>\d{2})(?::(?<seconds>\d{2})(?:\.(?<fraction>\d+))?)?)?$/u;
 const NO_FRACTION = 0;
@@ -463,8 +356,8 @@ export const checkCast = function checkCast(name: string, written: string, type:
   const base = written.replace(/\s*\(.*$/, "");
   const signed = dialect === "sqlite" ? (/int/i.test(base) ? INTEGERS.integer : undefined) : MYSQL_INTEGERS[base.replace(/\s*unsigned$/u, "") || "bigint"];
   if (signed) {
-    const range: Readonly<[bigint, bigint]> = dialect === "mysql" && base.endsWith("unsigned") ? [zero, signed[1] * two + one] : signed;
-    integer(range, dialect === "mysql" && range[1] >= bigInteger[1], written, v, fail, true);
+    const range = dialect === "mysql" && base.endsWith("unsigned") ? unsignedRange(signed) : signed;
+    integer(v, { digits: dialect === "mysql" && range[1] >= bigInteger[1], range, truth: true, written }, fail);
     return;
   }
   if (base === "uuid") {
