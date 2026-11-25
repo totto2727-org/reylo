@@ -1,7 +1,6 @@
-
 // The runtime query object behind `import query from "./file.sql"`.
 // Types come from the content mapper; values come from the runtime loader.
-import { compile, execute, executeSync } from './execute.ts';
+import { compile } from './execute.ts';
 import type { ClientFor, Dialect, Inputs, QueryModule, SyncClientFor } from './execute.ts';
 import type { StandardJSONSchemaV1, StandardTypedV1 } from "./standard.ts";
 import { standardQuery } from './standard-query.ts';
@@ -9,15 +8,9 @@ import type { StandardQueryV1 } from './standard-query.ts';
 import type { Structured } from "./rows.ts";
 import type { Checks } from "./checks.ts";
 import type { Fresh } from "./fresh.ts";
-import { DecodeError, ParameterError } from './values.ts';
 import type { Columns } from './values.ts';
-import { readQueryError, readQueryErrorSync } from './query-error.ts';
 import type { QueryError } from './query-error.ts';
-import { normalize } from "./decode-sqlite.ts";
-import { registerObjectDecoder } from "./query-metadata.ts";
-import { listening } from './trace.ts';
-import type { QueryTrace } from './trace.ts';
-import { hasObjectType, matchesNull, matchesString, matchesUndefined } from "./native-predicates.ts";
+import { querySource, QueryRuntime, requiredSchema, runtimeParams, tryNativeResult, tryResult } from "./query-runtime.ts";
 
 export type { ClientFor, Dialect, Inputs, MysqlClient, PostgresClient, SqliteClient, SyncClientFor } from "./execute.ts";
 export type { QueryTrace } from "./trace.ts";
@@ -28,6 +21,7 @@ export type { MysqlCode, MysqlErrorFields, MysqlNarrowing, MysqlQueryError, Post
 /** How many rows a statement returns: `none` is a data-modifying statement without RETURNING. */
 export type Cardinality = "many" | "one" | "maybeOne" | "none";
 
+// oxlint-disable-next-line typescript/no-invalid-void-type -- Preserve the public no-row result as void.
 export type Materialize<Row, C extends Cardinality> = C extends "many" ? Row[] : C extends "one" ? Row : C extends "none" ? void : Row | null;
 
 /**
@@ -70,39 +64,51 @@ export type TryResult<Value, E> = Readonly<{ value: Value; error?: undefined }> 
 /** A query: its statement, its parameters and result types (`Params`, `Row`), and the error its database may raise (`E`). */
 export interface Query<Params, Row, C extends Cardinality, D extends Dialect, E = QueryError<D>>
   extends StandardTypedV1<Params, Materialize<Row, C>>, StandardJSONSchemaV1<Params, Materialize<Row, C>>, StandardQueryV1<Params, Materialize<Row, C>, D> {
+  // oxlint-disable-next-line rules/no-readonly -- Preserve the public Query property contract.
   readonly dialect: D;
   // `sql` and `raw` carry no doc comment: each module declares them as their own text, which a
   // Hover shows. `sql` is the base text: a structured parameter (`::rows`, `::row`, src/rows.ts) in a
   // MySQL insert has its column lists written again for the keys each call carries, and the
   // Statement Reylo sends ends with the comment naming its file, which `sql` leaves out.
+  // oxlint-disable-next-line rules/no-readonly -- Preserve the public Query property contract.
   readonly sql: string;
+  // oxlint-disable-next-line rules/no-readonly -- Preserve the public Query property contract.
   readonly raw: string;
   /** Parameter names in binding order. */
+  // oxlint-disable-next-line rules/no-readonly -- Preserve the public Query property contract.
   readonly params: Readonly<string[]>;
   /**
    * The `.sql` file the query was built from, relative to the project's root: a name for logs and
    * traces. Reylo's own errors about the query start with it. A query defined by hand has none.
    */
+  // oxlint-disable-next-line rules/no-readonly -- Preserve the public Query property contract.
   readonly source: string | undefined;
+  // oxlint-disable-next-line rules/no-readonly -- Preserve the public Query property contract.
   readonly cardinality: C;
   /** The JSON Schema (2020-12) of the parameters, as the object `run` takes. */
+  // oxlint-disable-next-line rules/no-readonly -- Preserve the public Query property contract.
   readonly inputSchema: Record<string, unknown>;
   /** The JSON Schema (2020-12) of the result as JSON: what `run` returns, written as JSON, a BigInt as the integer it is. */
+  // oxlint-disable-next-line rules/no-readonly -- Preserve the public Query property contract.
   readonly outputSchema: Record<string, unknown>;
   /** Standard JSON Schema's `jsonSchema` and Standard Query's `query`: a driver that supports Standard Query runs the import with the same input and output as `.run()`. */
+  // oxlint-disable-next-line rules/no-readonly -- Preserve the public Query property contract.
   readonly "~standard": StandardJSONSchemaV1.Props<Params, Materialize<Row, C>> & StandardQueryV1.Props<Params, Materialize<Row, C>, D>;
+  // oxlint-disable-next-line rules/no-readonly -- Preserve the public Query property contract.
   readonly "~reylo": ReyloTypes<Params, Row, C>;
   /**
    * Runs the statement on the client, or on a transaction or connection taken from it. The
    * parameters are an object keyed by name (by number, `{ 1: … }`, for positional placeholders),
    * left out when the statement takes none. Always a promise, which rejects with the driver's own error.
    */
+  // oxlint-disable-next-line typescript/method-signature-style -- Preserve the published method signature and its variance.
   run(client: ClientFor<D>, ...params: ParamsArg<Params>): Promise<Materialize<Row, C>>;
   /**
    * Runs the statement on a synchronous SQLite client (better-sqlite3, node:sqlite, bun:sqlite)
    * and returns the result itself, throwing the driver's error, so it works inside their
    * `db.transaction(fn)`, whose function cannot await.
    */
+  // oxlint-disable-next-line typescript/method-signature-style -- Preserve the published method signature and its variance.
   runSync(client: SyncClientFor<D>, ...params: ParamsArg<Params>): Materialize<Row, C>;
   /**
    * Runs the statement as `run` does, and resolves to `{ value }`, or to `{ error }` where the
@@ -110,16 +116,21 @@ export interface Query<Params, Row, C extends Cardinality, D extends Dialect, E 
    * column it names. Every other error rejects, as from `run`: a refused connection, a client
    * Reylo cannot run on, a value Reylo refuses.
    */
+  // oxlint-disable-next-line typescript/method-signature-style -- Preserve the published method signature and its variance.
   try(client: ClientFor<D>, ...params: ParamsArg<Params>): Promise<TryResult<Materialize<Row, C>, E>>;
   /** `try` on a synchronous SQLite client, as `runSync`: it returns the result itself. */
+  // oxlint-disable-next-line typescript/method-signature-style -- Preserve the published method signature and its variance.
   trySync(client: SyncClientFor<D>, ...params: ParamsArg<Params>): TryResult<Materialize<Row, C>, E>;
   /** The statement bound to a client, such as a transaction: `const get = q.with(tx); await get({ id: 1 })`. */
+  // oxlint-disable-next-line typescript/method-signature-style -- Preserve the published method signature and its variance.
   with(client: ClientFor<D>): (...params: ParamsArg<Params>) => Promise<Materialize<Row, C>>;
 }
 
 /** The parameters argument, always an object: required when the statement takes any, optional when it takes none. */
+// oxlint-disable-next-line typescript/ban-types, typescript/no-empty-object-type -- Any input type that permits an empty object can omit the argument.
 export type ParamsArg<Params> = {} extends Params ? [params?: Params] : [params: Params];
 
+// oxlint-disable-next-line typescript/consistent-type-definitions -- Preserve the public definition record's structural assignability.
 export type QueryDefinition = {
   dialect: Dialect;
   /** The statement as written, Reylo's placeholders in place: the query's `raw`. */
@@ -150,159 +161,99 @@ export type QueryDefinition = {
   checks?: Checks;
 };
 
-export function defineQuery<Params, Row, C extends Cardinality, D extends Dialect>(
-  def: QueryDefinition & { dialect: D; cardinality?: C },
-): Query<Params, Row, C, D> {
-  const cardinality = (def.cardinality ?? "many") as C;
-  const missingSchema = (): never => {
-    throw new Error(`No JSON Schema is available for this query: a module a build step writes carries it, and a query defined by hand has none.`);
+const STANDARD_VERSION = 1;
+
+const runtimeModule = <D extends Dialect>(definition: QueryDefinition & { dialect: D }): QueryModule<D> => (
+  // oxlint-disable-next-line eslint/sort-keys -- Read a handwritten definition's bindings in their established order.
+  {
+    dialect: definition.dialect,
+    sql: definition.sql,
+    params: definition.params,
+    text: definition.text,
+    order: definition.order,
+    inputs: definition.inputs,
+    columns: definition.columns,
+    structured: definition.structured,
+    fresh: definition.fresh,
+    source: definition.source,
+    sqlcommenter: definition.sqlcommenter,
+    checks: definition.checks,
+  }
+);
+
+const sqlText = (module: QueryModule): (() => string) => {
+  const cache: { text?: string } = {};
+  return () => {
+    cache.text ??= compile(module).text;
+    return cache.text;
   };
-  // Reylo's own errors about the query start with its file.
-  const where = def.source ? `${def.source}: ` : "";
-  // What the run time reads, kept off the query object, whose `sql` is the compiled statement.
-  const module: QueryModule<D> = {
-    dialect: def.dialect,
-    sql: def.sql,
-    params: def.params,
-    text: def.text,
-    order: def.order,
-    inputs: def.inputs,
-    columns: def.columns,
-    structured: def.structured,
-    fresh: def.fresh,
-    source: def.source,
-    sqlcommenter: def.sqlcommenter,
-    checks: def.checks,
-  };
-  let compiled: string | undefined;
+};
+
+interface QuerySettings<Row, C extends Cardinality, D extends Dialect> {
+  cardinality: C;
+  definition: QueryDefinition & { dialect: D };
+  module: QueryModule<D>;
+  runtime: QueryRuntime<D, Row, C>;
+}
+
+const queryObject = <Params, Row, C extends Cardinality, D extends Dialect>(
+  { cardinality, definition, module, runtime }: QuerySettings<Row, C, D>,
+): Query<Params, Row, C, D> => {
+  const text = sqlText(module);
+  const dialect = (): D => definition.dialect;
+  // oxlint-disable-next-line eslint/sort-keys -- Preserve the published query object's enumerable property order.
   const query: Query<Params, Row, C, D> = {
-    dialect: def.dialect,
-    // A query defined by hand is compiled when its `sql` is first read, so a placeholder its
-    // `params` misses fails there and in `run`, not where it is defined.
-    get sql() {
-      return (compiled ??= compile(module).text);
-    },
-    raw: def.sql,
-    params: def.params,
-    source: def.source,
+    dialect: definition.dialect,
+    get sql() {return text();},
+    raw: definition.sql,
+    params: definition.params,
+    source: definition.source,
     cardinality,
-    get inputSchema() {
-      return def.jsonSchema?.input ?? missingSchema();
-    },
-    get outputSchema() {
-      return def.jsonSchema?.output ?? missingSchema();
-    },
+    get inputSchema() {return requiredSchema(definition, "input");},
+    get outputSchema() {return requiredSchema(definition, "output");},
+    // oxlint-disable-next-line eslint/sort-keys -- Preserve the Standard Schema and Standard Query descriptor's published key order.
     "~standard": {
-      version: 1,
+      version: STANDARD_VERSION,
       vendor: "reylo",
       jsonSchema: {
-        input: () => def.jsonSchema?.input ?? missingSchema(),
-        output: () => def.jsonSchema?.output ?? missingSchema(),
+        input: () => requiredSchema(definition, "input"),
+        output: () => requiredSchema(definition, "output"),
       },
-      query: standardQuery(module, (rows) => materialize(rows as Row[])),
+      query: standardQuery(module, (rows) => runtime.materialize(rows)),
     },
+    // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- This published property exists for type inference and has no runtime witness.
     "~reylo": undefined as unknown as ReyloTypes<Params, Row, C>,
-    run: ((client: ClientFor<D>, params?: Params) => run(client, params ?? ({} as Params))),
-    runSync: ((client: SyncClientFor<D>, params?: Params) => {
-      const values = (params ?? {}) as Record<string, unknown>;
-      const runOnce = () => {
-        try {
-          return materialize(executeSync(client, module, values) as Row[]);
-        } catch (error) {
-          throw named(error);
-        }
-      };
-      const tracing = listening();
-      return tracing ? tracing.traceSync(runOnce, trace(client, values, true)) : runOnce();
-    }),
-    try: ((client: ClientFor<D>, params?: Params) =>
-      run(client, params ?? ({} as Params)).then(
-        (value) => ({ value }),
-        async (error) => {
-          const read = await readQueryError(def.dialect, error);
-          if (read) {return { error: read };}
-          throw error;
-        },
-      )) as Query<Params, Row, C, D>["try"],
-    trySync: ((client: SyncClientFor<D>, params?: Params) => {
-      try {
-        // oxlint-disable-next-line rules/no-effect-runtime-run -- Reylo's public runSync executes SQLite through the native driver without Effect.
-        return { value: query.runSync(client, ...([params] as ParamsArg<Params>)) };
-      } catch (error) {
-        const read = readQueryErrorSync(def.dialect, error);
-        if (read) {return { error: read };}
-        throw error;
-      }
-    }) as Query<Params, Row, C, D>["trySync"],
-    with: ((client: ClientFor<D>) => (params?: Params) => run(client, params ?? ({} as Params))),
+    // oxlint-disable-next-line typescript/promise-function-async -- Keep the native execution Promise returned through the public method.
+    run: (client: ClientFor<D>, params?: Params) => runtime.run(client, runtimeParams(params)),
+    runSync: (client: SyncClientFor<D>, params?: Params) => runtime.runNative(client, runtimeParams(params)),
+    // oxlint-disable-next-line typescript/promise-function-async -- Keep the original Promise chain for the driver error conversion.
+    try: (client: ClientFor<D>, params?: Params) => tryResult(runtime.run(client, runtimeParams(params)), dialect),
+    trySync: (client: SyncClientFor<D>, params?: Params) => tryNativeResult(
+      // oxlint-disable-next-line rules/no-effect-runtime-run, typescript/no-unsafe-type-assertion -- This is Reylo's public native SQLite method and forwards its original parameter tuple.
+      () => query.runSync(client, ...([params] as ParamsArg<Params>)),
+      dialect,
+    ),
+    // oxlint-disable-next-line typescript/promise-function-async -- The client-bound function returns the same native execution Promise as run().
+    with: (client: ClientFor<D>) => (params?: Params) => runtime.run(client, runtimeParams(params)),
   };
-  // `.run()`, `.try()` and the function `.with()` returns, published on the tracing channel as one
-  // Call each (src/trace.ts).
-  function run(client: ClientFor<D>, params: Params): Promise<Materialize<Row, C>> {
-    const tracing = listening();
-    return tracing ? tracing.tracePromise(() => runOnce(client, params), trace(client, params as Record<string, unknown>, false)) : runOnce(client, params);
-  }
-  function trace(client: unknown, params: Record<string, unknown>, sync: boolean): QueryTrace {
-    return { query: query as unknown as QueryTrace["query"], client, params, sync };
-  }
-  // A synchronous client answers before run returns, but its rows and its error still come
-  // Back through the promise, so run means the same on every client.
-  function runOnce(client: ClientFor<D>, params: Params): Promise<Materialize<Row, C>> {
-    try {
-      const rows = execute(client, module, params as Record<string, unknown>);
-      return Array.isArray(rows)
-        ? Promise.resolve(materialize(rows as Row[]))
-        : rows.then(
-            (rows) => materialize(rows as Row[]),
-            (error) => { throw named(error); },
-          );
-    } catch (error) {
-      return Promise.reject(named(error));
-    }
-  }
-  // Reylo's errors about a parameter's value or a column's value take the file, as the row counts'
-  // Below do. The driver's own errors, and Reylo's about the client, pass through as they are.
-  function named(error: unknown): unknown {
-    if (where && (error instanceof ParameterError || error instanceof DecodeError) && !error.message.startsWith(where)) {
-      const {message} = error;
-      error.message = where + message;
-      // V8 writes the stack when it is first read, with the message as it is then; a stack written
-      // Earlier (read before, or on Bun) still has the old message in its first line.
-      if (matchesString(error.stack) && !error.stack.includes(error.message)) {error.stack = error.stack.replace(message, () => error.message);}
-    }
-    return error;
-  }
-  function materialize(rows: Row[]): Materialize<Row, C> {
-    switch (cardinality) {
-      case "none": {
-        return undefined as Materialize<Row, C>;
-      }
-      case "many": {
-        return rows as Materialize<Row, C>;
-      }
-      case "one": {
-        if (rows.length !== 1) {throw new Error(`${where}Expected exactly one row, got ${rows.length}`);}
-        return rows[0] as Materialize<Row, C>;
-      }
-      default: {
-        if (rows.length > 1) {throw new Error(`${where}Expected at most one row, got ${rows.length}`);}
-        return (rows[0] ?? null) as Materialize<Row, C>;
-      }
-    }
-  }
-  registerObjectDecoder(query, (rows) => {
-    if (module.dialect !== "sqlite") {throw new TypeError("Object-row execution supports only SQLite queries.");}
-    const {columns} = module;
-    if (matchesUndefined(columns)) {throw new TypeError("A query defined by hand without its columns cannot map rows to its output.");}
-    const keyed = rows.map((row) => {
-      if (matchesNull(row) || !hasObjectType(row) || Array.isArray(row)) {throw new DecodeError("Expected an object row from the query executor.");}
-      Iterator.from(columns).forEach(([name]) => {
-        if (!Object.hasOwn(row, name)) {throw new DecodeError(`The query executor's row is missing column "${name}".`);}
-      });
-      return { ...row };
-    });
-    // Normalize validates the SQLite storage classes, as the existing runtime path does.
-    return materialize(normalize(keyed, columns) as Row[]);
-  });
   return query;
-}
+};
+
+/**
+ * Construct a typed query from its generated or handwritten definition.
+ * @template Params, Row, C, D
+ * @param {QueryDefinition & { dialect: D; cardinality?: C }} definition - The statement and its analyzed bindings.
+ * @returns {Query<Params, Row, C, D>} The typed runtime query.
+ */
+export const defineQuery = function defineQuery<Params, Row, C extends Cardinality, D extends Dialect>(
+  definition: QueryDefinition & { dialect: D; cardinality?: C },
+): Query<Params, Row, C, D> {
+  // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- An omitted cardinality follows the public API's historical many default.
+  const cardinality = (definition.cardinality ?? "many") as C;
+  const where = querySource(definition.source);
+  const module = runtimeModule(definition);
+  const runtime = new QueryRuntime<D, Row, C>({ cardinality, module, where });
+  const query = queryObject<Params, Row, C, D>({ cardinality, definition, module, runtime });
+  runtime.bind(query);
+  return query;
+};
