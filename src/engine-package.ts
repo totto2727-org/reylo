@@ -19,21 +19,24 @@ import { readFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 // oxlint-disable-next-line rules/no-node-imports -- Resolve package metadata against the host paths that Node returns.
 import path from "node:path";
-import { hasFunctionType, hasObjectType, matchesNull, matchesString } from "./native-predicates.ts";
+import { hasFunctionType, hasObjectType, matchesNull, matchesString, matchesUndefined } from "./native-predicates.ts";
 
 /** What an engine package's build-time half offers reylo's entry points. */
+// oxlint-disable-next-line typescript/consistent-type-definitions -- Preserve structural assignment to the native tooling record.
 export type Tooling = {
   /** The module a build step writes for a `.sql` file, and what the build watches: the `.reylo/` entry it was built from, and the project's files its text reads. */
+  // oxlint-disable-next-line typescript/method-signature-style -- Preserve the native tooling interface's method variance.
   sqlModule(path: string, source: string): Promise<{ code: string; entry: string; watched: string[] }>;
   /** Closes every build step's connection, for a build that has ended. */
   releaseConnections: () => Promise<void>;
   /** The methods of TypeScript's content mapper protocol, which src/mapper.ts serves over this process's stdin and stdout. */
-  mapperHandlers: () => Record<string, (params: unknown) => unknown | Promise<unknown>>;
+  mapperHandlers: () => Record<string, (params: unknown) => unknown>;
   /** Runs the CLI's command, and answers with its exit code. */
+  // oxlint-disable-next-line typescript/method-signature-style -- Preserve the native tooling interface's method variance.
   runCli(args: string[]): Promise<number>;
 };
 
-const PACKAGES = ["@totto2727/reylo-sqlite"];
+const PACKAGE = "@totto2727/reylo-sqlite";
 
 const readVersion = (source: string): string | undefined => {
   const metadata: unknown = JSON.parse(source);
@@ -70,53 +73,98 @@ const exportedTooling = (module: unknown): Tooling => {
   return value as Tooling;
 };
 
-let loaded: Promise<Tooling> | undefined = undefined;
+interface Incompatible { dir: string; name: string; version: string | undefined }
+interface Search { other?: Incompatible }
+interface Loading { pending?: Promise<Tooling> }
 
-const load = async function load(from: string): Promise<Tooling> {
-  let other: { name: string; version: string | undefined; dir: string } | undefined;
-  for (const base of [path.join(from, "package.json"), import.meta.url]) {
-    const require = createRequire(base);
-    for (const name of PACKAGES) {
-      let toolingPath: string;
-      try {
-        toolingPath = require.resolve(`${name}/tooling`);
-      } catch {
-        // An engine package from before it carried this half has no such entry: its version says why.
-        try {
-          const manifest = require.resolve(`${name}/package.json`);
-          other ??= { dir: path.dirname(manifest), name, version: await versionAt(manifest) };
-        } catch {}
-        continue;
-      }
-      const version = await versionAt(path.join(path.dirname(toolingPath), "package.json"));
-      if (version !== VERSION) {
-        other ??= { dir: path.dirname(toolingPath), name, version };
-        continue;
-      }
-      // oxlint-disable-next-line import/no-dynamic-require -- Resolve the installed engine without forcing bundlers to include an optional package.
-      const module: unknown = require(toolingPath);
-      return exportedTooling(module);
-    }
+const state: Loading = {};
+
+const resolveOptional = (resolver: NodeJS.Require, specifier: string): string | undefined => {
+  try {
+    return resolver.resolve(specifier);
+  } catch {
+    return undefined;
   }
-  if (other) {throw new Error(`reylo ${VERSION} runs with ${other.name} ${VERSION}, and the one installed is ${other.version ?? "of no version"} (${other.dir}): npm install -D ${other.name}@${VERSION}`);}
+};
+
+const inspectOldPackage = async (resolver: NodeJS.Require, search: Search): Promise<void> => {
+  // An older SQLite package may publish its manifest and omit the tooling entry.
+  const manifest = resolveOptional(resolver, `${PACKAGE}/package.json`);
+  if (!matchesUndefined(manifest) && matchesUndefined(search.other)) {
+    search.other = { dir: path.dirname(manifest), name: PACKAGE, version: await versionAt(manifest) };
+  }
+};
+
+const compatible = async (resolver: NodeJS.Require, entry: string, search: Search): Promise<Tooling | undefined> => {
+  const dir = path.dirname(entry);
+  const version = await versionAt(path.join(dir, "package.json"));
+  if (version !== VERSION) {
+    search.other ??= { dir, name: PACKAGE, version };
+    return undefined;
+  }
+  const module: unknown = resolver(entry);
+  return exportedTooling(module);
+};
+
+const find = async (base: string, search: Search): Promise<Tooling | undefined> => {
+  const resolver = createRequire(base);
+  const entry = resolveOptional(resolver, `${PACKAGE}/tooling`);
+  if (matchesUndefined(entry)) {
+    await inspectOldPackage(resolver, search);
+    return undefined;
+  }
+  return compatible(resolver, entry, search);
+};
+
+const missing = (other: Incompatible | undefined): never => {
+  if (!matchesUndefined(other)) {
+    // oxlint-disable-next-line rules/require-tagged-error -- Preserve the native version mismatch error shown on the CLI and in TypeScript.
+    throw new Error(`reylo ${VERSION} runs with ${other.name} ${VERSION}, and the one installed is ${other.version ?? "of no version"} (${other.dir}): npm install -D ${other.name}@${VERSION}`);
+  }
+  // oxlint-disable-next-line rules/require-tagged-error -- Report the missing optional package without loading Effect.
   throw new Error(`reylo's SQLite/HCL build steps are not installed: npm install -D @totto2727/reylo-sqlite`);
 };
 
-/** The build-time half, as the project of the directory `from` finds it, or reylo's own install. */
-export const tooling = function tooling(from: string = process.cwd()): Promise<Tooling> {
-  if (!loaded) {
-    const loading = load(from);
-    // A failure is not kept: an engine may be installed while the process runs.
-    loading.catch(() => {
-      if (loaded === loading) {loaded = undefined;}
-    });
-    loaded = loading;
+const load = async (from: string): Promise<Tooling> => {
+  const search: Search = {};
+  const project = await find(path.join(from, "package.json"), search);
+  if (!matchesUndefined(project)) {return project;}
+  const installed = await find(import.meta.url, search);
+  return installed ?? missing(search.other);
+};
+
+const loadWithRetry = async (from: string): Promise<Tooling> => {
+  try {
+    return await load(from);
+  } catch (error) {
+    // Clear a failed load so a package installed during the process can serve the next request.
+    delete state.pending;
+    throw error;
   }
-  return loaded;
+};
+
+/**
+ * Resolve the matching engine in a project, then in Reylo's own install.
+ * @param {string} [from] - The project's directory.
+ * @returns {Promise<Tooling>} The shared loading operation.
+ */
+// oxlint-disable-next-line typescript/promise-function-async -- In-flight callers share the same Promise for the native tooling instance.
+export const tooling = function tooling(from: string = process.cwd()): Promise<Tooling> {
+  state.pending ??= loadWithRetry(from);
+  return state.pending;
+};
+
+const loadedTooling = async (pending: Promise<Tooling>): Promise<Tooling | undefined> => {
+  try {
+    return await pending;
+  } catch {
+    return undefined;
+  }
 };
 
 /** Closes the build steps' connections, where a build step has opened any. */
 export const releaseConnections = async function releaseConnections(): Promise<void> {
-  const loading = loaded;
-  if (loading) {await (await loading.catch(() => undefined))?.releaseConnections();}
+  if (matchesUndefined(state.pending)) {return;}
+  const ready = await loadedTooling(state.pending);
+  await ready?.releaseConnections();
 };

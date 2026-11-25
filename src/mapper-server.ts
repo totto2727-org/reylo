@@ -1,183 +1,128 @@
-// The content mapper, which each engine package carries (src/tooling.ts) and src/mapper.ts starts:
-// The type check's view of a `.sql` file. The analysis itself (the
-// Database, the engine, the `.reylo/` cache shared with the bundler plugins and `reylo generate`)
-// Is `src/analyze.ts`; this file renders it as types and places its diagnostics in the file.
-// oxlint-disable-next-line rules/no-node-imports -- This server-side entry point uses this built-in to compute the existing digest using the host's hash implementation.
-import { createHash } from "node:crypto";
-// oxlint-disable-next-line rules/no-node-imports -- This server-side entry point uses this built-in to inspect or write files through the host filesystem.
-import { readFileSync } from "node:fs";
-// oxlint-disable-next-line rules/no-node-imports -- This server-side entry point uses this built-in to resolve paths using the host platform's filesystem conventions.
-import { dirname, relative, sep } from "node:path";
-import { CONTENT_MAPPER_POSITION_ENCODING, serve } from "./rpc.ts";
-import { anyEngine } from './engine.ts';
-import type { Lexed } from './engine.ts';
-import { moduleTypes, queryErrorType, reyloImport, withinFile } from "./module-types.ts";
-import { hclPath, PROJECT_FILE, PROJECT_FILES, resolveProject } from "./project.ts";
+// The native TypeScript content mapper. It analyzes SQL and returns its virtual declaration.
+// oxlint-disable-next-line rules/no-node-imports -- Resolve TypeScript's project path through the native filesystem.
+import path from "node:path";
 import { Session } from "./analyze.ts";
-import { docComment, leadingComment, statementAfter } from "./doc-comment.ts";
+import { anyEngine } from "./engine.ts";
+import type { Lexed } from "./engine-core.ts";
+import { declarationSource, declarationText, diagnostic, FIRST_BYTE_OFFSET, mapToStatement, missingProjectText, ONE_BYTE_DIAGNOSTIC } from "./mapper-declaration.ts";
+import type { MapperDiagnostic } from "./mapper-declaration.ts";
+import { configDigest, optionDiagnostics, projectName } from "./mapper-project.ts";
+import type { OptionDiagnostic } from "./mapper-project.ts";
+import { moduleTypes } from "./module-types.ts";
 import { matchesUndefined } from "./native-predicates.ts";
+import { PROJECT_FILES, resolveProject } from "./project.ts";
+import { CONTENT_MAPPER_POSITION_ENCODING, serve } from "./rpc.ts";
 
-interface Project {
-  strictParams: boolean;
-  /** The project file as its messages name it: relative to the project, or `.reylo.yaml` where there is none. */
-  projectFile: string;
-  session: Promise<Session>;
-}
+interface Project { projectFile: string; session: Promise<Session>; strictParams: boolean }
+interface OpenProject { configFileName: string; options?: Record<string, unknown>; projectHandle: string }
+interface TransformRequest { content: string; fileName: string; projectHandle: string }
+interface ProjectHandle { projectHandle: string }
+interface Reply { diagnostics: MapperDiagnostic[]; extension: ".ts"; mappings: number[][]; text: string }
+interface OpenReply { configIdentity: string; optionDiagnostics: OptionDiagnostic[]; watchedFiles: string[] }
+interface InitializeReply { diagnosticSource: string; positionEncoding: typeof CONTENT_MAPPER_POSITION_ENCODING; protocolVersion: number }
+export type MapperHandlers = Record<string, (params: unknown) => unknown>;
+
 const projects = new Map<string, Project>();
-
 const DEFAULT_PROTOCOL_VERSION = 1;
-const FIRST_BYTE_OFFSET = 0;
-const BYTE_WIDTH = 1;
-const ONE_BYTE_DIAGNOSTIC = 1;
-const GENERAL_DIAGNOSTIC = 1;
 const MISSING_PROJECT_DIAGNOSTIC = 9;
-const SETTINGS_LOCATION_DIAGNOSTIC = 104;
 
-/** A diagnostic of the file, its range kept inside the file's `size` bytes (`withinFile`). */
-const diag = function (size: number, messageText: string, start: number, length: number, code = GENERAL_DIAGNOSTIC) {
-  return { messageText, ...withinFile(start, length, size), code };
+const initialize = (params: unknown): InitializeReply => {
+  const { protocolVersion } = (params ?? {}) as { protocolVersion?: number };
+  // oxlint-disable-next-line eslint/sort-keys -- Preserve the existing TypeScript handshake's serialized key order.
+  return { protocolVersion: protocolVersion ?? DEFAULT_PROTOCOL_VERSION, positionEncoding: CONTENT_MAPPER_POSITION_ENCODING, diagnosticSource: "reylo" };
 };
 
-const byteIsWhitespace = (byte: number): boolean => /\s/u.test(String.fromCodePoint(byte));
+const openProject = async (params: unknown): Promise<OpenReply> => {
+  // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- The openProject method receives TypeScript's content mapper project fields.
+  const { configFileName, options, projectHandle } = params as OpenProject;
+  const directory = path.dirname(configFileName);
+  const resolved = resolveProject(await anyEngine(), directory);
+  const projectFile = projectName(directory, resolved.file);
+  const diagnostics = optionDiagnostics(options, projectFile);
+  projects.set(projectHandle, { projectFile, session: Session.open(directory), strictParams: resolved.strictParams });
+  // oxlint-disable-next-line eslint/sort-keys -- Preserve the TypeScript project response's established field order.
+  return { configIdentity: configDigest(resolved, options), watchedFiles: resolved.watched, optionDiagnostics: diagnostics };
+};
+
+const reply = (sql: string, text: string, diagnostics: MapperDiagnostic[]): Reply =>
+  // oxlint-disable-next-line eslint/sort-keys -- Keep the TypeScript transform response's established field order.
+  ({ extension: ".ts", diagnostics, text, mappings: mapToStatement(text, sql) });
+
+const empty = (): Reply =>
+  // oxlint-disable-next-line eslint/sort-keys -- Keep the same response fields even when there is no SQL statement.
+  ({ extension: ".ts", diagnostics: [], text: "export {};\n", mappings: [] });
+
+const missing = (sql: string, size: number): Reply => {
+  const message = "The content mapper has no project for this file; restart the TypeScript server.";
+  const failure = diagnostic(size, message, { code: MISSING_PROJECT_DIAGNOSTIC, length: ONE_BYTE_DIAGNOSTIC, start: FIRST_BYTE_OFFSET });
+  return reply(sql, missingProjectText(sql), [failure]);
+};
+
+const readLexed = async (session: Session, sql: string): Promise<Lexed | undefined> => {
+  try {
+    return await session.lex(sql);
+  } catch {
+    return undefined;
+  }
+};
+
+const unavailable = (source: ReturnType<typeof declarationSource>, failed: { code: number; message: string }, { names, size }: { names: string[]; size: number }): Reply => {
+  const report = diagnostic(size, failed.message, { code: failed.code, length: ONE_BYTE_DIAGNOSTIC, start: FIRST_BYTE_OFFSET });
+  const text = declarationText(source, { cardinality: "many", names, paramsType: "unknown", rowType: "unknown" });
+  return reply(source.sql, text, [report]);
+};
+
+const analyzed = async (sql: string, size: number, project: Project): Promise<Reply> => {
+  const session = await project.session;
+  const outcome = await session.analyze(sql);
+  // A successful direct_url retry can change the session's project.
+  const { dialect } = session.project;
+  const lexed = await readLexed(session, sql);
+  const source = declarationSource(sql, dialect);
+  if (!outcome.ok) {return unavailable(source, outcome, { names: lexed?.params ?? [], size });}
+  const types = moduleTypes(sql, outcome.analysis, dialect, lexed, project.strictParams, project.projectFile);
+  const diagnostics = types.diagnostics.map((item) => diagnostic(size, item.message, item));
+  return reply(sql, declarationText(source, {
+    cardinality: types.cardinality,
+    compiled: outcome.analysis.rewritten.sql.trimEnd(),
+    names: types.names,
+    paramsType: types.params,
+    queryError: types.queryError,
+    rowType: types.row,
+  }), diagnostics);
+};
+
+const transform = async (params: unknown): Promise<Reply> => {
+  // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- TypeScript owns this wire request and its transform fields.
+  const { content, fileName, projectHandle } = params as TransformRequest;
+  const size = Buffer.byteLength(content);
+  if (PROJECT_FILES.some((name) => fileName.endsWith(name))) {return empty();}
+  const project = projects.get(projectHandle);
+  return matchesUndefined(project) ? missing(content, size) : analyzed(content, size, project);
+};
+
+const closeProject = async (params: unknown): Promise<object> => {
+  // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- TypeScript supplies the handle of the project being closed.
+  const { projectHandle } = params as ProjectHandle;
+  const project = projects.get(projectHandle);
+  projects.delete(projectHandle);
+  if (!matchesUndefined(project)) {
+    const session = await project.session;
+    await session.close();
+  }
+  return {};
+};
 
 /**
- * The span map TypeScript reads as `mappings`: `[virtualStart, virtualLength, originalStart,
- * originalLength, kind, features]`, in UTF-8 bytes, the encoding `initialize` chose. One atom takes the
- * whole module to the statement, so go-to-definition on anything the module declares (the import's
- * path, the query, a column, a parameter) opens the `.sql` file at its statement. TypeScript maps a
- * definition only when its whole range lies in one segment, and the import's path goes to the range
- * of the module from its first token to its end, which a map by name would cut into pieces. No hover,
- * references or rename, which would land on the whole statement or write the TypeScript into it.
+ * Return the TypeScript methods the native mapper serves over stdio.
+ * @returns {MapperHandlers} The content mapper's method table.
  */
-const mapToStatement = function (text: string, sql: string): number[][] {
-  const bytes = Buffer.from(sql, "utf8");
-  let start = FIRST_BYTE_OFFSET;
-  let end = bytes.length;
-  while (start < end && byteIsWhitespace(bytes.readUInt8(start))) {start += BYTE_WIDTH;}
-  while (end > start && byteIsWhitespace(bytes.readUInt8(end - BYTE_WIDTH))) {end -= BYTE_WIDTH;}
-  const ATOM = 1;
-  const DEFINITION = 8; const TYPE_DEFINITION = 16; const IMPLEMENTATION = 32;
-  return [[FIRST_BYTE_OFFSET, Buffer.byteLength(text), start, end - start, ATOM, DEFINITION | TYPE_DEFINITION | IMPLEMENTATION]];
+export const mapperHandlers = function mapperHandlers(): MapperHandlers {
+  // oxlint-disable-next-line eslint/sort-keys -- Preserve enumeration of the content mapper's public method table.
+  return { initialize, openProject, transform, closeProject };
 };
 
-export type MapperHandlers = Record<string, (params: unknown) => unknown | Promise<unknown>>;
-
-/** Answers TypeScript's content mapper protocol over this process's stdin and stdout. */
-export function serveMapper(): void {
+/** Answer the content mapper protocol on the current process's stdin and stdout. */
+export const serveMapper = function serveMapper(): void {
   serve(mapperHandlers());
-}
-
-/** The content mapper's methods, for an entry point that serves them (src/mapper.ts). */
-export function mapperHandlers(): MapperHandlers {
-  return {
-    initialize(params) {
-      // Builds from 2026-09-18 on send `protocolVersion: 1` and refuse a mapper that does not
-      // Answer with the version it speaks; the npm nightly of the same day does not send it yet.
-      const { protocolVersion } = (params ?? {}) as { protocolVersion?: number };
-      return { protocolVersion: protocolVersion ?? DEFAULT_PROTOCOL_VERSION, positionEncoding: CONTENT_MAPPER_POSITION_ENCODING, diagnosticSource: "reylo" };
-    },
-    async openProject(params) {
-      const p = params as { projectHandle: string; options?: Record<string, unknown>; configFileName: string };
-      const projectDir = dirname(p.configFileName);
-      // Every setting lives in the project file, which other hosts read too.
-      const resolved = resolveProject(await anyEngine(), projectDir);
-      const projectFile = resolved.file ? relative(projectDir, resolved.file).split(sep).join("/") || resolved.file : PROJECT_FILE;
-      const optionDiagnostics = Object.keys(p.options ?? {}).map((key) => ({ path: [key], messageText: `reylo reads its settings from ${projectFile}, not from the content mapper's options; move "${key}" there.`, code: SETTINGS_LOCATION_DIAGNOSTIC }));
-      projects.set(p.projectHandle, { strictParams: resolved.strictParams, projectFile, session: Session.open(projectDir) });
-      let schemaIdentity: string | undefined;
-      try {
-        const source = resolved.url && hclPath(resolved.url, resolved.root);
-        if (source) {schemaIdentity = createHash("sha1").update(readFileSync(source)).digest("hex");}
-      } catch {
-        schemaIdentity = "unreadable HCL source";
-      }
-      // JSON arrays encode absent settings as null in the configuration digest.
-      const configIdentity = createHash("sha1").update(JSON.stringify([resolved.file, resolved.dialect, resolved.strictParams, resolved.url, resolved.error, p.options, ...(matchesUndefined(schemaIdentity) ? [] : [schemaIdentity])])).digest("hex");
-      return { configIdentity, watchedFiles: resolved.watched, optionDiagnostics };
-    },
-    async transform(params) {
-      const p = params as { fileName: string; content: string; projectHandle: string };
-      const sql = p.content;
-      const size = Buffer.byteLength(sql);
-      const diagnostics: ReturnType<typeof diag>[] = [];
-      // A project file (`.reylo.yaml` or `.reylo.yml`, or a `<name>.reylo.yaml` that `include` takes
-      // In) is no query, and its module declares nothing.
-      if (PROJECT_FILES.some((name) => p.fileName.endsWith(name))) {return { extension: ".ts" as const, diagnostics, text: "export {};\n", mappings: [] };}
-      const project = projects.get(p.projectHandle);
-      if (!project) {
-        // A transform for a project this process never opened: answer, never throw, so the file
-        // Keeps its default export instead of becoming an empty module.
-        diagnostics.push(diag(size, `The content mapper has no project for this file; restart the TypeScript server.`, FIRST_BYTE_OFFSET, ONE_BYTE_DIAGNOSTIC, MISSING_PROJECT_DIAGNOSTIC));
-        const leading = leadingComment(sql);
-        const doc = docComment(leading.prose, statementAfter(sql, leading));
-        const text = `import type { Query } from "@totto2727/reylo";\nexport type Params = unknown;\nexport type Row = unknown;\nexport type QueryError = import("@totto2727/reylo").QueryError;\n${doc}declare const query: Query<unknown, unknown, "many", "postgres">;\nexport default query;\n`;
-        return { extension: ".ts" as const, diagnostics, text, mappings: mapToStatement(text, sql) };
-      }
-      // The analysis first, and the dialect from the session after it: a session whose `direct_url`
-      // Command has just succeeded takes the project the command's URL resolves to (src/analyze.ts).
-      const session = await project.session;
-      const outcome = await session.analyze(sql);
-      const { dialect } = session.project;
-      // The engine's lexer names the parameters. A statement it cannot read (a placeholder form the
-      // Dialect would misread, named and positional mixed) comes back from the analysis as an error
-      // At its place; until then nothing is proved, so the row count is `many`.
-      let lexed: Lexed | undefined;
-      try {
-        lexed = await session.lex(sql);
-      } catch {}
-      // `compiled` is the engine's rewritten text, the query's `sql`, which an analysis that failed
-      // Has not given: then `sql` is any string. The comment at the top of the file and the statement
-      // Go into the query's doc comment, so a hover over the import shows the prose and the
-      // Statement as written. `sql` and `raw` are declared as their own texts, which a hover over
-      // Either shows once, with no doc comment to repeat it.
-      const leading = leadingComment(sql, dialect);
-      const emit = (compiled: string | undefined, paramsType: string, rowType: string, cardinality: string, names: string[], queryError = queryErrorType(dialect, undefined)) => {
-        const written = statementAfter(sql, leading);
-        const text = [
-          reyloImport(paramsType, rowType),
-          `export type Params = ${paramsType};`,
-          `export type Row = ${rowType};`,
-          `export type QueryError = ${queryError};`,
-          `export declare const sql: ${matchesUndefined(compiled) ? "string" : JSON.stringify(compiled)};`,
-          `export declare const raw: ${JSON.stringify(sql)};`,
-          `export declare const params: readonly [${names.map((currentName) => JSON.stringify(currentName)).join(", ")}];`,
-          // The literal types go in the Query type directly rather than through the aliases, so a
-          // Hover shows the row's shape (`{ id: number; ... } | null`) and not `Row | null`. The two
-          // Texts go in by `typeof`, so a hover over the query names them and one over its `sql`
-          // Shows the statement.
-          `${docComment(leading.prose, written)}declare const query: Query<${paramsType}, ${rowType}, ${JSON.stringify(cardinality)}, ${JSON.stringify(dialect)}, QueryError> & {`,
-          `  readonly sql: typeof sql;`,
-          `  readonly raw: typeof raw;`,
-          // Every build step writes the file's path into the module, so an import's source is never
-          // Missing. Its text is not given: the build reads the root from the file's own project,
-          // Which may not be the project the type check opened.
-          `  readonly source: string;`,
-          `};`,
-          `export default query;`,
-          ``,
-        ].join("\n");
-        return { extension: ".ts" as const, diagnostics, text, mappings: mapToStatement(text, sql) };
-      };
-
-      if (!outcome.ok) {
-        diagnostics.push(diag(size, outcome.message, FIRST_BYTE_OFFSET, ONE_BYTE_DIAGNOSTIC, outcome.code));
-        return emit(undefined, "unknown", "unknown", "many", lexed?.params ?? []);
-      }
-      const { analysis } = outcome;
-      // The types, the diagnostics the analysis gives and the untyped parameters' are one function
-      // The docs site's playground shares (src/module-types.ts).
-      const types = moduleTypes(sql, analysis, dialect, lexed, project.strictParams, project.projectFile);
-      diagnostics.push(...types.diagnostics.map((diagnostic) => diag(size, diagnostic.message, diagnostic.start, diagnostic.length, diagnostic.code)));
-      // The compiled statement, without the comment naming its file, which the run time adds where
-      // It sends the statement (src/sqlcommenter.ts).
-      return emit(analysis.rewritten.sql.trimEnd(), types.params, types.row, types.cardinality, types.names, types.queryError);
-    },
-    async closeProject(params) {
-      const handle = (params as { projectHandle: string }).projectHandle;
-      const project = projects.get(handle);
-      projects.delete(handle);
-      if (project) {await (await project.session).close();}
-      return {};
-    },
-  };
-}
+};

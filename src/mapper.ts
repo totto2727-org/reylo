@@ -1,53 +1,96 @@
-// The content mapper TypeScript starts (package.json, `typescript.contentMapper`): the engine
-// Package's (src/mapper-server.ts). Where no engine of reylo's version is installed, one that
-// Answers every file with the reason, as the type check reports a missing engine everywhere else.
-// An engine installed while the process runs takes over: each call looks for it again, and the
-// Projects opened meanwhile are opened again on it.
+// TypeScript starts this entry point. It answers with the missing-engine diagnostic until the
+// Matching engine is installed, then opens the known projects on the real mapper.
 import { tooling } from "./engine-package.ts";
+import { matchesUndefined } from "./native-predicates.ts";
 import { CONTENT_MAPPER_POSITION_ENCODING, serve } from "./rpc.ts";
 
-type Handler = (params: unknown) => unknown | Promise<unknown>;
+type Handler = (params: unknown) => unknown;
 type Handlers = Record<string, Handler>;
+interface MapperState { handlers?: Handlers; message: string }
+interface Handle { projectHandle: string }
+interface Source { content: string; fileName: string }
 
 const NO_ENGINE_TEXT = `import type { Query } from "@totto2727/reylo";\nexport type Params = unknown;\nexport type Row = unknown;\nexport type QueryError = import("@totto2727/reylo").QueryError;\ndeclare const query: Query<unknown, unknown, "many", "postgres">;\nexport default query;\n`;
+const PROTOCOL_VERSION = 1;
+const START_OF_SOURCE = 0;
+const MAXIMUM_DIAGNOSTIC_LENGTH = 1;
+const MISSING_ENGINE = 11;
 
-let real: Handlers | undefined;
-let message = "";
+const state: MapperState = { message: "" };
 const opened = new Map<string, unknown>();
 
-/** The engine's methods, once an engine of reylo's version is installed. */
-const engine = async function (): Promise<Handlers | undefined> {
-  if (real) {return real;}
+const replayOpened = async (handlers: Handlers): Promise<void> => {
+  // oxlint-disable-next-line rules/no-for-loops -- Replay TypeScript's open requests serially in their original order.
+  for (const params of opened.values()) {
+    // oxlint-disable-next-line eslint/no-await-in-loop, typescript/no-non-null-assertion -- A compatible mapper provides openProject, and this replay preserves registration order.
+    await handlers.openProject!(params);
+  }
+};
+
+const load = async (): Promise<Handlers | undefined> => {
+  if (!matchesUndefined(state.handlers)) {return state.handlers;}
   try {
-    const handlers = (await tooling()).mapperHandlers();
-    for (const params of opened.values()) {await handlers.openProject!(params);}
-    return (real = handlers);
+    const engine = await tooling();
+    const handlers = engine.mapperHandlers();
+    await replayOpened(handlers);
+    state.handlers = handlers;
+    return handlers;
   } catch (error) {
-    message = (error as Error).message;
+    // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- Retain the native loader's diagnostic for virtual SQL modules.
+    state.message = (error as Error).message;
     return undefined;
   }
 };
 
 const handle = (method: string, fallback: Handler): Handler => async (params) => {
-  const handlers = await engine();
-  return handlers ? handlers[method]!(params) : fallback(params);
+  const handlers = await load();
+  if (matchesUndefined(handlers)) {return fallback(params);}
+  // oxlint-disable-next-line typescript/no-non-null-assertion -- Both the fallback and compatible engine expose the same four TypeScript methods.
+  return handlers[method]!(params);
 };
 
+const initialize = (params: unknown): object => {
+  // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- Negotiate the native TypeScript protocol version when the host supplies it.
+  const protocolVersion = (params as { protocolVersion?: number } | undefined)?.protocolVersion ?? PROTOCOL_VERSION;
+  // oxlint-disable-next-line eslint/sort-keys -- Keep the TypeScript handshake in its existing wire order.
+  return { protocolVersion, positionEncoding: CONTENT_MAPPER_POSITION_ENCODING, diagnosticSource: "reylo" };
+};
+
+const openProject = (params: unknown): object => {
+  // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- Remember the handle TypeScript assigns to this project.
+  const { projectHandle } = params as Handle;
+  opened.set(projectHandle, params);
+  // oxlint-disable-next-line eslint/sort-keys -- Keep the TypeScript project reply's existing wire order.
+  return { configIdentity: state.message, watchedFiles: [], optionDiagnostics: [] };
+};
+
+const settingsFile = (filename: string): boolean => filename.endsWith(".reylo.yaml") || filename.endsWith(".reylo.yml");
+
+const transform = (params: unknown): object => {
+  // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- TypeScript supplies the virtual SQL source fields.
+  const { content, fileName } = params as Source;
+  if (settingsFile(fileName)) {
+    // oxlint-disable-next-line eslint/sort-keys -- Keep the empty config module's transform wire order.
+    return { extension: ".ts", diagnostics: [], text: "export {};\n", mappings: [] };
+  }
+  const length = Math.min(MAXIMUM_DIAGNOSTIC_LENGTH, Buffer.byteLength(content));
+  // oxlint-disable-next-line eslint/sort-keys -- Preserve the native TypeScript diagnostic order.
+  const diagnostic = { messageText: state.message, start: START_OF_SOURCE, length, code: MISSING_ENGINE };
+  // oxlint-disable-next-line eslint/sort-keys -- Preserve the virtual SQL module's transform wire order.
+  return { extension: ".ts", diagnostics: [diagnostic], text: NO_ENGINE_TEXT, mappings: [] };
+};
+
+const closeProject = (params: unknown): object => {
+  // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- TypeScript closes the project using its own handle.
+  const { projectHandle } = params as Handle;
+  opened.delete(projectHandle);
+  return {};
+};
+
+// oxlint-disable-next-line eslint/sort-keys -- Keep the original content mapper server method order.
 serve({
-  initialize: handle("initialize", (params) => ({ protocolVersion: (params as { protocolVersion?: number } | undefined)?.protocolVersion ?? 1, positionEncoding: CONTENT_MAPPER_POSITION_ENCODING, diagnosticSource: "reylo" })),
-  openProject: handle("openProject", (params) => {
-    const p = params as { projectHandle: string };
-    opened.set(p.projectHandle, params);
-    return { configIdentity: message, watchedFiles: [], optionDiagnostics: [] };
-  }),
-  transform: handle("transform", (params) => {
-    const p = params as { fileName: string; content: string };
-    // A project file is no query, and its module declares nothing.
-    if (p.fileName.endsWith(".reylo.yaml") || p.fileName.endsWith(".reylo.yml")) {return { extension: ".ts", diagnostics: [], text: "export {};\n", mappings: [] };}
-    return { extension: ".ts", diagnostics: [{ messageText: message, start: 0, length: Math.min(1, Buffer.byteLength(p.content)), code: 11 }], text: NO_ENGINE_TEXT, mappings: [] };
-  }),
-  closeProject: handle("closeProject", (params) => {
-    opened.delete((params as { projectHandle: string }).projectHandle);
-    return {};
-  }),
+  initialize: handle("initialize", initialize),
+  openProject: handle("openProject", openProject),
+  transform: handle("transform", transform),
+  closeProject: handle("closeProject", closeProject),
 });
