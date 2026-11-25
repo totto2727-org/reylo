@@ -14,6 +14,8 @@
 // Constructors, loaded from the app beside the connection: each element a type node-api takes
 // From JavaScript (an integer a HUGEINT, a decimal or a date its text), which DuckDB casts in turn.
 import { dateFromDays, decimal, duckdbInterval, interval, MICROSECONDS, MILLISECONDS, NANOSECONDS, SECONDS, timestamp } from "./decode-duckdb-time.ts";
+import { nodeApiOf } from "./duckdb-node-api.ts";
+import type { Api } from "./duckdb-node-api.ts";
 import { DecodeError, ParameterError } from "./values.ts";
 import type { EngineType } from "./engine-type.ts";
 import type { Columns } from "./values.ts";
@@ -40,107 +42,6 @@ interface DuckType {
   entryTypes?: DuckType[];
   memberTags?: string[];
   memberTypes?: DuckType[];
-}
-
-/** The slice of @duckdb/node-api that builds a nested or binary value with its type. */
-interface Api {
-  DuckDBConnection: unknown;
-  listValue(items: unknown[]): unknown;
-  structValue(entries: Record<string, unknown>): unknown;
-  mapValue(entries: { key: unknown; value: unknown }[]): unknown;
-  unionValue(tag: string, value: unknown): unknown;
-  blobValue(bytes: Uint8Array): unknown;
-  LIST(of: unknown): unknown;
-  STRUCT(fields: Record<string, unknown>): unknown;
-  MAP(key: unknown, value: unknown): unknown;
-  UNION(members: Record<string, unknown>): unknown;
-  TUPLE(items: unknown[]): unknown;
-  tupleValue(items: unknown[]): unknown;
-  BOOLEAN: unknown;
-  HUGEINT: unknown;
-  DOUBLE: unknown;
-  VARCHAR: unknown;
-  BLOB: unknown;
-}
-
-// Named in a variable and loaded with a `require`, so that a bundler leaves it to the run time: only
-// A DuckDB app has the package, and it loads it itself. An `import()` of it is wrapped by tsc in a
-// Helper of its own, which moves a `webpackIgnore` comment where Rspack no longer reads it.
-const NODE_API = "@duckdb/node-api";
-/** The module path of node-api's entry, as Node's CommonJS cache keys it. */
-const NODE_API_ENTRY = /[\\/]@duckdb[\\/]node-api[\\/]lib[\\/]index\.js$/u;
-const apis = new WeakMap<object, Promise<Api>>();
-
-type ModuleCache = Record<string, { exports?: unknown } | undefined>;
-interface NodeRequire { (id: string): unknown; cache?: ModuleCache }
-interface NodeProcess { argv?: string[]; cwd: () => string; getBuiltinModule?(id: string): { createRequire(from: string): NodeRequire } | undefined }
-
-/**
- * The @duckdb/node-api the connection `c` came from. node-api takes a nested or binary value only
- * as an instance of its own classes, built over its own native binding, so a second copy of the
- * package (another version, or the same one installed twice, as a workspace or a linked package
- * can have it) builds values the connection refuses. node-api is CommonJS, so the copy that made
- * `c` is in Node's module cache however the app imported it: the one whose DuckDBConnection `c`
- * is an instance of, a subclass's included. For a connection that only wraps one, the copy is
- * the one loaded where there is one, else the copy the app's install resolves, which is refused only
- * when `c` is another copy's DuckDBConnection.
- */
-const nodeApiOf = function (c: DuckdbClient): Promise<Api> {
-  // A connection's class decides its copy; an object that only wraps one is its own.
-  const proto = Reflect.getPrototypeOf(c);
-  const own = matchesNull(proto) || proto === Object.prototype ? c : proto;
-  let found = apis.get(own);
-  if (matchesUndefined(found)) {
-    found = loadNodeApi(c);
-    apis.set(own, found);
-    found.catch(() => apis.delete(own));
-  }
-  return found;
-};
-
-/** The classes on `c`'s prototype chain. */
-const classesOf = function (c: object): unknown[] {
-  const out: unknown[] = [];
-  for (let p = Object.getPrototypeOf(c) as { constructor?: unknown } | null; !matchesNull(p) && p !== Object.prototype; p = Object.getPrototypeOf(p)) {out.push(p.constructor);}
-  return out;
-};
-
-async function loadNodeApi(c: DuckdbClient): Promise<Api> {
-  const classes = classesOf(c);
-  const proc = (globalThis as { process?: NodeProcess }).process;
-  let cache: ModuleCache | undefined;
-  try {
-    cache = proc?.getBuiltinModule?.("node:module")?.createRequire(`${proc.cwd()}/`).cache;
-  } catch {}
-  const loaded: Api[] = [];
-  for (const [path, value] of Object.entries(cache ?? {})) {
-    const exports = NODE_API_ENTRY.test(path) ? (value?.exports as Api | undefined) : undefined;
-    if (matchesUndefined(exports?.DuckDBConnection)) {continue;}
-    if (classes.includes(exports.DuckDBConnection)) {return exports;}
-    loaded.push(exports);
-  }
-  if (loaded.length === 1) {return loaded[0]!;}
-  let imported: Api | undefined;
-  let failure: unknown;
-  const createRequire = proc?.getBuiltinModule?.("node:module")?.createRequire;
-  for (const from of [proc?.argv?.[1], proc && `${proc.cwd()}/`]) {
-    if (!from || !createRequire) {continue;}
-    try {
-      imported = createRequire(from)(NODE_API) as Api;
-      break;
-    } catch (error) {
-      failure ??= error;
-    }
-  }
-  if (matchesUndefined(imported)) {
-    throw new TypeError(`A list, a struct, a map or binary data is bound with @duckdb/node-api's own values, and the copy the connection came from cannot be found, nor one installed in the project: ${(failure as Error | undefined)?.message ?? "this runtime has no process.getBuiltinModule"}`);
-  }
-  const another = classes.some((k) => k !== imported.DuckDBConnection && (k as { name?: unknown })?.name === "DuckDBConnection");
-  if (loaded.length > 1 || another) {
-    const why = another ? "the copy the app's install resolves is another" : "the app has loaded several, and the connection is none of their DuckDBConnection";
-    throw new TypeError(`A list, a struct, a map or binary data is bound with @duckdb/node-api's own values, which must come from the copy of the package the connection came from, and ${why}: install a single @duckdb/node-api.`);
-  }
-  return imported;
 }
 
 /** Whether a client is @duckdb/node-api's DuckDBConnection. */
